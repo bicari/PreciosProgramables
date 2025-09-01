@@ -25,7 +25,7 @@ class Tasks(models.Model):
     file = models.FileField(upload_to=user_directory_path, blank=False, null=True
                             )
     dbisam_table = models.CharField(max_length=100, blank=True, null=True)
-    date_to_execute = models.DateField(blank=False)
+    date_to_execute = models.DateTimeField(blank=False)
     status = models.BooleanField(default=True)
     check_process = models.BooleanField(default=False)
     

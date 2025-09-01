@@ -1,0 +1,24 @@
+{% extends "dashboard.html" %}
+{% block content %}
+{% load static %}
+<div class="container row d-flex justify-content-center">
+    <div class="row text-center">
+        <h2>La lista No ha podido ser procesada</h2>
+        <p>Todos los productos encontrados pertenecen a una oferta o lista pendiente en la fecha seleccionada</p>
+        <p>Productos Leídos: {{filas}} </p>
+        <p>Productos actualizados: {{actualizados}} </p>
+        <p>Items duplicados: {{duplicados}} </p>
+        <div>
+            <img src="{% static "test/cancel.png" %}" alt="cancelado", style="width: 120px; height: 100px;">
+        </div>
+        {% if request.session.duplicados_txt %}
+        <div class="mt-3">
+            <a href="{% url 'download_duplicados' %}" class="btn btn-outline-danger">Descargar duplicados</a>
+        </div>
+        
+        {% endif %}
+    </div>
+
+</div>
+
+{% endblock %}

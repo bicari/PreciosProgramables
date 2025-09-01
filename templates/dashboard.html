@@ -1,0 +1,185 @@
+{% load permisos_tags %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Menú Lateral CSS Puro</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <style>
+        body {
+            display: flex;
+            margin: 0;
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        /* Sidebar */
+        .nav-side-menu {
+            width: 250px;
+            background: #2e353d;
+            color: white;
+            height: 100vh;
+            position: fixed;
+        }
+        
+        .brand {
+            padding: 15px;
+            background: #23282e;
+            text-align: center;
+            border-bottom: 1px solid #4e545a;
+        }
+        
+        .menu-list {
+            padding: 0;
+        }
+        
+        .menu-content {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        /* Items principales */
+        .menu-item {
+            position: relative;
+        }
+        
+        .menu-label {
+            display: block;
+            padding: 12px 15px;
+            color: white;
+            text-decoration: none;
+            border-bottom: 1px solid #4e545a;
+            cursor: pointer;
+        }
+        
+        .menu-label:hover {
+            background: #4e545a;
+        }
+        
+        .menu-label i {
+            margin-right: 10px;
+        }
+        
+        /* Submenú (oculto por defecto) */
+        .sub-menu {
+            list-style: none;
+            padding: 0;
+            background: #23282e;
+            display: none;
+        }
+        
+        .sub-menu a {
+            display: block;
+            padding: 10px 15px 10px 40px;
+            color: #e1ffff;
+            text-decoration: none;
+        }
+        
+        .sub-menu a:hover {
+            background: #3d4348;
+        }
+        
+        /* Checkbox oculto */
+        .menu-toggle {
+            display: none;
+        }
+        
+        /* Flecha */
+        .arrow {
+            float: right;
+            transition: transform 0.3s;
+        }
+        
+        /* Mostrar submenú cuando el checkbox está checked */
+        .menu-toggle:checked ~ .sub-menu {
+            display: block;
+        }
+        
+        /* Rotar flecha */
+        .menu-toggle:checked ~ .menu-label .arrow {
+            transform: rotate(90deg);
+        }
+        
+        /* Contenido principal */
+        .main-content {
+            margin-left: 250px;
+            padding: 20px;
+            flex-grow: 1;
+            background: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    <!-- Menú Lateral -->
+    <div class="nav-side-menu">
+        <div class="brand">App Lista De precios</div>
+        
+        <div class="menu-list">
+            <ul class="menu-content">
+                <!-- Ítem simple -->
+                <li class="menu-item">
+                    <a href="#" class="menu-label">
+                        <i class="fas fa-tachometer-alt"></i> Dashboard
+                    </a>
+                </li>
+                
+                <!-- Ítem con submenú -->
+                {% if request.user|has_group:"Generar Lista"%} 
+                <li class="menu-item">
+                    <input type="checkbox" id="menu-ui" class="menu-toggle">
+                    <label for="menu-ui" class="menu-label">
+                        <i class="fa-solid fa-file-excel"></i> Generar Lista
+                        <span class="arrow">›</span>
+                    </label>
+                    <ul class="sub-menu">
+                        <li><a href="/list-form">Nueva Lista</a></li>
+                    </ul>
+                </li>
+                {%endif%}
+                
+                <!-- Ítem con submenú -->
+                {% if request.user|has_group:"Consultar Lista"%} 
+                <li class="menu-item">
+                    <input type="checkbox" id="menu-services" class="menu-toggle">
+                    <label for="menu-services" class="menu-label">
+                        <i class="fa-solid fa-magnifying-glass"></i> Consultar Lista
+                        <span class="arrow">›</span>
+                    </label>
+                    <ul class="sub-menu">
+                        <li><a href="/list-tasks">Estatus Lista</a></li>
+                        <li><a href="/print-label">Generar Etiquetas</a></li>
+                    </ul>
+                </li>
+                {%endif%}
+            </ul>
+        </div>
+        <div>
+            <ul class="menu-content">
+                <!-- Ítem simple -->
+                <li class="menu-item">
+                    <a href="/logout" class="menu-label">
+                        <i class="fas fa-sign-out-alt"></i> Salir
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+    
+    <!-- Contenido Principal -->
+    <div class="container col d-flex main-content">
+        <div class="container">
+            {% block content %}
+            <h1>Bienvenido al Dashboard</h1>
+            {% endblock content%}
+        </div>
+       
+    </div>
+</body>
+</html>

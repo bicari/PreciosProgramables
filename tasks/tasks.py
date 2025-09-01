@@ -17,12 +17,17 @@ def ejecutar_tarea_programada(task_number):
                 #filas = read_excel_file(task.file, task.header_file, process=True)
                 #for fila in filas: 
                 #    insert_data_tmp(fila.SKU, fila.PRECIO)
-                dbisam_db.update_a2precios(task.dbisam_table)
-
+                if not task.is_oferta:
+                    dbisam_db.update_a2precios(task.dbisam_table)
                 #Cambiando status de la tarea a procesada
-                task.check_process = True
-                task.save()
-                productsTasks.delete()
+                    task.check_process = True
+                    task.save()
+                    productsTasks.delete()
+                else:
+                    dbisam_db.insert_into_sinvoferta(task.dbisam_table, list(productsTasks.values('sku')))
+                    task.check_process = True
+                    task.save()
+                    productsTasks.delete()    
 
     except Exception as e:
         print('Error al ejecutar la tarea programada', e)        

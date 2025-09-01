@@ -1,9 +1,10 @@
 # tareas/scheduler.py
 from apscheduler.schedulers.background import BackgroundScheduler
 from django_apscheduler.jobstores import DjangoJobStore
-from django_apscheduler.models import DjangoJobExecution, DjangoJob
+from django_apscheduler.models import DjangoJobExecution
 from django_apscheduler import util
-from .models import Tasks
+#from .models import Tasks
+from .send_mail import enviar_correo
 from .tasks import ejecutar_tarea_programada
 from datetime import datetime
 from django.db import transaction
@@ -18,21 +19,41 @@ def get_scheduler():
         with _scheduler_lock:
             if _scheduler_instance is None:
                 _scheduler_instance = BackgroundScheduler()
-                #_scheduler_instance.configure(
-                #    job_defaults={
-                #        'coalesce': True,
-                #        'max_instances': 1,
-                #        'misfire_grace_time': 30  # segundos
-                #    })
+                _scheduler_instance.configure(
+                    job_defaults={
+                        'coalesce': True,
+                        'max_instances': 1,
+                        'misfire_grace_time': 30  # segundos
+                    })
                 _scheduler_instance.add_jobstore(DjangoJobStore(), 'default')
                 # Configuración recomendada
                 
                 
     return _scheduler_instance
 
+
+
+def programar_correo():
+    scheduler = get_scheduler()
+    job_id = 'correo_automatico_diario'
+    job=scheduler.add_job(
+        enviar_correo,
+        trigger='cron',
+        hour=20,
+        minute=30,
+        second=15,
+        id=job_id,
+        replace_existing=True,
+        jobstore='default',
+        max_instances=1,
+        misfire_grace_time=9600
+    )
+    print('Correo programado', job)
+
+
 def iniciar_scheduler():
     scheduler = get_scheduler()
-    print('inciadnd')
+    print('inciando')
     with _scheduler_lock:
         if not scheduler.running:
             print("Iniciando scheduler...")
@@ -45,6 +66,7 @@ def iniciar_scheduler():
             
             # Cargar tareas pendientes al inicio
             cargar_tareas_pendientes()
+            programar_correo()
             
             print("Scheduler iniciado correctamente")
 
@@ -78,14 +100,14 @@ def programar_tarea(tarea):
         # Crear nuevo job
         ob=scheduler.add_job(
             id=job_id,
-            func=ejecutar_tarea_programada,  # Esta función debe estar definida en tu código
+            func=ejecutar_tarea_programada,  
             args=[tarea.task_number],
             trigger='date',
             run_date=tarea.date_to_execute,
             replace_existing=True,
             jobstore='default',
             max_instances=1,
-            misfire_grace_time=7200
+            misfire_grace_time=9600
         )
         print(f"Tarea {job_id} programada para {tarea.date_to_execute}{ob}")
         

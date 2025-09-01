@@ -51,10 +51,18 @@ class DBISAMDatabase:
         conn.commit()
         conn.close()
 
-    def get_table_tmp(self, name_table):
+    def get_table_tmp_con_existencia(self, name_table):
         conn = self.connect()
         cursor = conn.cursor()
-        cursor.execute(f'SELECT * FROM "{self.tmp_table_tasks}\\TMPDJANGO{name_table}"')
+        cursor.execute(f'SELECT * FROM "{self.tmp_table_tasks}\\TMPDJANGO{name_table}" WHERE ACTUALIZADO = 1 AND EXISTENCIA > 0')
+        rows = cursor.fetchall()
+        conn.close()
+        return rows
+    
+    def get_table_tmp_sin_existencia(self, name_table):
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(f'SELECT * FROM "{self.tmp_table_tasks}\\TMPDJANGO{name_table}" WHERE ACTUALIZADO = 1')
         rows = cursor.fetchall()
         conn.close()
         return rows
@@ -71,24 +79,32 @@ class DBISAMDatabase:
         conn.commit()
         return row_count
         
-    def update_tabla_tmp_productos_actualizados(self, name_table):
+    def update_tabla_tmp_productos_actualizados(self, name_table, fecha_ejecucion=None):
         conn = self.connect()
         cursor  =  conn.cursor()
         cursor.execute(f"""UPDATE "{self.tmp_table_tasks}\\TMPDJANGO{name_table}" SET ACTUALIZADO = TRUE
                             FROM "{self.tmp_table_tasks}\\TMPDJANGO{name_table}"
                             LEFT OUTER JOIN SINVOFERTA ON SKU = FO_PRODUCTO
-                           WHERE SKU NOT IN (SELECT FO_PRODUCTO FROM SINVOFERTA WHERE ('{datetime.now().strftime('%Y-%m-%d')}' BETWEEN FO_FECHAINICIO AND FO_FECHAFINAL) AND FO_VISIBLE = 1)""")
+                           WHERE SKU NOT IN (SELECT FO_PRODUCTO FROM SINVOFERTA WHERE ('{datetime.now().strftime('%Y-%m-%d') if fecha_ejecucion is None else fecha_ejecucion }' BETWEEN FO_FECHAINICIO AND FO_FECHAFINAL) AND FO_VISIBLE = 1)""")
         conn.commit()
         duplicados = cursor.execute(f"""SELECT SKU FROM "{self.tmp_table_tasks}\\TMPDJANGO{name_table}" WHERE ACTUALIZADO = 0""").fetchall()
         conn.close()
         return duplicados
-        
+
+
+    def get_productos_actualizados(self, name_table):
+        conn = self.connect()
+        cursor  =  conn.cursor()
+        productos = cursor.execute(f"""SELECT SKU FROM "{self.tmp_table_tasks}\\TMPDJANGO{name_table}" WHERE ACTUALIZADO = 1""").rowcount
+        conn.close()
+        return productos    
 
     def insert_into_sinvoferta(self, name_table, products: list[dict]):
         try:
             conn = self.connect()
             cursor  =  conn.cursor()
             products_chart ='(' +  ','.join(map(lambda x: f"'{x['sku']}'", products)) + ')'
+            print(products_chart)
             row_count = cursor.execute(f"""INSERT INTO SINVOFERTA (FO_PRODUCTO, FO_DESCRIPCION, FO_PRECIODESC, FO_FECHAINICIO, FO_FECHAFINAL)
                                           SELECT SKU, DESCRIPCION_OFERTA, (PRECIOANTES - PRECIO) / PRECIOANTES * 100, FECHA_INICIO, FECHA_FINAL
                                           FROM "{self.tmp_table_tasks}\\TMPDJANGO{name_table}" WHERE ACTUALIZADO = 1""" ).rowcount
@@ -115,7 +131,7 @@ class DBISAMDatabase:
         cursor.execute(f"""UPDATE "{self.tmp_table_tasks}\\TMPDJANGO{name_table}" SET EXISTENCIA = COALESCE(FT_EXISTENCIA, 0.00)
                            FROM "{self.tmp_table_tasks}\\TMPDJANGO{name_table}"
                            INNER JOIN "{self.catalog}\\SINVDEP" ON SKU = FT_CODIGOPRODUCTO
-                           WHERE FT_CODIGODEPOSITO IN (2,8) """ 
+                           WHERE FT_CODIGODEPOSITO = 2 """ 
                      )
         conn.commit()
         conn.close()

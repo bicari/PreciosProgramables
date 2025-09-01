@@ -1,0 +1,138 @@
+{% extends "dashboard.html" %}
+
+{% block content %}
+
+
+
+<script>
+    
+    document.addEventListener('DOMContentLoaded', function() {
+       
+        {% if error %}
+        
+        console.log('Mostrando modal automáticamente');
+        var modalEl = document.getElementById('exampleModal');
+        var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.show();
+        {% endif %}
+        
+
+    });
+
+    document.addEventListener('DOMContentLoaded', ()=>{
+        const errorMessage = document.querySelector('.alert.alert-danger');
+        if (errorMessage) {
+            setInterval(() => {
+                errorMessage.style.display = 'none';
+            }, 5000); // Oculta el mensaje después de 5 segundos
+            
+        }
+    })
+</script>
+
+
+<!-- Modal -->
+<div class="modal fade" id="exampleModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="exampleModalLabel">Advertencia</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div>
+            Existe una lista de precios con el mismo proveedor y fecha y hora, no es posible procesar la lista
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<div class="container row d-flex justify-content-center">
+    <div class= "row text-center">
+        <h2> Lista de precios </h1>
+    </div>
+
+</div>
+
+<form class="container row d-flex justify-content-center", method="post", action="/list-form/", enctype="multipart/form-data">
+    {% csrf_token %}
+
+    <div class="form-floating mb-3">
+        {{form.user_id}}
+        <label for="floatingInput">Usuario responsable</label>
+    </div>
+    <!--
+    <div class="mb-3">
+        <label for="exampleFormControlInput1" class="form-label">Rif proveedor:</label>
+        {{form.rif_proveedor}}
+    </div>
+    -->
+    <div class="mb-3">
+        <label for="Cabecera de datos">Fila inicio de los datos: </label>
+        {{form.header}}
+    </div>
+
+    <div class="mb-3">
+        <label for="formFile" class="form-label">Fecha ejecución:</label>
+        
+        {{form.date_time}}
+    </div>
+    <!--
+    <div class="mb-3">
+        <label for="formFile" class="form-label">Archivo de excel con formato</label>
+        <input class="form-control" type="file" id="formFile" required>
+    </div>
+    -->
+    <div class="mb-3">
+        <label for="formFile" class="form-label">Archivo de excel con formato:</label>
+        {{form.file}}
+
+    </div>
+    <div class="d-flex flex-row mb-3 gap-2">
+       
+            <div class="form-check form-switch">
+                 {{form.check_process}}
+                <label for="forCheck", class="text-nowrap form-label">Procesar archivo de inmediato:</label>
+            </div> 
+            <div class="form-check form-switch">
+                 {{form.validar_ofertas}}
+                <label for="forCheck", class="text-nowrap form-label">Ignorar las ofertas activas</label>
+            </div>
+            <div class="form-check form-switch">
+                 {{form.is_oferta}}
+                <label for="forCheck", class="text-nowrap form-label">Es una oferta</label>
+            </div>
+        
+    
+        
+    
+    </div>
+    {% if message%}
+
+    <div class="mb-3"> 
+      <div class="alert alert-danger" role="alert">
+        {{message}}  
+      </div> 
+    </div>
+    
+    {%endif%}
+    <div class = "col-1 d-grid">
+        <button class="btn btn-primary",type="submit">Guardar</button>
+    </div>
+</form>
+
+
+{% endblock content %}
+
+
+
+
+

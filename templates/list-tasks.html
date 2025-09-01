@@ -1,0 +1,73 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css">
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
+<script>
+    $(document).ready(function() {
+// Initialize DataTable
+        $('#myDataTable').DataTable({
+            "language": {
+            "url": "//cdn.datatables.net/plug-ins/1.11.5/i18n/es-ES.json"
+        },
+        paging: true, // Enable pagination
+        searching: true, // Enable search
+        ordering: true, // Enable sorting
+        info: true, // Show information
+        lengthChange: false, // Disable the "Show X entries" dropdown
+        });
+    });
+</script>
+
+
+<div class="container mt-5">
+    <h1>Estatus listas</h1>
+    <table id="myDataTable" class="table table-striped-columns" style="width:100%">
+        <thead>
+            <tr>
+                <th>Id Lista</th>
+                <th>Responsable</th>
+                <!-- 
+                <th>Descripcion</th>
+                -->
+                <th>Fecha Ejecución</th>
+                <th>Fecha creación</th>
+                <th>Estado</th>
+                <th>Archivo</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for task in tasks%}
+            <tr>
+                <td>{{ task.task_number }}</td>
+                
+                <td>{{task.user_id.username | capfirst}}</td>
+                
+                <!--
+                <td>Descripcion</td>-->
+                <td>{{task.date_to_execute}}</td>
+                <td>{{task.created_at}}</td>
+                {% if task.check_process %}
+                <td>Procesado &#9989</td>
+                {% else %}
+                <td>Pendiente &#128347</td>
+                {% endif %}
+                <td>
+                    {% if task.file %}
+                            <a href="{% url 'download_excel' task.task_number %}" class="btn-download">
+                                <i class="fas fa-file-excel"></i> Descargar
+                            </a>
+                    {% else %}
+                            <button class="btn-download" disabled>
+                                <i class="fas fa-times-circle"></i> No disponible
+                            </button>
+                    {% endif %}
+                </td>
+            </tr>    
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock content%}

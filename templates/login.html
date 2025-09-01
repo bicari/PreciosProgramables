@@ -1,0 +1,57 @@
+{%load django_bootstrap5 %}
+{% bootstrap_css %}
+{% bootstrap_javascript %}
+
+<style>
+body{
+    background-color: lightgray;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+.container {
+    background-color: white;
+    box-shadow: 3px 5px 3px -1px;
+    max-width: 400px;
+    border-radius: 0.5rem;
+
+}
+#login-title{
+     font-size: 1.5rem;
+     font-weight: 600;
+     
+     
+}
+</style>
+
+
+<body>
+    <div class="container row d-flex justify-content-center">
+        <div class="row d-flex text-center", id="login-header">
+           <h1 id="login-title"> Inicio de sesión</h1>
+           <p>Ingresa tus credenciales por favor</p>
+           {%if error%}
+            <p style="color: red">{{error}}</p>
+           {%endif%}
+        </div>
+        <form class="container-fluid row d-flex justify-content-center", id="login-form", method="post", action="/login/">
+            {% csrf_token %}
+            
+            
+            <div id="username_form", class= "col-12 mb-3">
+                <label for="id_username">Usuario</label>
+                <input type="text", name="username", id="id_username", required autofocus, class="form-control">
+            </div>
+            
+            <div id="password_form", class= "col-12 mb-3">
+                <label for="id_password">Contraseña</label>
+                <input type="password", name="password", id="id_password", required, class="form-control">
+            </div>
+            <div class = "col-12 d-grid">
+                <button class="btn btn-primary", type="submit">Ingresar</button>
+            </div>
+            
+        </form>
+
+    </div>
+</body>
