@@ -1,0 +1,14 @@
+
+<tr data-codigo="{{Codigo}}">
+    
+    <td>{{Codigo}}</td>
+    <td class="fs-6">{{Descripcion}}</td>
+    <td data-codigo={{Codigo}} type="number" class="cantidad-recepcion" contenteditable="true" onkeydown="handleEnterCantidad(event)" value="1">1</td>
+    <td>
+        <button type="button" data-codigo={{Codigo}} class="btn btn-danger " hx-delete="/product-delete/" hx-on:htmx:after-request="updateTotal(event)">
+            <i class="fa-solid fa-trash"></i>
+        </button>
+    </td>
+</tr>
+
+    
