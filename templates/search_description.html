@@ -1,0 +1,23 @@
+{%for product in products%}
+<tr class="table-secondary"data-codigo="{{product.Codigo}}">
+    {% csrf_token %}
+    <td>{{product.Codigo}}</td>
+    {% if is_order%}
+    <td>{{product.Documento}}</td>
+    <td class="pendiente" data-pendiente="{{product.Cantidad}}">{{product.Cantidad}}</td>
+    <td class="diferencia" data-diferencia="{{product.Diferencia}}">{{product.Diferencia}}</td>
+    <td class="d-none">{{product.Costo}}</td>
+    <td class="recibido d-none" data-recibido></td>
+    <td class="iva d-none"> {{product.Iva}} </td>
+    <td class="moneda d-none"> {{product.Moneda}} </td>
+    {% else %}
+    <td class="fs-6">{{product.Descripcion}}</td>
+    <td data-codigo={{product.Codigo}} type="number" class="cantidad-recepcion" contenteditable="true" onkeydown="handleEnterCantidad(event)" value="1">1</td>
+    <td>
+        <button type="button" class="btn btn-success " onclick="addProductModal(event)">
+            <i class="fa-solid fa-plus"></i>
+        </button>
+    </td>
+    {% endif %}
+</tr>
+{%endfor%}
