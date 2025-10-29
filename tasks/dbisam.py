@@ -12,6 +12,50 @@ class DBISAMDatabase:
 
     def connect(self):
         return pyodbc.connect(f'DSN={self.dsn};CatalogName={self.catalog}')
+    
+
+    def search_order(self, order_number, proveedor):
+        order_numbers ='(' +  ','.join(map(lambda x: f"'{x}'", order_number)) + ')'
+        with self.connect() as conn:
+            with conn.cursor() as cursor:
+                rows = cursor.execute(f"""SELECT 
+                                            FDI_CODIGO, 
+                                            FDI_CANTIDADPENDIENTE, 
+                                            FDI_DOCUMENTO,
+                                            FDI_COSTOOPERACION,
+                                            FDI_IMPUESTO1,
+                                            FDI_MONEDA    
+                                         
+                                        FROM SOPERACIONINV 
+                                        INNER JOIN SDETALLECOMPRA ON FTI_AUTOINCREMENT = FDI_OPERACION_AUTOINCREMENT
+                                        WHERE FDI_DOCUMENTO IN {order_numbers} AND FDI_CANTIDADPENDIENTE > 0 AND FDI_CLIENTEPROVEEDOR = '{proveedor}'
+                                        AND FTI_TIPO = 5 AND FDI_STATUS = 4
+                                    """).fetchall()
+                print(rows)
+                return rows
+    def search_proveedor(self, codigo_proveedor):
+        try:
+            with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    rows = cursor.execute(f"""SELECT 
+                                                FP_CODIGO,
+                                                FP_DESCRIPCION
+                                          FROM SPROVEEDOR
+                                          WHERE FP_CODIGO = '{codigo_proveedor}' and FP_STATUS = 1
+                                    """).fetchone()
+                return rows
+        except  Exception as e:
+            return str(e)            
+    def search_product(self, sku):
+        with self.connect() as conn:
+            with conn.cursor() as cursor:
+                row = cursor.execute(f"SELECT FI_CODIGO, FI_DESCRIPCION, FI_CATEGORIA FROM SINVENTARIO WHERE FI_REFERENCIA = '{sku}' OR FI_CODIGO = '{sku}' ").fetchone()
+                return row
+    def search_product_by_description(self, description):
+        with self.connect() as conn:
+            with conn.cursor() as cursor:
+                row = cursor.execute(f"SELECT FI_CODIGO, FI_DESCRIPCION, FI_CATEGORIA FROM SINVENTARIO WHERE FI_DESCRIPCION LIKE '%{description}%' ").fetchmany(200)
+                return row            
 
     def create_table_tmp(self, name_table):
         conn = self.connect()
@@ -40,6 +84,158 @@ class DBISAMDatabase:
         conn.commit()
         conn.close()
     
+    def insert_notas_entrega(self, request: dict):
+        try:
+           with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    detalle_query = []
+                    linea = 0
+                    moneda_operacion = 0
+                    ordenes_compra = []
+                    for ordenes in request['ordenes']:
+                        if ordenes['orden'] not in ordenes_compra:
+                            ordenes_compra.append(ordenes['orden'])
+                        moneda_operacion = ordenes['moneda']
+                        detalle_query.append(f""" INSERT INTO SDETALLECOMPRA
+                                             (FDI_DOCUMENTO,
+                                                        FDI_DOCUMENTOORIGEN,
+                                                        FDI_CLIENTEPROVEEDOR,
+                                                        FDI_STATUS,
+                                                        FDI_MONEDA,
+                                                        FDI_VISIBLE,
+                                                        FDI_DEPOSITOSOURCE,
+                                                        FDI_USADEPOSITOS, 
+                                                        FDI_TIPOOPERACION, 
+                                                        FDI_CODIGO, 
+                                                        FDI_CANTIDAD,
+                                                        FDI_CANTIDADPENDIENTE, 
+                                                        FDI_COSTOOPERACION, 
+                                                        FDI_OPERACION_AUTOINCREMENT, 
+                                                        FDI_LINEA,
+                                                        FDI_IMPUESTO1,
+                                                        FDI_PORCENTIMPUESTO1,
+                                                        FDI_MONTOIMPUESTO1,
+                                                        FDI_PORCENTDESCPARCIAL,
+                                                        FDI_DESCUENTOPARCIAL,
+                                                        FDI_PRECIOSINDESCUENTO,
+                                                        FDI_PRECIOCONDESCUENTO,
+                                                        FDI_PRECIODEVENTA,
+                                                        FDI_UNDDESCARGA,
+                                                        FDI_UNDCAPACIDAD,
+                                                        FDI_FECHAOPERACION
+                                                        )
+                                             VALUES('TEST-NOTA',
+                                                    '{ordenes['orden']}',
+                                                    '{request['rif']}',
+                                                    4,
+                                                    {ordenes['moneda']},
+                                                    1,
+                                                    1,
+                                                    1,
+                                                    8, 
+                                                    '{ordenes['codigo']}', 
+                                                    {ordenes['cantidad']},
+                                                    {ordenes['cantidad']}, 
+                                                    {ordenes['costo']}, 
+                                                    LASTAUTOINC('SOPERACIONINV'), 
+                                                    {linea},
+                                                    {ordenes['iva']},
+                                                    {1 if ordenes['iva'] == 16 else 0},
+                                                    {round(ordenes['costo'] * .16, 2) if ordenes['iva'] == 16 else 0},
+                                                    0,
+                                                    {ordenes['costo']},
+                                                    {ordenes['costo']},
+                                                    {ordenes['costo']},
+                                                    {ordenes['costo']},
+                                                    1,
+                                                    1,
+                                                    '{datetime.now().strftime('%Y-%m-%d')}');
+                                                    """)
+                        linea += 1
+                update_depositos = [f"UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {orden['recibido']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = 1"
+                                    for orden in request['ordenes']]
+                query_update_depositos = ";\n".join(update_depositos)  + ';' 
+
+                update_orden_compra = [f"""UPDATE SDETALLECOMPRA 
+                                            SET FDI_CANTIDADPENDIENTE =
+                                                CASE WHEN FDI_CANTIDADPENDIENTE < {orden['recibido']} THEN 0
+                                                     ELSE FDI_CANTIDADPENDIENTE - {orden['recibido']}   
+                                            END
+                                            FROM SDETALLECOMPRA
+                                            WHERE FDI_DOCUMENTO = '{orden['orden']}' 
+                                            AND FDI_CLIENTEPROVEEDOR = '{request['rif']}' 
+                                            AND FDI_CODIGO = '{orden['codigo']}'
+                                            AND FDI_TIPOOPERACION = 5"""
+                                       for orden in request['ordenes']] 
+                query = f"""
+                                          ---INICIO DE LA TRANSACCION---
+                                          START TRANSACTION;
+                                          ---INSERCION NOTA DE ENTREGA---
+                                          INSERT INTO SOPERACIONINV 
+                                                (FTI_DOCUMENTO,
+                                                FTI_TIPO,
+                                                FTI_STATUS,
+                                                FTI_VISIBLE,
+                                                FTI_FECHAEMISION,
+                                                FTI_DEPOSITOSOURCE,
+                                                FTI_TOTALITEMS,
+                                                FTI_TOTALITEMSINICIAL,
+                                                FTI_MONEDA,
+                                                FTI_FACTORCAMBIO,
+                                                FTI_TOTALCOSTO,
+                                                FTI_USER,
+                                                FTI_RESPONSABLE,
+                                                FTI_UPDATEITEMS,
+                                                FTI_TOTALBRUTO,
+                                                FTI_DESCUENTO1PORCENT,
+                                                FTI_DESCUENTO1MONTO,
+                                                FTI_BASEIMPONIBLE,
+                                                FTI_IMPUESTO1PORCENT,
+                                                FTI_IMPUESTO1MONTO,
+                                                FTI_TOTALNETO,
+                                                FTI_PERSONACONTACTO,
+                                                FTI_ORDENCOMPRA,
+                                                FTI_DOCUMENTOORIGEN,
+                                                FTI_HORA,
+                                                FTI_FECHALIBRO)
+                                      VALUES('TEST-NOTA',
+                                              8,
+                                              4,
+                                              1,
+                                              '{datetime.now().strftime("%Y-%m-%d")}',
+                                              1,
+                                              2,
+                                              2,
+                                              {moneda_operacion},
+                                              1,
+                                              {sum(map(lambda x: float(x['costo']), request['ordenes']))},
+                                              1,
+                                              '{request['rif']}',
+                                              1,
+                                              {sum(map(lambda x: float(x['costo']), request['ordenes']))},
+                                              0,
+                                              0,
+                                              {sum(map(lambda x: float(x['costo']), request['ordenes']))},
+                                              16,
+                                              0,
+                                              {sum(map(lambda x: float(x['costo']), request['ordenes']))},
+                                              '{request['proveedor']}',
+                                              '{''.join(ordenes_compra)}',
+                                              '{''.join(ordenes_compra)}',
+                                              '{datetime.now().strftime("%I:%M:%S %p")}',
+                                              '{datetime.now().strftime("%Y-%m-%d")}');                                     
+                                      {''.join(detalle_query)}
+                                      {''.join(query_update_depositos)}
+                                    {';'.join(update_orden_compra)}
+                                    """
+                print(query)
+                rows = cursor.execute(query)
+                cursor.execute("COMMIT;")
+                return rows
+        except Exception as e:
+            print(e)
+            return str(e)    
+
     def update_table_tmp(self, name_table):
         conn = self.connect()
         cursor  =  conn.cursor()
