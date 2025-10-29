@@ -1,0 +1,45 @@
+<div class="modal fade show" style="display:block;" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Buscar productos</h5>
+        <button type="button" class="btn-close" onclick="cerrarModal()"></button>
+      </div>
+      <div class="modal-body input-group">
+        <input 
+          type="text" 
+          class="form-control mb-3" 
+          placeholder="Buscar..." 
+          hx-get="/search-product-description" 
+          hx-target="#resultados-productos" 
+          hx-trigger="keyup[key=='Enter'] changed delay:300ms" 
+          hx-indicator="#spinner"
+          name="description">
+          <div id="spinner" class="htmx-indicator" style="display:block;">
+            <div class="spinner-grow text-primary" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+          </div>
+
+        </div>
+        <table id="myDataTable" class="table table-sm table-striped table-hover" style="width:100%">
+            <thead>
+                <tr>
+                    <th>Codigo</th>
+                    <th>Descripcion</th>
+                    <th>Cantidad</th>
+                </tr>
+            </thead>
+            <tbody id="resultados-productos" hx-confirm="Desea agregar el producto" hx-target="closest tr" hx-swap="outerHTML swap:1s">  
+            </tbody>
+        </table>    
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function cerrarModal() {
+    document.querySelector('#modal-container').innerHTML = '';
+  }
+</script>
