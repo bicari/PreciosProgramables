@@ -1,0 +1,253 @@
+{% extends "dashboard.html" %} {% block content %} {% load static %}
+
+<div class="container-fluid">
+  <h2 class="text-center mt-6 mb-8">Recepción de Productos</h2>
+</div>
+<div class="modal fade" id="modalGlobal" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
+    
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalGlobalLabel">Confirma</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        Esta seguro desea procesar la nota de recepción?
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+        <button 
+            id="procesar-modal" type="button" class="btn btn-primary"
+              >
+            Confirmar</button>
+      </div>
+    </div>
+  </div>
+</div>
+<form >
+     <!-- Modal -->
+
+  
+<div class="container-fluid">
+  
+  <div class="grid gap-4 d-flex">
+    <div class="card shadow-sm col-md-6 p-3">
+      <div class="row justify-content-center mb-2">
+        <h5 class="text-center">📦 Recepción Sku</h5>
+      </div>
+      <div class="card-header text-center d-none" id="card-proveedor">
+      </div>
+      <div class="input-group mb-3">
+        <input
+          type="text"
+          class="form-control"
+          name="sku"
+          id="search-producto"
+          placeholder="Ingrese código de producto"
+          hx-get="/search-product"
+          ,hx-trigger="input changed delay:500ms, keyup[key=='Enter'], load"
+          hx-target="#search-results"
+          hx-indicator=".htmx-indicator"
+          hx-swap="beforeend"
+          hx-on:htmx:after-request="postSearchActions(event)"
+          disabled
+        />
+        <button
+          type="button"
+          class="btn btn-info"
+          hx-get="/modal_search"
+          hx-trigger="click"
+          hx-target="#modal-container"
+          hx-swap="innerHTML"
+        >
+          <i class="fa-solid fa-magnifying-glass"></i>
+        </button>
+
+        <div id="modal-container"></div>
+      </div>
+      <div
+        id="error-product"
+        class="alert alert-danger alert-dismissible fade show w-100 d-none"
+        role="alert"
+      >
+        {{message}}
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="alert"
+          aria-label="Close"
+        ></button>
+      </div>
+
+      <div class="table-responsive" style="max-height: 400px; overflow-y: auto">
+        <table id="myDataTable" class="table table-sm" style="width: 100%">
+          <thead class="table-dark">
+            <tr>
+              <th>Codigo</th>
+              <th>Descripcion</th>
+              <th>Cantidad</th>
+            </tr>
+          </thead>
+          <tbody
+            id="search-results"
+            hx-confirm="Seguro desea eliminar el producto?"
+            hx-target="closest tr"
+            hx-swap="outerHTML"
+          ></tbody>
+        </table>
+      </div>
+    </div>
+    
+    <div class="card shadow-sm col-md-6 p-3">
+      <div class="row justify-content-center mb-2">
+        <h5 class="text-center">🧾 Ordenes de compra</h5>
+      </div>
+      <div class="input-group mb-3">
+        
+        <input 
+          type="text"
+          class="form-control"
+          name="proveedor"
+          id="search-proveedor"
+          placeholder="Código Proveedor"
+          pattern="^[JGEjge]\d+$"
+          maxlength="10"
+          hx-get="/search-proveedor"
+          hx-trigger="keydown[key=='Enter']"
+          hx-on:htmx:after-request="
+            if (event.detail.xhr.status === 200){
+               
+              document.getElementById('search-orden').disabled=false; 
+              document.getElementById('search-orden').focus()}
+              "
+          hx-target="#card-proveedor"
+          hx-swap="outerHTML"
+          >
+        <input
+          type="text"
+          class="form-control"
+          name="data"
+          id="search-orden"
+          placeholder="Número de OC"
+          hx-get="/search-order"
+          hx-trigger="keydown[key=='Enter']"
+          hx-target="#search-orden-compra"
+          hx-indicator=".htmx-indicator"
+          hx-swap="beforeend"
+          hx-include="#search-proveedor"
+          hx-on:htmx:after-request="
+                  document.getElementById('search-orden').value = '';
+                  if(event.detail.xhr.status === 200){
+                    document.getElementById('search-producto').disabled = false;
+                    document.getElementById('search-producto').focus();
+                  }"
+          disabled
+        />
+        
+        <button
+          type="button"
+          class="btn btn-info"
+          hx-get="/modal_search"
+          hx-trigger="click"
+          hx-target="#modal-container"
+          hx-swap="innerHTML"
+        >
+          <i class="fa-solid fa-magnifying-glass"></i>
+        </button>
+        <button
+          type="button"
+          class="btn btn-danger"
+          hx-delete="/product-delete/"
+          hx-trigger="click"
+          hx-include="#search-orden-compra"
+          hx-target="#search-orden-compra"
+          hx-on:htmx:after-request="
+              document.getElementById('card-proveedor').classList.add('d-none'); 
+              document.getElementById('search-orden').disabled=true
+              document.getElementById('search-producto').disabled=true"
+          hx-swap="innerHTML"
+        >
+          <i class="fa-solid fa-trash"></i>
+        </button>
+      </div>
+      <div
+        id="error-orden"
+        class="alert alert-danger alert-dismissible fade show w-100 d-none"
+        role="alert"
+      >
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="alert"
+          aria-label="Close"
+        ></button>
+      </div>
+      <div class="table-responsive" style="max-height: 400px">
+        <table id="myDataTable" class="table table-sm" style="width: 100%">
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Orden Compra</th>
+              <th>Cantidad</th>
+              <th>Diferencia</th>
+            </tr>
+          </thead>
+          <tbody
+            id="search-orden-compra"
+            hx-target="closest tr"
+            hx-swap="outerHTML swap:1s"
+          ></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div
+  class="container-fluid mt-4 hidden justify-content-center"
+  id="totalizar-documento"
+>
+  <div class="row justify-content-around">
+    <div class="col-lg-2 col-md-8">
+      <div class="card h-100 shadow-sm border-0">
+        <div class="card-body h-100">
+          <div
+            class="d-flex flex-column flex-md-row justify-content-between align-items-center"
+          >
+            <h5 class="mb-3 mb-md-0 text-primary fw-semibold">items: 25</h5>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6 col-md-8">
+      <div class="card shadow-sm border-0">
+        <div class="card-body">
+          <div
+            class="d-flex flex-column flex-md-row justify-content-between align-items-center"
+          >
+            <h5 class="mb-3 mb-md-0 text-primary fw-semibold">
+              <i class="fa-solid fa-file-invoice-dollar me-2"></i> Totalizar
+              Documento
+            </h5>
+            <button
+              type="button"
+              class="btn btn-success btn-sm px-4"
+              data-bs-toggle="modal"
+              data-bs-target="#modalGlobal"
+              id="procesar-recepcion"
+              
+            >
+              <i class="fa-solid fa-check-circle me-2"></i> Procesar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-2 col-md-8">
+      <div class="card shadow-sm border-0"></div>
+    </div>
+  </div>
+</div>
+</form>
+
+{% endblock content%}
