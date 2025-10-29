@@ -1,0 +1,231 @@
+/* ==============================
+   BASE GENERAL
+============================== */
+body {
+    display: flex;
+    margin: 0;
+    min-height: 100vh;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #f8f9fa;
+}
+
+/* ==============================
+   SIDEBAR PRINCIPAL
+============================== */
+.nav-side-menu {
+    width: 250px;
+    background: #2e353d;
+    color: white;
+    height: 100vh;
+    position: fixed;
+    left: 0;
+    top: 0;
+    transition: width 0.3s ease;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    z-index: 1000;
+}
+
+/* Colapsado */
+.nav-side-menu.collapsed {
+    width: 70px;
+}
+
+/* ==============================
+   ENCABEZADO DEL MENÚ
+============================== */
+.brand {
+    background: #23282e;
+    color: white;
+    padding: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #4e545a;
+    transition: all 0.3s ease;
+    white-space: nowrap;
+}
+
+/* Ocultar texto del título al colapsar */
+.nav-side-menu.collapsed .brand span {
+    opacity: 0;
+    width: 0;
+    overflow: hidden;
+}
+
+/* Botón hamburguesa */
+.hamburger-btn {
+    background: transparent;
+    color: white;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    margin-left: 5px;
+    transition: transform 0.3s ease;
+}
+
+.hamburger-btn:hover {
+    transform: scale(1.1);
+}
+
+/* ==============================
+   LISTA DE MENÚ
+============================== */
+.menu-list {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 0;
+    margin: 0;
+}
+
+/* Contenedor general */
+.menu-content {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+/* Ítems */
+.menu-item {
+    position: relative;
+}
+
+/* Enlaces principales */
+.menu-label {
+    display: flex;
+    align-items: center;
+    padding: 12px 15px;
+    color: white;
+    text-decoration: none;
+    border-bottom: 1px solid #4e545a;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.3s ease;
+}
+
+.menu-label:hover {
+    background: #4e545a;
+}
+
+/* Íconos */
+.menu-label i {
+    font-size: 20px;
+    min-width: 20px;
+    text-align: center;
+    transition: font-size 0.3s, margin 0.3s;
+}
+
+/* Texto del menú */
+.menu-text {
+    margin-left: 10px;
+    transition: opacity 0.3s, transform 0.3s;
+}
+
+/* Ocultar texto cuando está colapsado */
+.nav-side-menu.collapsed .menu-text {
+    opacity: 0;
+    transform: translateX(-10px);
+    pointer-events: none;
+    width: 0%;
+    margin: 0;
+}
+.nav-side-menu.collapsed .arrow {
+    opacity: 0;
+    transform: translateX(-10px);
+    pointer-events: none;
+    width: 0%;
+    margin: 0;
+}
+
+/* Centrar íconos en modo colapsado */
+.nav-side-menu.collapsed .menu-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 0;
+}
+
+/* Ajustar tamaño de íconos al colapsar */
+.nav-side-menu.collapsed .menu-label i {
+    font-size: 24px;
+    justify-content: center;
+    align-items: center;
+}
+
+/* ==============================
+   SUBMENÚS
+============================== */
+.sub-menu {
+    list-style: none;
+    padding: 0;
+    background: #23282e;
+    display: none;
+}
+
+.sub-menu a {
+    display: block;
+    padding: 10px 15px 10px 40px;
+    color: #e1ffff;
+    text-decoration: none;
+}
+
+.sub-menu a:hover {
+    background: #3d4348;
+}
+
+/* Mostrar submenú cuando el checkbox está activo */
+.menu-toggle {
+    display: none;
+}
+
+.menu-toggle:checked ~ .sub-menu {
+    display: block;
+}
+
+/* Flecha */
+.arrow {
+    margin-left: auto;
+    transition: transform 0.3s;
+}
+
+.menu-toggle:checked ~ .menu-label .arrow {
+    transform: rotate(90deg);
+}
+
+/* ==============================
+   CONTENIDO PRINCIPAL
+============================== */
+.main-content {
+    margin-left: 250px;
+    padding: 20px;
+    flex-grow: 1;
+    transition: margin-left 0.3s ease;
+}
+
+/* Ajustar al colapsar */
+.main-content.expanded {
+    margin-left: 70px;
+    width: calc(100% - 70px);
+}
+
+/* ==============================
+   OTROS EFECTOS
+============================== */
+.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+.error {
+    animation: fadeOut 4s forwards;
+}
+
+@keyframes fadeOut {
+    0% { opacity: 1; }
+    80% { opacity: 1; }
+    100% { opacity: 0; visibility: hidden; display: none; }
+}
+/* BOTON MENU*/
