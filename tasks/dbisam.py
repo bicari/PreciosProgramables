@@ -16,6 +16,7 @@ class DBISAMDatabase:
 
     def search_order(self, order_number, proveedor):
         order_numbers ='(' +  ','.join(map(lambda x: f"'{x}'", order_number)) + ')'
+        print(order_numbers)
         with self.connect() as conn:
             with conn.cursor() as cursor:
                 rows = cursor.execute(f"""SELECT 
@@ -24,7 +25,8 @@ class DBISAMDatabase:
                                             FDI_DOCUMENTO,
                                             FDI_COSTOOPERACION,
                                             FDI_IMPUESTO1,
-                                            FDI_MONEDA    
+                                            FDI_MONEDA,
+                                            FDI_DEPOSITOSOURCE    
                                          
                                         FROM SOPERACIONINV 
                                         INNER JOIN SDETALLECOMPRA ON FTI_AUTOINCREMENT = FDI_OPERACION_AUTOINCREMENT
@@ -152,8 +154,12 @@ class DBISAMDatabase:
                                                     '{datetime.now().strftime('%Y-%m-%d')}');
                                                     """)
                         linea += 1
-                update_depositos = [f"UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {orden['recibido']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = 1"
-                                    for orden in request['ordenes']]
+                update_depositos = [
+                                    (f"UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {orden['recibido']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = {orden['deposito']}"
+                                    if orden['diferencia'] <=0 
+                                    else f"""UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {orden['cantidad']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = {orden['deposito']}; 
+                                            UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {orden['diferencia']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = 2""" )
+                                        for orden in request['ordenes'] ]
                 query_update_depositos = ";\n".join(update_depositos)  + ';' 
 
                 update_orden_compra = [f"""UPDATE SDETALLECOMPRA 
