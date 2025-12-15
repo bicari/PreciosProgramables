@@ -1,0 +1,23 @@
+{% extends "dashboard.html" %}
+{% block content %}
+{% load static %}
+<div class="container row d-flex justify-content-center">
+    <div class="row text-center">
+        <h2>Solicitud procesada con éxito</h2>
+        <p>La recepción ha sido generada correctamente.</p>
+        <p>Nota Entrega Nro: {{document}} </p>
+        
+        <div>
+            <img src="{% static "test/check.png" %}" alt="confirmado", style="width: 120px; height: 100px;">
+        </div>
+        
+        <div class="mt-3">
+            <a href="/notas-entrega/" class="btn btn-primary">Nueva Orden</a>
+        </div>
+        
+        
+    </div>
+
+</div>
+
+{% endblock %}
