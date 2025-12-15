@@ -19,7 +19,12 @@ from django.urls import path, include
 from django.shortcuts import redirect
 from django.conf import settings
 from django.conf.urls.static import static
+
 redirect_login = lambda request: redirect('login')
+admin.site.site_title = "Ksa Home Admin"
+admin.site.site_header = "Ksa Home Administración"
+admin.site.index_title = "Panel de Administración"
+admin.site.site_url = "/dashboard"
 
 urlpatterns = [
     path('admin/', admin.site.urls),
