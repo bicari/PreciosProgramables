@@ -1,13 +1,15 @@
 import pyodbc
 from django.conf import settings
 from datetime import datetime
-
-
+from itertools import zip_longest
+from uuid import uuid4
 class DBISAMDatabase:
     def __init__(self):
         self.dsn = settings.DBISAM_DATABASE['DSN']
         self.catalog = settings.DBISAM_DATABASE['CatalogName']
         self.tmp_table_tasks = settings.DBISAM_DATABASE['TMP_TABLE_TASKS']
+        self.almacen_ppal = settings.ALMACEN_PPAL
+        self.almacen_items_sin_oc = settings.ALMACEN_PRODUCTOS_SIN_OC
         
 
     def connect(self):
@@ -16,7 +18,7 @@ class DBISAMDatabase:
 
     def search_order(self, order_number, proveedor):
         order_numbers ='(' +  ','.join(map(lambda x: f"'{x}'", order_number)) + ')'
-        print(order_numbers)
+        name_table_temp = f'TEMP_TABLE_ORDENES_{uuid4().hex.upper()}'
         with self.connect() as conn:
             with conn.cursor() as cursor:
                 rows = cursor.execute(f"""SELECT 
@@ -27,13 +29,28 @@ class DBISAMDatabase:
                                             FDI_IMPUESTO1,
                                             FDI_MONEDA,
                                             FDI_DEPOSITOSOURCE    
-                                         
+                                        INTO {name_table_temp}
                                         FROM SOPERACIONINV 
                                         INNER JOIN SDETALLECOMPRA ON FTI_AUTOINCREMENT = FDI_OPERACION_AUTOINCREMENT
                                         WHERE FDI_DOCUMENTO IN {order_numbers} AND FDI_CANTIDADPENDIENTE > 0 AND FDI_CLIENTEPROVEEDOR = '{proveedor}'
-                                        AND FTI_TIPO = 5 AND FDI_STATUS = 4
+                                        AND FTI_TIPO = 5 AND FDI_STATUS = 4;
+                                        --INDICE PARA EL CAMPO FDI_CODIGO
+                                        CREATE INDEX IF NOT EXISTS "INDEX_CODIGO" ON "{name_table_temp}" (FDI_CODIGO);
+                                        --SELECCION DE LOS DATOS
+                                        SELECT
+                                             FDI_CODIGO,
+                                             FDI_CANTIDADPENDIENTE,
+                                             FDI_DOCUMENTO,
+                                             FDI_COSTOOPERACION,
+                                             FDI_IMPUESTO1,   
+                                             FDI_MONEDA,
+                                             FDI_DEPOSITOSOURCE,
+                                             FI_DESCRIPCION
+                                        FROM {name_table_temp}
+                                        INNER JOIN SINVENTARIO ON FDI_CODIGO = FI_CODIGO;
                                     """).fetchall()
                 print(rows)
+                cursor.execute(f"""DROP TABLE IF EXISTS {name_table_temp}""")
                 return rows
     def search_proveedor(self, codigo_proveedor):
         try:
@@ -49,14 +66,29 @@ class DBISAMDatabase:
         except  Exception as e:
             return str(e)            
     def search_product(self, sku):
-        with self.connect() as conn:
-            with conn.cursor() as cursor:
-                row = cursor.execute(f"SELECT FI_CODIGO, FI_DESCRIPCION, FI_CATEGORIA FROM SINVENTARIO WHERE FI_REFERENCIA = '{sku}' OR FI_CODIGO = '{sku}' ").fetchone()
-                return row
+        try:
+            with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    row = cursor.execute(f"""SELECT 
+                                                FI_CODIGO, 
+                                                FI_DESCRIPCION, FIC_COSTOACTBOLIVARES, FIC_COSTOACTEXTRANJERO, FIC_IMP01MONTO
+                                        FROM SINVENTARIO
+                                        INNER JOIN A2INVCOSTOSPRECIOS ON FI_CODIGO = FIC_CODEITEM  
+                                        WHERE FI_REFERENCIA = '{sku}' OR FI_CODIGO = '{sku}' """).fetchone()
+                    return row
+        except Exception as e:
+            return str(e)        
     def search_product_by_description(self, description):
         with self.connect() as conn:
             with conn.cursor() as cursor:
-                row = cursor.execute(f"SELECT FI_CODIGO, FI_DESCRIPCION, FI_CATEGORIA FROM SINVENTARIO WHERE FI_DESCRIPCION LIKE '%{description}%' ").fetchmany(200)
+                row = cursor.execute(f"""SELECT 
+                                     FI_CODIGO, 
+                                     FI_DESCRIPCION, 
+                                     FI_CATEGORIA,
+                                     FIC_COSTOACTBOLIVARES, FIC_COSTOACTEXTRANJERO, FIC_IMP01MONTO 
+                                     FROM SINVENTARIO
+                                     INNER JOIN A2INVCOSTOSPRECIOS ON FI_CODIGO = FIC_CODEITEM  
+                                     WHERE FI_DESCRIPCION LIKE '%{description}%' """).fetchmany(200)
                 return row            
 
     def create_table_tmp(self, name_table):
@@ -86,82 +118,199 @@ class DBISAMDatabase:
         conn.commit()
         conn.close()
     
-    def insert_notas_entrega(self, request: dict):
+    def notas_entrega_correlativo(self):
+        try:
+            with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    row = cursor.execute("""SELECT NO_NOTAENTREGAPROV FROM SSISTEMA WHERE DUMMYKEY='' """).fetchone()
+                    return row.NO_NOTAENTREGAPROV
+        except Exception as e:
+            print(e)
+            return e
+
+    def insert_notas_entrega(self, request: dict, nro_nota: int):
         try:
            with self.connect() as conn:
                 with conn.cursor() as cursor:
                     detalle_query = []
+                    nro_documento = str(nro_nota).rjust(8,'0')
                     linea = 0
-                    moneda_operacion = 0
+                    moneda_operacion = 1
                     ordenes_compra = []
-                    for ordenes in request['ordenes']:
-                        if ordenes['orden'] not in ordenes_compra:
-                            ordenes_compra.append(ordenes['orden'])
-                        moneda_operacion = ordenes['moneda']
-                        detalle_query.append(f""" INSERT INTO SDETALLECOMPRA
-                                             (FDI_DOCUMENTO,
-                                                        FDI_DOCUMENTOORIGEN,
-                                                        FDI_CLIENTEPROVEEDOR,
-                                                        FDI_STATUS,
-                                                        FDI_MONEDA,
-                                                        FDI_VISIBLE,
-                                                        FDI_DEPOSITOSOURCE,
-                                                        FDI_USADEPOSITOS, 
-                                                        FDI_TIPOOPERACION, 
-                                                        FDI_CODIGO, 
-                                                        FDI_CANTIDAD,
-                                                        FDI_CANTIDADPENDIENTE, 
-                                                        FDI_COSTOOPERACION, 
-                                                        FDI_OPERACION_AUTOINCREMENT, 
-                                                        FDI_LINEA,
-                                                        FDI_IMPUESTO1,
-                                                        FDI_PORCENTIMPUESTO1,
-                                                        FDI_MONTOIMPUESTO1,
-                                                        FDI_PORCENTDESCPARCIAL,
-                                                        FDI_DESCUENTOPARCIAL,
-                                                        FDI_PRECIOSINDESCUENTO,
-                                                        FDI_PRECIOCONDESCUENTO,
-                                                        FDI_PRECIODEVENTA,
-                                                        FDI_UNDDESCARGA,
-                                                        FDI_UNDCAPACIDAD,
-                                                        FDI_FECHAOPERACION
-                                                        )
-                                             VALUES('TEST-NOTA',
-                                                    '{ordenes['orden']}',
-                                                    '{request['rif']}',
-                                                    4,
-                                                    {ordenes['moneda']},
-                                                    1,
-                                                    1,
-                                                    1,
-                                                    8, 
-                                                    '{ordenes['codigo']}', 
-                                                    {ordenes['cantidad']},
-                                                    {ordenes['cantidad']}, 
-                                                    {ordenes['costo']}, 
-                                                    LASTAUTOINC('SOPERACIONINV'), 
-                                                    {linea},
-                                                    {ordenes['iva']},
-                                                    {1 if ordenes['iva'] == 16 else 0},
-                                                    {round(ordenes['costo'] * .16, 2) if ordenes['iva'] == 16 else 0},
-                                                    0,
-                                                    {ordenes['costo']},
-                                                    {ordenes['costo']},
-                                                    {ordenes['costo']},
-                                                    {ordenes['costo']},
-                                                    1,
-                                                    1,
-                                                    '{datetime.now().strftime('%Y-%m-%d')}');
-                                                    """)
-                        linea += 1
-                update_depositos = [
-                                    (f"UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {orden['recibido']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = {orden['deposito']}"
-                                    if orden['diferencia'] <=0 
-                                    else f"""UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {orden['cantidad']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = {orden['deposito']}; 
-                                            UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {orden['diferencia']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = 2""" )
-                                        for orden in request['ordenes'] ]
-                query_update_depositos = ";\n".join(update_depositos)  + ';' 
+                    total_items = len(request['ordenes']) + len(request['productoSinOc'])
+                    for ordenes, productos_sin_ordenes in zip_longest(request['ordenes'], request['productoSinOc'], fillvalue=None):
+                        #moneda = ordenes['moneda']
+                        if ordenes is not None:
+                            nro_oc = ordenes['orden']
+                            codigo = ordenes['codigo']
+                            cantidad = ordenes['cantidad']
+                            moneda_operacion = ordenes['moneda']
+                            costo = ordenes['costo']
+                            iva = ordenes['iva']
+                            
+                            fecha = datetime.now().strftime("%Y-%m-%d")
+                            impuesto_porcentaje = 1 if iva == 16 else 0
+                            monto_impuesto = round(costo * 0.16, 2) if iva == 16 else 0
 
+                            sql = """
+                                    INSERT INTO SDETALLECOMPRA (
+                                        FDI_DOCUMENTO,
+                                        FDI_DOCUMENTOORIGEN,
+                                        FDI_CLIENTEPROVEEDOR,
+                                        FDI_STATUS,
+                                        FDI_MONEDA,
+                                        FDI_VISIBLE,
+                                        FDI_DEPOSITOSOURCE,
+                                        FDI_USADEPOSITOS,
+                                        FDI_TIPOOPERACION,
+                                        FDI_CODIGO,
+                                        FDI_CANTIDAD,
+                                        FDI_CANTIDADPENDIENTE,
+                                        FDI_COSTOOPERACION,
+                                        FDI_OPERACION_AUTOINCREMENT,
+                                        FDI_LINEA,
+                                        FDI_IMPUESTO1,
+                                        FDI_PORCENTIMPUESTO1,
+                                        FDI_MONTOIMPUESTO1,
+                                        FDI_PORCENTDESCPARCIAL,
+                                        FDI_DESCUENTOPARCIAL,
+                                        FDI_PRECIOSINDESCUENTO,
+                                        FDI_PRECIOCONDESCUENTO,
+                                        FDI_PRECIODEVENTA,
+                                        FDI_UNDDESCARGA,
+                                        FDI_UNDCAPACIDAD,
+                                        FDI_FECHAOPERACION
+                                    ) VALUES (
+                                        '{nro_nota}',
+                                        '{orden_id}',
+                                        '{rif}',
+                                        4,
+                                        {moneda},
+                                        1,
+                                        1,
+                                        1,
+                                        8,
+                                        '{codigo}',
+                                        {cantidad},
+                                        {cantidad},
+                                        {costo},
+                                        LASTAUTOINC('SOPERACIONINV'),
+                                        {linea},
+                                        {iva},
+                                        {impuesto_porcentaje},
+                                        {monto_impuesto},
+                                        0,
+                                        {costo},
+                                        {costo},
+                                        {costo},
+                                        {costo},
+                                        1,
+                                        1,
+                                        '{fecha}'
+                                    );
+                                    """.format(
+                                        orden_id=nro_oc,
+                                        rif=request['rif'],
+                                        moneda=moneda_operacion,
+                                        codigo=codigo,
+                                        cantidad=cantidad,
+                                        costo=costo,
+                                        linea=linea,
+                                        iva=iva,
+                                        impuesto_porcentaje=impuesto_porcentaje,
+                                        monto_impuesto=monto_impuesto,
+                                        fecha=fecha,
+                                        nro_nota=nro_documento
+                                    )
+                            linea +=1
+                            detalle_query.append(sql)
+                        if productos_sin_ordenes is not None:
+                            iva = productos_sin_ordenes['iva']
+                            costo = productos_sin_ordenes['costoBS'] if moneda_operacion == 1 else productos_sin_ordenes['costoUS']
+                            fecha = datetime.now().strftime("%Y-%m-%d")
+                            impuesto_porcentaje = 1 if iva == 16 else 0
+                            monto_impuesto = round(costo * 0.16, 2) if iva == 16 else 0
+                            sql_productos_sin_oc = """
+                                    INSERT INTO SDETALLECOMPRA (
+                                        FDI_DOCUMENTO,
+                                        FDI_DOCUMENTOORIGEN,
+                                        FDI_CLIENTEPROVEEDOR,
+                                        FDI_STATUS,
+                                        FDI_MONEDA,
+                                        FDI_VISIBLE,
+                                        FDI_DEPOSITOSOURCE,
+                                        FDI_USADEPOSITOS,
+                                        FDI_TIPOOPERACION,
+                                        FDI_CODIGO,
+                                        FDI_CANTIDAD,
+                                        FDI_CANTIDADPENDIENTE,
+                                        FDI_COSTOOPERACION,
+                                        FDI_OPERACION_AUTOINCREMENT,
+                                        FDI_LINEA,
+                                        FDI_IMPUESTO1,
+                                        FDI_PORCENTIMPUESTO1,
+                                        FDI_MONTOIMPUESTO1,
+                                        FDI_PORCENTDESCPARCIAL,
+                                        FDI_DESCUENTOPARCIAL,
+                                        FDI_PRECIOSINDESCUENTO,
+                                        FDI_PRECIOCONDESCUENTO,
+                                        FDI_PRECIODEVENTA,
+                                        FDI_UNDDESCARGA,
+                                        FDI_UNDCAPACIDAD,
+                                        FDI_FECHAOPERACION
+                                    )VALUES (
+                                        '{nro_nota}',
+                                        '{orden_id}',
+                                        '{rif}',
+                                        4,
+                                        {moneda},
+                                        1,
+                                        1,
+                                        1,
+                                        8,
+                                        '{codigo}',
+                                        {cantidad},
+                                        {cantidad},
+                                        {costo},
+                                        LASTAUTOINC('SOPERACIONINV'),
+                                        {linea},
+                                        {iva},
+                                        {impuesto_porcentaje},
+                                        {monto_impuesto},
+                                        0,
+                                        {costo},
+                                        {costo},
+                                        {costo},
+                                        {costo},
+                                        1,
+                                        1,
+                                        '{fecha}'
+                                    );""".format(
+                                        orden_id="",
+                                        rif=request['rif'],
+                                        moneda=moneda_operacion,
+                                        codigo=productos_sin_ordenes['codigo'],
+                                        cantidad = productos_sin_ordenes['cantidad'],
+                                        linea=linea,
+                                        iva=iva,
+                                        impuesto_porcentaje = impuesto_porcentaje,
+                                        monto_impuesto = monto_impuesto,
+                                        costo = costo,
+                                        fecha= fecha,
+                                        nro_nota=nro_documento)
+                            detalle_query.append(sql_productos_sin_oc)
+                            linea += 1
+                update_depositos = [
+                                    (f"UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {orden['recibido']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = {orden['deposito']};"
+                                    if orden['diferencia'] <= 0 
+                                    else f"""UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {orden['cantidad']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = {orden['deposito']};
+                                            UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {orden['diferencia']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = {self.almacen_items_sin_oc};""" )
+                                        for orden in request['ordenes'] ]
+                update_depositos_productos_sin_oc = [(f"UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {products['cantidad']}WHERE FT_CODIGOPRODUCTO = '{products['codigo']}' AND FT_CODIGODEPOSITO = {self.almacen_items_sin_oc};") 
+                                                     for products in request['productoSinOc']]
+                
+                query_update_depositos = "\n".join(update_depositos) 
+                query_update_depositos_sin_oc = "\n".join(update_depositos_productos_sin_oc) 
                 update_orden_compra = [f"""UPDATE SDETALLECOMPRA 
                                             SET FDI_CANTIDADPENDIENTE =
                                                 CASE WHEN FDI_CANTIDADPENDIENTE < {orden['recibido']} THEN 0
@@ -171,8 +320,12 @@ class DBISAMDatabase:
                                             WHERE FDI_DOCUMENTO = '{orden['orden']}' 
                                             AND FDI_CLIENTEPROVEEDOR = '{request['rif']}' 
                                             AND FDI_CODIGO = '{orden['codigo']}'
-                                            AND FDI_TIPOOPERACION = 5"""
-                                       for orden in request['ordenes']] 
+                                            AND FDI_TIPOOPERACION = 5 \n"""
+                                       for orden in request['ordenes']]
+                total_sin_oc ={1:sum(map(lambda x: float(x['costoBS']), request['productoSinOc'])), 
+                                 2:sum(map(lambda x: float(x['costoUS']), request['productoSinOc']))} 
+                print(total_sin_oc, moneda_operacion)
+                total_neto = sum(map(lambda x: float(x['costo']), request['ordenes'])) + total_sin_oc[int(moneda_operacion)]
                 query = f"""
                                           ---INICIO DE LA TRANSACCION---
                                           START TRANSACTION;
@@ -204,27 +357,27 @@ class DBISAMDatabase:
                                                 FTI_DOCUMENTOORIGEN,
                                                 FTI_HORA,
                                                 FTI_FECHALIBRO)
-                                      VALUES('TEST-NOTA',
+                                      VALUES('{nro_documento}',
                                               8,
                                               4,
                                               1,
                                               '{datetime.now().strftime("%Y-%m-%d")}',
                                               1,
-                                              2,
-                                              2,
+                                              {total_items},
+                                              {total_items},
                                               {moneda_operacion},
                                               1,
-                                              {sum(map(lambda x: float(x['costo']), request['ordenes']))},
+                                              {total_neto},
                                               1,
                                               '{request['rif']}',
                                               1,
-                                              {sum(map(lambda x: float(x['costo']), request['ordenes']))},
+                                              {total_neto},
                                               0,
                                               0,
-                                              {sum(map(lambda x: float(x['costo']), request['ordenes']))},
+                                              {total_neto},
                                               16,
                                               0,
-                                              {sum(map(lambda x: float(x['costo']), request['ordenes']))},
+                                              {total_neto},
                                               '{request['proveedor']}',
                                               '{''.join(ordenes_compra)}',
                                               '{''.join(ordenes_compra)}',
@@ -232,15 +385,17 @@ class DBISAMDatabase:
                                               '{datetime.now().strftime("%Y-%m-%d")}');                                     
                                       {''.join(detalle_query)}
                                       {''.join(query_update_depositos)}
+                                      {''.join(query_update_depositos_sin_oc)}  
                                     {';'.join(update_orden_compra)}
                                     """
-                print(query)
+                #print(query)
                 rows = cursor.execute(query)
+                cursor.execute(f"""UPDATE SSISTEMA SET NO_NOTAENTREGAPROV = {nro_nota} + 1 WHERE DUMMYKEY = '' """)
                 cursor.execute("COMMIT;")
                 return rows
         except Exception as e:
             print(e)
-            return str(e)    
+            return e    
 
     def update_table_tmp(self, name_table):
         conn = self.connect()
