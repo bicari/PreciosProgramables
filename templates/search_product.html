@@ -5,10 +5,18 @@
     <td class="fs-6">{{Descripcion}}</td>
     <td data-codigo={{Codigo}} type="number" class="cantidad-recepcion" contenteditable="true" onkeydown="handleEnterCantidad(event)" value="1">1</td>
     <td>
-        <button type="button" data-codigo={{Codigo}} class="btn btn-danger " hx-delete="/product-delete/" hx-on:htmx:after-request="updateTotal(event)">
+        <button type="button" data-codigo={{Codigo}} class="btn btn-danger " hx-delete="/product-delete/" 
+        hx-on:htmx:after-request="updateTotal(event);"
+        hx-confirm="Seguro desea eliminar el producto?"
+          hx-target="closest tr"
+          hx-swap="outerHTML"
+        >
             <i class="fa-solid fa-trash"></i>
         </button>
     </td>
+    <td class="d-none"> {{CostoBs}} </td>
+    <td class="d-none"> {{CostoUsd}} </td>
+    <td class="d-none"> {{Iva}} </td>
 </tr>
 
     
