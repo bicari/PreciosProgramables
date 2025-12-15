@@ -26,7 +26,7 @@ function handleEnterCantidad(event) {
         console.log(cell);
         const codigoNoEncontrado = actualizarEstadoRecepcion(codigo, valorTotal !== undefined ? valorTotal : valor);
         if (codigoNoEncontrado){
-            cell.classList.add('table-danger');
+            cell.parentElement.classList.add('table-danger');
         }
     }
     else{
@@ -40,12 +40,13 @@ function handleEnterCantidad(event) {
         const codigoNoEncontrado = actualizarEstadoRecepcion(codigo, valorTotal !== undefined ? valorTotal : valor)
         
         if (codigoNoEncontrado){
-            cell.classList.add('table-danger');
+            cell.parentElement.classList.add('table-danger');
         }
+     
 });
     }
 }  
-  function actualizarEstadoRecepcion(codigo, cantidadRecibida) {
+function actualizarEstadoRecepcion(codigo, cantidadRecibida) {
     const filaOC = document.querySelector(`#search-orden-compra tr[data-codigo="${codigo}"]`);
     if (!filaOC) return codigo;
 
@@ -64,6 +65,7 @@ function handleEnterCantidad(event) {
     }
     const diferenciaCell = filaOC.querySelector('.diferencia');
     const diferencia = cantidadRecibida - pendiente;
+    
     recibidoCell.innerText = cantidadRecibida;
     diferenciaCell.innerText = diferencia;
     diferenciaCell.dataset.diferencia = diferencia;
@@ -71,23 +73,37 @@ function handleEnterCantidad(event) {
 
 function updateTotal(event){
     //const filas = document.querySelectorAll('#search-orden-compra tr');
-    const button = event.target
+    console.log('disparando update total');
+    const cantItems = document.getElementById('search-results').rows.length
+    const bandaItems = document.getElementById('band-items')
+    bandaItems.textContent = cantItems.toString();
+    const button = event.detail.target;
+    if (!button) {
+        console.warn('No se pudo obtener el botón desde event.detail.elt');
+        return;
+    }
+
     const codigo = button.dataset.codigo;
     const filaOC = document.querySelector(`#search-orden-compra tr[data-codigo="${codigo}"]`);
+    console.log(filaOC, button, codigo, event.detail.target);
+
     if (!filaOC) return;
-    console.log(filaOC);
+
     filaOC.classList.remove('table-success', 'table-warning', 'table-danger');
+
     const pendienteCell = filaOC.querySelector('.pendiente');
     const diferenciaCell = filaOC.querySelector('.diferencia');
-    const pendienteValue = parseInt(pendienteCell.dataset.pendiente);
-    diferenciaCell.innerText = pendienteValue;
-    
 
-    
+    if (pendienteCell && diferenciaCell) {
+        const pendienteValue = parseInt(pendienteCell.dataset.pendiente);
+        diferenciaCell.innerText = '';
+    }
 }
+
 function postSearchActions(event){
     document.getElementById('search-producto').value = '';
     handleEnterCantidad(event);
+    
     
 }
     
@@ -107,9 +123,11 @@ function addProductModal(event){
   const codigo = filaOriginal.dataset.codigo;
   const tdBoton = document.createElement('td');
   tdBoton.innerHTML = `
-    <button data-codigo="${codigo}" class="btn btn-danger"
+    <button type="button" data-codigo="${codigo}" class="btn btn-danger"
             hx-delete="/product-delete/"
-            hx-on:htmx:after-request="updateTotal(event)">
+            hx-on:htmx:after-request="updateTotal(event)"
+            hx-target="closest tr"
+            hx-swap="outerHTML">
       <i class="fa-solid fa-trash"></i>
     </button>
   `;
@@ -118,44 +136,45 @@ function addProductModal(event){
   // Agrega la fila clonada al tbody
   tbodyProductos.appendChild(filaClonada);
   htmx.process(filaClonada);
+  handleEnterCantidad(event);
 }
 
-document.body.addEventListener('htmx:afterSwap', (event) => {
-  console.info('Evento disparado');
-  const tabla = document.getElementById('search-orden-compra');
-  const tablaProductos = document.getElementById('search-results');
-  const totalizar = document.getElementById('totalizar-documento');
+// document.body.addEventListener('htmx:afterSwap', (event) => {
+//   console.info('Evento disparado');
+//   const tabla = document.getElementById('search-orden-compra');
+//   const tablaProductos = document.getElementById('search-results');
+//   const totalizar = document.getElementById('totalizar-documento');
 
-  if (!tabla || !tablaProductos || !totalizar) return;
+//   if (!tabla || !tablaProductos || !totalizar) return;
 
-  const mostrar = tabla.rows.length > 0 && tablaProductos.rows.length > 0 ;
-  console.info(`Mostrando totalizar: ${mostrar}`);
-  totalizar.classList.toggle('hidden', !mostrar); 
+//   const mostrar = tabla.rows.length > 0 && tablaProductos.rows.length > 0 ;
+//   console.info(`Mostrando totalizar: ${mostrar}`);
+//   totalizar.classList.toggle('hidden', !mostrar); 
 
-  const buttonProcesar = document.getElementById('procesar-recepcion');
-  if (buttonProcesar && !buttonProcesar.dataset.listenerAdded) {
-    buttonProcesar.dataset.listenerAdded = 'true';
-    buttonProcesar.addEventListener('click', (event) => {
-      console.log('Procesando recepción de productos...');
-    }, { once: true });
-  }
-});
+//   const buttonProcesar = document.getElementById('procesar-recepcion');
+//   if (buttonProcesar && !buttonProcesar.dataset.listenerAdded) {
+//     buttonProcesar.dataset.listenerAdded = 'true';
+//     buttonProcesar.addEventListener('click', (event) => {
+//       console.log('Procesando recepción de productos...');
+//     }, { once: true });
+//   }
+// });
 
-document.body.addEventListener('htmx:afterSettle', (event) =>{
-  console.info('Evento outerHTML disparado');const totalizarDocumento = document.getElementById('totalizar-documento');
-  const tabla = document.getElementById('search-orden-compra');
-  const tablaProductos = document.getElementById('search-results');
-  console.info('Antes de validar la vvisilidabb', tablaProductos.rows.length, tabla.rows.length);
-  if ( tablaProductos.rows.length === 0 ||tabla.rows.length === 0 ){
-      console.info('Ocultando totalizar documento');  
-      totalizarDocumento.classList.add('hidden');      
-    }
+// document.body.addEventListener('htmx:afterSettle', (event) =>{
+//   console.info('Evento outerHTML disparado');const totalizarDocumento = document.getElementById('totalizar-documento');
+//   const tabla = document.getElementById('search-orden-compra');
+//   const tablaProductos = document.getElementById('search-results');
+//   console.info('Antes de validar la vvisilidabb', tablaProductos.rows.length, tabla.rows.length);
+//   if ( tablaProductos.rows.length === 0 ||tabla.rows.length === 0 ){
+//       console.info('Ocultando totalizar documento');  
+//       totalizarDocumento.classList.add('hidden');      
+//     }
     
-})
+// })
 
 document.body.addEventListener("htmx:error", function (event) {
   
-  if ([404, 500].includes(event.detail.errorInfo.xhr.status)) {
+  if ([404, 500, 409].includes(event.detail.errorInfo.xhr.status)) {
     console.info(event.detail)
     const responseText = event.detail.errorInfo.xhr.responseText;
     if (event.detail.elt.id === "search-orden" || event.detail.elt.id ==="search-proveedor"){
@@ -191,6 +210,7 @@ document.getElementById("procesar-modal").addEventListener("click", (event)=>{
     const clasesAfiltrar = ['table-success', 'table-warning', 'table-danger'];
     const filasFiltradas = Array.from(productosOrden).filter(tr =>
     clasesAfiltrar.some(clase => tr.classList.contains(clase))
+    
   );
   const productosRecibidos = Array.from(productosRecepcion).map(tr =>
     Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim())
@@ -202,37 +222,50 @@ document.getElementById("procesar-modal").addEventListener("click", (event)=>{
     console.info(productosOrden.values(), productosRecibidos, filasFiltradas)
   }
 )
+document.body.addEventListener('htmx:afterRequest', (event) =>{
+   //console.info(event.detail.elt?.matches('#search-results'), event.detail.elt)
+   if (event.detail.elt?.matches('#search-results')) {
+         updateTotal(event);
+     }
+} );
+// document.addEventListener("htmx:afterRequest",(event) => {
+//   console.log('Evento disparado escuchado', event.detail)
+//   const statusPeticionOrder = event.detail.xhr.status
+//   if (statusPeticionOrder === 200){
 
-document.addEventListener("htmx:afterRequest",(event) => {
-  console.log('Evento disparado escuchado', event.detail)
-  const statusPeticionOrder = event.detail.xhr.status
-  if (statusPeticionOrder === 200){
-
-  }
-})
+//   }
+// })
 
 function recolectarDatos() {
-  const clases = ['table-success', 'table-warning', 'table-danger']
+  const clases = ['table-success', 'table-danger', 'table-warning']
   const ordenes = Array.from(document.querySelectorAll('#search-orden-compra tr'))
   .filter(tr => clases.some(clase => tr.classList.contains(clase)))
   .map(tr => ({
     codigo: tr.cells[0].innerText.trim(),
     orden: tr.cells[1].innerText.trim(),
     cantidad: parseFloat(tr.cells[2].innerText.trim().replace(',', '.')),
+    diferencia: parseFloat(tr.cells[3].innerText.trim().replace(',', '.')),
     recibido: parseFloat(tr.cells[5].innerText.trim().replace(',', '.')),
     costo: parseFloat(tr.cells[4].innerText.trim().replace(',', '.')),
-    iva: parseFloat(tr.cells[6].innerText.trim().replace(',', '.')),
-    moneda: tr.cells[7].innerText.trim()
+    iva: parseInt(tr.cells[6].innerText.trim()),
+    moneda: tr.cells[7].innerText.trim(),
+    deposito: tr.cells[8].innerText.trim(),
+    descripcion: tr.cells[9].innerText.trim()
   }));
 
-  const productos = Array.from(document.querySelectorAll('#search-results tr')).map(tr => ({
-    sku: tr.cells[0].innerText.trim(),
+  const productoSinOc = Array.from(document.querySelectorAll('#search-results tr')).filter(tr => clases.some(clase => tr.classList.contains(clase))).map(tr => ({
+    codigo: tr.cells[0].innerText.trim(),
     descripcion: tr.cells[1].innerText.trim(),
-    cantidad: tr.cells[2].innerText.trim()
+    cantidad: parseFloat(tr.cells[2].innerText.trim().replace(',', '.')),
+    costoBS: parseFloat(tr.cells[4].innerText.trim().replace(',', '.')),
+    costoUS: parseFloat(tr.cells[5].innerText.trim().replace(',', '.')),
+    iva: parseInt(tr.cells[6].innerText.trim())
   }));
   const [rif, proveedor]  =  document.getElementById('card-proveedor').innerText.trim().split('-')
-  
-  return { ordenes, productos, proveedor, rif };
+  const comentario = document.getElementById('message-text').value.trim();
+  //const numeroOrdenesOc   =
+  console.info(ordenes)
+  return { ordenes, productoSinOc, proveedor, rif, comentario};
 }
 function getCookie(name) {
   let cookieValue = null;
@@ -249,9 +282,25 @@ function getCookie(name) {
   return cookieValue;
 }
 
+function isPresentTableOc(event){
+  const input = event.target
+  const ocInput = input.value.trim()
+  console.info(input, ocInput)
+  
+  if (document.querySelector(`#search-orden-compra tr[data-oc="${ocInput}"]`)) {
+      event.preventDefault(); // Cancela la petición
+      alert(`El documento ${ocInput} ya está en la tabla, por favor seleccione un documento diferente.`);
+    }
+
+}
+
 document.getElementById('procesar-modal').addEventListener('click', function () {
+  const botonProcesar = this;
   const datos = recolectarDatos();
+  const spinnerButton = document.getElementById('spinner-button');
+  spinnerButton.classList.add('spinner-grow', 'spinner-grow-sm')
   console.info(datos)
+  botonProcesar.disabled = true;
   fetch('/procesar-recepcion/', {
     method: 'POST',
     headers: {
@@ -264,6 +313,10 @@ document.getElementById('procesar-modal').addEventListener('click', function () 
   .then(response => response.json())
   .then(data => {
     console.log('Respuesta del servidor:', data);
-    // Actualiza el DOM si es necesario
+    if (data.status === true){
+      spinnerButton.classList.remove('spinner-grow', 'spinner-grow-sm');
+      window.location.href = data.redirect_url;
+      botonProcesar.disabled = false;
+      }
   });
 });
