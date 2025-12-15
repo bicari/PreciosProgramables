@@ -229,3 +229,7 @@ body {
     100% { opacity: 0; visibility: hidden; display: none; }
 }
 /* BOTON MENU*/
+tr.htmx-swapping td {
+  opacity: 0;
+  transition: opacity 1s ease-out;
+}
