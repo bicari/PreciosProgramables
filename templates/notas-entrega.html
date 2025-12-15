@@ -8,18 +8,25 @@
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="modalGlobalLabel">Confirma</h5>
+        <h5 class="modal-title" id="modalGlobalLabel">Por favor confirma la operación</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        Esta seguro desea procesar la nota de recepción?
+        <div>
+          Esta seguro desea procesar la nota de recepción?
+        </div>
+        <label for="message-text" class="col-form-label">Comentario: </label>
+        <textarea class="form-control" id="message-text"></textarea>
       </div>
+
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
         <button 
             id="procesar-modal" type="button" class="btn btn-primary"
               >
-            Confirmar</button>
+            <span id="spinner-button" role="status" aria-hidden="true"></span>
+            Procesar
+        </button>
       </div>
     </div>
   </div>
@@ -49,7 +56,15 @@
           hx-target="#search-results"
           hx-indicator=".htmx-indicator"
           hx-swap="beforeend"
-          hx-on:htmx:after-request="postSearchActions(event)"
+          hx-on:htmx:after-request="postSearchActions(event);
+          if (event.detail.xhr.status === 200 && document.getElementById('search-orden-compra').rows.length > 0){
+            const bandaTotalizacion = document.getElementById('totalizar-documento')
+            bandaTotalizacion.classList.remove('hidden')
+            const cantItems = document.getElementById('search-results').rows.length
+            const bandaItems = document.getElementById('band-items')
+            bandaItems.textContent = cantItems.toString();
+
+          }"
           disabled
         />
         <button
@@ -79,7 +94,7 @@
         ></button>
       </div>
 
-      <div class="table-responsive" style="max-height: 400px; overflow-y: auto">
+      <div class="table" style="max-height: 400px; overflow-y: auto">
         <table id="myDataTable" class="table table-sm" style="width: 100%">
           <thead class="table-dark">
             <tr>
@@ -90,10 +105,8 @@
           </thead>
           <tbody
             id="search-results"
-            hx-confirm="Seguro desea eliminar el producto?"
-            hx-target="closest tr"
-            hx-swap="outerHTML"
-          ></tbody>
+          > 
+          </tbody>
         </table>
       </div>
     </div>
@@ -116,7 +129,6 @@
           hx-trigger="keydown[key=='Enter']"
           hx-on:htmx:after-request="
             if (event.detail.xhr.status === 200){
-               
               document.getElementById('search-orden').disabled=false; 
               document.getElementById('search-orden').focus()}
               "
@@ -135,6 +147,7 @@
           hx-indicator=".htmx-indicator"
           hx-swap="beforeend"
           hx-include="#search-proveedor"
+          hx-on:htmx:before-request="isPresentTableOc(event);"
           hx-on:htmx:after-request="
                   document.getElementById('search-orden').value = '';
                   if(event.detail.xhr.status === 200){
@@ -164,7 +177,13 @@
           hx-on:htmx:after-request="
               document.getElementById('card-proveedor').classList.add('d-none'); 
               document.getElementById('search-orden').disabled=true
-              document.getElementById('search-producto').disabled=true"
+              document.getElementById('search-producto').disabled=true;
+              document.getElementById('totalizar-documento').classList.add('hidden');
+              const tablaProductos = document.getElementById('search-results');
+              while (tablaProductos.rows.length > 0){
+                tablaProductos.deleteRow(0)
+              }
+              "
           hx-swap="innerHTML"
         >
           <i class="fa-solid fa-trash"></i>
@@ -214,7 +233,10 @@
           <div
             class="d-flex flex-column flex-md-row justify-content-between align-items-center"
           >
-            <h5 class="mb-3 mb-md-0 text-primary fw-semibold">items: 25</h5>
+            <h5  class="mb-3 mb-md-0 text-primary fw-semibold">
+                <span>Items: </span>
+                <span id="band-items"></span>
+            </h5>
           </div>
         </div>
       </div>
