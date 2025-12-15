@@ -1,5 +1,5 @@
 {%for product in products%}
-<tr class="table-secondary"data-codigo="{{product.Codigo}}">
+<tr class="table-secondary"data-codigo="{{product.Codigo}}" data-oc="{{product.Documento}}">
     {% csrf_token %}
     <td>{{product.Codigo}}</td>
     {% if is_order%}
@@ -10,9 +10,15 @@
     <td class="recibido d-none" data-recibido></td>
     <td class="iva d-none"> {{product.Iva}} </td>
     <td class="moneda d-none"> {{product.Moneda}} </td>
+    <td class="deposito d-none"> {{product.Deposito}} </td>
+    <td class="descripcion d-none">{{product.Descripcion}}</td>
     {% else %}
     <td class="fs-6">{{product.Descripcion}}</td>
     <td data-codigo={{product.Codigo}} type="number" class="cantidad-recepcion" contenteditable="true" onkeydown="handleEnterCantidad(event)" value="1">1</td>
+    <td class="d-none"></td>
+    <td class="d-none"> {{product.CostoBS}} </td>
+    <td class="d-none"> {{product.CostoUS}} </td>
+    <td class="d-none"> {{product.Iva}} </td>
     <td>
         <button type="button" class="btn btn-success " onclick="addProductModal(event)">
             <i class="fa-solid fa-plus"></i>
