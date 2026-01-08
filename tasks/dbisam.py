@@ -13,45 +13,52 @@ class DBISAMDatabase:
         
 
     def connect(self):
-        return pyodbc.connect(f'DSN={self.dsn};CatalogName={self.catalog}')
+        return pyodbc.connect(f'DSN={self.dsn};CatalogName={self.catalog};PrivateDirectory={self.tmp_table_tasks}')
     
 
     def search_order(self, order_number, proveedor):
-        order_numbers ='(' +  ','.join(map(lambda x: f"'{x}'", order_number)) + ')'
+        order_numbers = order_number[0] #'(' +  ','.join(map(lambda x: f"'{x}'", order_number)) + ')'
         name_table_temp = f'TEMP_TABLE_ORDENES_{uuid4().hex.upper()}'
-        with self.connect() as conn:
-            with conn.cursor() as cursor:
-                rows = cursor.execute(f"""SELECT 
+        try:
+            with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    rows = cursor.execute(f"""SELECT 
                                             FDI_CODIGO, 
                                             FDI_CANTIDADPENDIENTE, 
                                             FDI_DOCUMENTO,
                                             FDI_COSTOOPERACION,
                                             FDI_IMPUESTO1,
                                             FDI_MONEDA,
-                                            FDI_DEPOSITOSOURCE    
-                                        INTO {name_table_temp}
+                                            FDI_DEPOSITOSOURCE,
+                                            FI_DESCRIPCION,
+                                            FTI_AUTOINCREMENT     
+                                        --INTO "{self.tmp_table_tasks}\\{name_table_temp}"
                                         FROM SOPERACIONINV 
                                         INNER JOIN SDETALLECOMPRA ON FTI_AUTOINCREMENT = FDI_OPERACION_AUTOINCREMENT
-                                        WHERE FDI_DOCUMENTO IN {order_numbers} AND FDI_CANTIDADPENDIENTE > 0 AND FDI_CLIENTEPROVEEDOR = '{proveedor}'
-                                        AND FTI_TIPO = 5 AND FDI_STATUS = 4;
+                                        INNER JOIN SINVENTARIO ON FDI_CODIGO = FI_CODIGO
+                                        WHERE FDI_CLIENTEPROVEEDOR = '{proveedor}' AND FDI_DOCUMENTO = '{order_numbers}' AND FDI_STATUS = 4
+                                        AND FDI_CANTIDADPENDIENTE > 0 AND FTI_TIPO = 5;
                                         --INDICE PARA EL CAMPO FDI_CODIGO
-                                        CREATE INDEX IF NOT EXISTS "INDEX_CODIGO" ON "{name_table_temp}" (FDI_CODIGO);
-                                        --SELECCION DE LOS DATOS
-                                        SELECT
-                                             FDI_CODIGO,
-                                             FDI_CANTIDADPENDIENTE,
-                                             FDI_DOCUMENTO,
-                                             FDI_COSTOOPERACION,
-                                             FDI_IMPUESTO1,   
-                                             FDI_MONEDA,
-                                             FDI_DEPOSITOSOURCE,
-                                             FI_DESCRIPCION
-                                        FROM {name_table_temp}
-                                        INNER JOIN SINVENTARIO ON FDI_CODIGO = FI_CODIGO;
-                                    """).fetchall()
-                print(rows)
-                cursor.execute(f"""DROP TABLE IF EXISTS {name_table_temp}""")
-                return rows
+                                        --CREATE INDEX IF NOT EXISTS "INDEX_CODIGO" ON "{self.tmp_table_tasks}\\{name_table_temp}" (FDI_CODIGO);
+                                        --SELECCION DE LOS DATOS""").fetchall()
+                    # rows = cursor.execute(f"""SELECT
+                    #                          FDI_CODIGO,
+                    #                          FDI_CANTIDADPENDIENTE,
+                    #                          FDI_DOCUMENTO,
+                    #                          FDI_COSTOOPERACION,
+                    #                          FDI_IMPUESTO1,   
+                    #                          FDI_MONEDA,
+                    #                          FDI_DEPOSITOSOURCE,
+                    #                          FI_DESCRIPCION
+                    #                     FROM "{self.tmp_table_tasks}\\{name_table_temp}"
+                    #                     INNER JOIN SINVENTARIO ON FDI_CODIGO = FI_CODIGO""").fetchall()
+                    print("Filas Recuperadas en la consulta: ", rows)
+                    #cursor.execute(f"""DROP TABLE IF EXISTS "{self.tmp_table_tasks}\\{name_table_temp}" """)
+                    return rows
+        except Exception as e:
+            print(e)
+            raise pyodbc.DatabaseError(e)        
+        
     def search_proveedor(self, codigo_proveedor):
         try:
             with self.connect() as conn:
@@ -77,11 +84,13 @@ class DBISAMDatabase:
                                         WHERE FI_REFERENCIA = '{sku}' OR FI_CODIGO = '{sku}' """).fetchone()
                     return row
         except Exception as e:
-            return str(e)        
+            raise pyodbc.DatabaseError(str(e))
+         
     def search_product_by_description(self, description):
-        with self.connect() as conn:
-            with conn.cursor() as cursor:
-                row = cursor.execute(f"""SELECT 
+        try:
+            with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    row = cursor.execute(f"""SELECT 
                                      FI_CODIGO, 
                                      FI_DESCRIPCION, 
                                      FI_CATEGORIA,
@@ -89,7 +98,9 @@ class DBISAMDatabase:
                                      FROM SINVENTARIO
                                      INNER JOIN A2INVCOSTOSPRECIOS ON FI_CODIGO = FIC_CODEITEM  
                                      WHERE FI_DESCRIPCION LIKE '%{description}%' """).fetchmany(200)
-                return row            
+                    return row 
+        except Exception as e:
+            raise pyodbc.DatabaseError(str(e))                   
 
     def create_table_tmp(self, name_table):
         conn = self.connect()
@@ -391,6 +402,19 @@ class DBISAMDatabase:
                 #print(query)
                 rows = cursor.execute(query)
                 cursor.execute(f"""UPDATE SSISTEMA SET NO_NOTAENTREGAPROV = {nro_nota} + 1 WHERE DUMMYKEY = '' """)
+                autoincrement_oc = set(oc['autoincrement'] for oc in request['ordenes']) 
+                parse_autoinc = '(' +  ','.join(map(lambda x: str(x), autoincrement_oc)) + ')'
+                cursor.execute(f"""UPDATE SOPERACIONINV
+                                        SET FTI_STATUS = 1
+                                    WHERE FTI_TIPO = 5
+                                    AND FTI_STATUS = 4
+                                    AND FTI_AUTOINCREMENT IN {parse_autoinc}
+                                    AND FTI_AUTOINCREMENT NOT IN(
+                                            SELECT FDI_OPERACION_AUTOINCREMENT
+                                            FROM SDETALLECOMPRA
+                                            WHERE FDI_OPERACION_AUTOINCREMENT IN {parse_autoinc}
+                                            AND FDI_TIPOOPERACION = 5 AND FDI_STATUS = 4 AND FDI_CANTIDADPENDIENTE <> 0
+                                            )""")
                 cursor.execute("COMMIT;")
                 return rows
         except Exception as e:
