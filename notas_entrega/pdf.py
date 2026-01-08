@@ -1,4 +1,5 @@
 from reportlab.lib.pagesizes import LETTER
+from reportlab.lib.enums import TA_RIGHT, TA_LEFT
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (
@@ -33,10 +34,13 @@ def generar_factura(filename, pedido: dict, logo_path=None, preliminar: bool = F
             logo.hAlign = "LEFT"
             #logo.drawOn(doc, doc.leftMargin, doc.height + doc.topMargin - 50)
             
-
-
+        
+        doc_origen = set(oc['orden'].lstrip('0') for oc in pedido['ordenes'])
+        style_right = ParagraphStyle(name='AlignRight', parent=styles['Normal'], alignment=TA_RIGHT)
         empresa_info = [
             Paragraph(f"Usuario: {pedido['usuario'].upper()}", styles["Normal"]),
+            Paragraph(f"Doc Afectados: [{','.join(doc_origen)}]", style_right)
+
         ]
         nro_pedido = str(pedido['id']).rjust(7,'0')
         factura_datos = [Paragraph(f"<b>Nota Entrega #{nro_pedido}</b>", styles["Heading2"]),
@@ -69,7 +73,7 @@ def generar_factura(filename, pedido: dict, logo_path=None, preliminar: bool = F
 
         # ---- Bill To / Ship To ----
         data_clientes = [
-            ["Cliente / Rif",  "Comentario"],
+            ["Proveedor / Rif",  "Comentario"],
             [Paragraph(pedido['proveedor']), Paragraph(pedido['comentario'])],
             [Paragraph(pedido['rif'])],
         ]
@@ -101,7 +105,7 @@ def generar_factura(filename, pedido: dict, logo_path=None, preliminar: bool = F
             data_items.append([productos["codigo"],  
                             Paragraph(productos['descripcion'], styles['Normal']), 
                             f'{productos["costo"]:.2f}', 
-                            f'{productos["cantidad"]:.2f}', 
+                            f'{productos["recibido"]:.2f}', 
                             f'{(productos["costo"] * productos["cantidad"]):.2f}'])
 
         for productos_sin_oc in pedido['productoSinOc']:
@@ -144,7 +148,10 @@ def generar_factura(filename, pedido: dict, logo_path=None, preliminar: bool = F
         print(f"Error al generar la factura: {e}")
 
 #pedido = {'id':'PRELIMINAR', 'direccion_cliente':'Maracay', 'cliente': 'E80338646', 'productos': {'01010001': {'cantidad': 23.0, 'descuento': 10, 'descripcion': 'MARCADOR PIZARRA PUNTA CINCEL OFIMAK REF OK93P', 'impuesto': 16, 'precio_sin_iva': 48.5, 'precio': 56.26, 'precio_con_descuento': 43.65, 'monto_iva': 6.98, 'precio_venta': 50.63, 'subtotal': 1164.49}, '01010009': {'cantidad': 2.0, 'descuento': 0, 'descripcion': 'TABLA D/INVENTARIO T/OFICIO OFIMAK REF  EN MADERA', 'impuesto': 0, 'precio_sin_iva': 2.0, 'precio': 2.0, 'precio_con_descuento': 2.0, 'monto_iva': 0.0, 'precio_venta': 2.0, 'subtotal': 4.0}, '01020003': {'cantidad': 1.0, 'descuento': 0, 'descripcion': 'ENGRAPADORA OFIMAK REF OK07B C/AZUL P/GRAPAS LISAS/CORRUG 120X60X20MM', 'impuesto': 16, 'precio_sin_iva': 5.87, 'precio': 6.81, 'precio_con_descuento': 5.87, 'monto_iva': 0.94, 'precio_venta': 6.81, 'subtotal': 6.81}, '07080059': {'cantidad': 2.0, 'descuento': 0, 'descripcion': 'TALADRO 1/2 BRUSHLESS BARETOOL GBS 18V-150 C BOCHS REF. 06019J51E0 / 03-32-011', 'impuesto': 16, 'precio_sin_iva': 867.98, 'precio': 1006.86, 'precio_con_descuento': 867.98, 'monto_iva': 138.88, 'precio_venta': 1006.86, 'subtotal': 2013.72}}, 'precio': 'P1', 'comentario': 'Despacho en 2 dias para entregar el 30 de agosto de 2025', 'total': 0.0, 'descripcion_cliente': 'RAUL ARAGUNDI', 'vendedor': '04', 'baseimponible': 2745.78, 'exento': 4.0, 'total_bruto': 2749.78, 'iva_16': 439.32, 'total_neto': 3189.1, 'nombre_vendedor': 'Carlos Aranguren', 'pedido':11}
-#nota = {'ordenes': [{'codigo': '01020003', 'orden': '00009921', 'descripcion':'Ratón recarcagable' ,'cantidad': 16, 'diferencia': -15, 'recibido': 1, 'costo': 136.73, 'iva': 16, 'moneda': '1', 'deposito': '1'}], 
+#nota = {'ordenes': [{'codigo': '01020003', 'orden': '00009921', 'descripcion':'Ratón recarcagable' ,'cantidad': 16, 'diferencia': -15, 'recibido': 1, 'costo': 136.73, 'iva': 16, 'moneda': '1', 'deposito': '1'},
+#                    {'codigo': '01020003', 'orden': '00009922', 'descripcion':'Ratón recarcagable' ,'cantidad': 16, 'diferencia': -15, 'recibido': 1, 'costo': 136.73, 'iva': 16, 'moneda': '1', 'deposito': '1'},
+#                    {'codigo': '01020003', 'orden': '00009923', 'descripcion':'Ratón recarcagable' ,'cantidad': 16, 'diferencia': -15, 'recibido': 1, 'costo': 136.73, 'iva': 16, 'moneda': '1', 'deposito': '1'},
+#                    {'codigo': '01020003', 'orden': '00009924', 'descripcion':'Ratón recarcagable' ,'cantidad': 16, 'diferencia': -15, 'recibido': 1, 'costo': 136.73, 'iva': 16, 'moneda': '1', 'deposito': '1'}], 
 #        'productoSinOc': [{'codigo': '01020003', 'descripcion':'Teclado RetroIluminado' ,'cantidad': 16, 'costoBS': 20, 'costoUS': 25}], 'proveedor': 'A2CONSULTORES ARAGUA, C.A.', 'rif': 'J407903691', 'usuario': 'Carlos Aranguren', 'id': 10357,
 #        'direccion_proveedor': 'Maracay Av Aragua', 'comentario': 'Entrega parcial de la orden 00009921'}
 #generar_factura("factura_reportlab_logo.pdf", nota, logo_path="C:\Proyectos\Python\Precios-KsaHome\static\KsaHome.png", preliminar=False)
