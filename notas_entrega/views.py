@@ -20,7 +20,7 @@ def search_product_by_code(request):
             return HttpResponse(content='Producto no encontrado o inactivo', status=404)
         return render(request, 'search_product.html', {'Codigo': result[0], 'Descripcion': result[1], 'CostoBs': result[2], 'CostoUsd': result[3], 'Iva': result[4]})
     except Exception as e:
-        return render(request, 'error_message.html', {'message': "Error al procesar la solicitud"}, status=500)
+        return HttpResponse(content=str(e), status=500)
 
 def search_product_by_description(request):
     try:
@@ -33,7 +33,7 @@ def search_product_by_description(request):
         
         return render(request, 'search_description.html', {'products': json_result})
     except Exception as e:
-        print(e)
+        return HttpResponse(content=f"Error al procesar la solicitud {e}", status=500)
 
 def modal_search(request):
     return render(request, 'modal_search.html')
@@ -47,19 +47,19 @@ def search_order(request):
         print('numero de orden', order_number, 'codigo proveedor', proveedor)
         dbisam = DBISAMDatabase()
         result = dbisam.search_order(order_number, proveedor)
-
         if len(result) > 0:
             json_result = [{'Codigo': row[0], 'Documento': row[2], 
                             'Cantidad': row[1], 'Costo': row[3], 
                             'Iva': row[4], 'Moneda':row[5],
-                            'Deposito': row[6], 'Descripcion':row[7]}  for row in result]
+                            'Deposito': row[6], 'Descripcion':row[7],
+                            'Autoincrement': row[8]}  for row in result]
             return render(request, 'search_description.html', {'products': json_result, 'is_order': True})
         else:
             return HttpResponse(content='No se encontraron resultados', status=404)
             #return HttpResponse("No se encontraron resultados", status=404)
     except Exception as e:
         print(e)
-        return HttpResponse(content="Error al procesar la solicitud", status=500)
+        return HttpResponse(content=f"Error al procesar la solicitud {e}", status=500)
 
 def search_proveedor(request):
     try:
@@ -89,9 +89,10 @@ def procesar_recepcion(request):
                 nota_pdf = generar_factura('factura.pdf', request_frontend, 'static/KsaHome.png', preliminar=True)
                 send_notification(request_frontend, nro_nota_entrega, nota_pdf)
                 return JsonResponse({'status': True, 'redirect_url': '/confirmar-nota-entrega/'}, status=200)
-            print('Error al procesar la recepcion', result)
+            return JsonResponse({'status': False, 'error': str(result)}, status=500)
     except Exception as e:
         print('Error en la solicitud',e)    
+        return HttpResponse(content=f"Error al procesar la solicitud {e}", status=500)
 
 def obtener_confirmacion(request):
     nro_nota_entrega=request.session.pop('nota_entrega', {})
