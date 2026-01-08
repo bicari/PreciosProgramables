@@ -12,6 +12,7 @@
     <td class="moneda d-none"> {{product.Moneda}} </td>
     <td class="deposito d-none"> {{product.Deposito}} </td>
     <td class="descripcion d-none">{{product.Descripcion}}</td>
+    <td class="autoincrement d-none">{{product.Autoincrement}}</td>
     {% else %}
     <td class="fs-6">{{product.Descripcion}}</td>
     <td data-codigo={{product.Codigo}} type="number" class="cantidad-recepcion" contenteditable="true" onkeydown="handleEnterCantidad(event)" value="1">1</td>
