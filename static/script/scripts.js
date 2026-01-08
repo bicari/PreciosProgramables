@@ -250,7 +250,8 @@ function recolectarDatos() {
     iva: parseInt(tr.cells[6].innerText.trim()),
     moneda: tr.cells[7].innerText.trim(),
     deposito: tr.cells[8].innerText.trim(),
-    descripcion: tr.cells[9].innerText.trim()
+    descripcion: tr.cells[9].innerText.trim(),
+    autoincrement: parseInt(tr.cells[10].innerText.trim())
   }));
 
   const productoSinOc = Array.from(document.querySelectorAll('#search-results tr')).filter(tr => clases.some(clase => tr.classList.contains(clase))).map(tr => ({
@@ -318,5 +319,13 @@ document.getElementById('procesar-modal').addEventListener('click', function () 
       window.location.href = data.redirect_url;
       botonProcesar.disabled = false;
       }
+    else{
+      spinnerButton.classList.remove('spinner-grow', 'spinner-grow-sm');
+      botonProcesar.disabled = true;
+      const alertDiv = document.querySelector('.alert-danger');
+      alertDiv.classList.remove('d-none');
+      alertDiv.innerHTML = data.error;
+
+    }  
   });
 });
