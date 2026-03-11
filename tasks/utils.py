@@ -4,10 +4,16 @@ import win32print
 from .labels import PrinterLabel
 from django.conf import settings
 import os
-from .models import ProductsTasks, Tasks
+from .models import ProductsTasks
 from datetime import datetime, time
+import time as t
 import openpyxl
-from openpyxl.styles import Font, PatternFill            
+from openpyxl.styles import Font, PatternFill   
+import socket         
+#import time
+
+TCP_IP = '10.150.1.122'  # IP de la impresora
+TCP_PORT = 9100
 
 
 def read_excel_file(form, file, name_table, user, inmediato=False, is_oferta=False):
@@ -83,31 +89,77 @@ def read_excel_file(form, file, name_table, user, inmediato=False, is_oferta=Fal
 
    
 def print_labels(row, request):
-    hPrinter=win32print.OpenPrinter(request.POST['so_printers'], {"DesiredAccess": win32print.PRINTER_ALL_ACCESS})
-    static_path = os.path.join(settings.BASE_DIR, 'static', '%s.jpg' %request.POST['logo_etiquetas'])            
-    etiquetas_impresas = 0    
-    for producto in row: 
+    logo = request.POST['logo_etiquetas']
+    etiquetas_impresas = 0
+    hPrinter = win32print.OpenPrinter(
+                request.POST['so_printers'],
+                {"DesiredAccess": win32print.PRINTER_ALL_ACCESS}
+            )
+    #win32print.StartDocPrinter(hPrinter, 1, ('ZPL_BATCH', None, 'RAW'))
+    #win32print.StartPagePrinter(hPrinter)
+    
+    def generar_zpl(producto):
         match request.POST['formato_label']:
             case 'Ofertas':
-                text=PrinterLabel.label_ofertas_ksa({'Logo': f"{static_path}", "SKU":f"{producto.SKU}",  
-                                           "Descripcion":f"{producto.DESCRIPCION}",
-                                           "PrecioAntes": f"{str(producto.PRECIOANTES)}", 
-                                           "DescuentoPorcentaje": f"{str(round((producto.PRECIOANTES - producto.PRECIO) / producto.PRECIOANTES * 100, 2))}",
-                                           "Precio": f"{str(producto.PRECIO)}",
-                                           'Departamento':f"{producto.DEPARTAMENTO}"})
+                return PrinterLabel.label_zpl_ofertas({
+                    'Logo': logo,
+                    "SKU": f"{producto.SKU}",
+                    "Descripcion": f"{producto.DESCRIPCION}",
+                    "PrecioAntes": f"{producto.PRECIOANTES * ((producto.IVA / 100) + 1):.2f}",
+                    "DescuentoPorcentaje": f"{round((producto.PRECIOANTES - producto.PRECIO) / producto.PRECIOANTES * 100, 2):.2f}",
+                    "Precio": f"{producto.PRECIO * ((producto.IVA / 100) + 1):.2f}",
+                    'Departamento': f"{producto.DEPARTAMENTO}",
+                    "Desde": f"{producto.FECHA_INICIO.strftime('%d/%m/%Y')}",
+                    "Hasta": f"{producto.FECHA_FINAL.strftime('%d/%m/%Y')}",
+                })
             case 'Hablador':
-                text=PrinterLabel.label_hablador({'Logo': f"{static_path}", "SKU":f"{producto.SKU}",  
-                                           "Descripcion":f"{producto.DESCRIPCION}",
-                                           "PrecioAntes": f"{str(producto.PRECIOANTES)}", 
-                                           "CodBarra": f"{producto.CODBARRA}",
-                                           "Precio": f"{{:.2f}}".format(producto.PRECIO),
-                                           'Departamento':f"{producto.DEPARTAMENTO}"})
-    
-        win32print.StartDocPrinter(hPrinter, 1, ('1',None,'RAW'))
-        win32print.WritePrinter(hPrinter, text)
-        win32print.EndPagePrinter(hPrinter)
-        win32print.EndDocPrinter(hPrinter)
-        etiquetas_impresas += 1
+                return PrinterLabel.label_zpl_hablador({
+                    'Logo': logo,
+                    "SKU": f"{producto.SKU}",
+                    "Descripcion": f"{producto.DESCRIPCION}",
+                    "PrecioAntes": f"{producto.PRECIOANTES * ((producto.IVA / 100) + 1):.2f}",
+                    "CodBarra": f"{producto.CODBARRA}",
+                    "Precio": f"{producto.PRECIO * ((producto.IVA / 100) + 1):.2f}",
+                    'Departamento': f"{producto.DEPARTAMENTO}",
+                })
+
+    def chunked(iterable, size):
+        """Divide cualquier iterable en lotes del tamaño indicado."""
+        lote = []
+        for item in iterable:
+            lote.append(item)
+            if len(lote) == size:
+                yield lote
+                lote = []
+        if lote:  # Último lote si sobran elementos
+            yield lote
+
+    try:
+        
+        for numero_lote, lote in enumerate(chunked(row, 10), start=1):
+            buffer = b""
+
+            for producto in lote:
+                buffer += generar_zpl(producto)
+                etiquetas_impresas += 1
+                #print(buffer)
+            print(f"Enviando lote  —  etiquetas ({etiquetas_impresas} total)")
+            #s.sendall(buffer)
+            win32print.StartDocPrinter(hPrinter, 1, (f'ZPL_BATCH_{numero_lote}', None, 'RAW'))
+            win32print.StartPagePrinter(hPrinter)
+            win32print.WritePrinter(hPrinter, buffer)
+            win32print.EndPagePrinter(hPrinter)
+            win32print.EndDocPrinter(hPrinter)
+                #win32print.WritePrinter(hPrinter, buffer)
+                # Pausa entre lotes para que la impresora no se sature
+            t.sleep(1.5)
+        #win32print.EndPagePrinter(hPrinter)
+        #win32print.EndDocPrinter(hPrinter)
+        win32print.ClosePrinter(hPrinter)
+    except Exception as e:
+        print(f"Error de impresión: {e}")
+        return 0
+
     return etiquetas_impresas
 
 
@@ -138,3 +190,6 @@ def resaltar_sku_actualizados(excel_path, lista_skus_actualizados, header_row, s
 
     wb.save(excel_path)
     wb.close()
+
+def generar_pdf():
+       pass 
