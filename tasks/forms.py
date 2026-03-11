@@ -58,7 +58,8 @@ class UploadTaskForm(forms.Form):
                 'class': 'form-control',
                 'type': 'date',
                 'id': 'date_time',
-                'required': 'true'
+                'required': 'true',
+                'onkeydown': 'return false'
             }
         ),
         input_formats=['%Y-%m-%d'],
