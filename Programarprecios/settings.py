@@ -85,7 +85,7 @@ SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=True, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost').split(',')
-HORA_EJECUCION = '17:30'  # Hora de ejecución diaria en formato HH:MM (24 horas) Militar
+HORA_EJECUCION = '15:54'  # Hora de ejecución diaria en formato HH:MM (24 horas) Militar
 
 # Application definition
 # Configuración para django-apscheduler
@@ -190,7 +190,7 @@ TIME_ZONE = 'America/Caracas'
 USE_I18N = True
 
 USE_TZ = False
-DBISAM_DATABASE= {'DSN': 'A2GKC', 'CatalogName': 'C:\\a2Softway12.36.ID\\Empre001\\Data', 'TMP_TABLE_TASKS': 'C:\\a2Softway12.36.ID\\Empre001\\Tmp'}
+DBISAM_DATABASE= {'DSN': 'A2GKC', 'CatalogName': 'C:\\a2Softway12.36.ID\\Empre001\\Data', 'TMP_TABLE_TASKS': 'C:\\Proyectos\\Python\\Precios-KsaHome\\Tmp'}
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
@@ -216,6 +216,7 @@ EMAIL_HOST_USER = config('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
 EMAIL_USE_TLS = config('EMAIL_USE_TLS')
 EMAIL_USERS = config('EMAIL_USERS').split(',')
+EMAIL_RECEPCIONES = config('EMAIL_RECEPCIONES').split(',')
 
 #CONFIGURACION ALMACEN DEFECTO X EXCESO DE PRODUCTOS 
 ALMACEN_PPAL = config('ALMACEN')
