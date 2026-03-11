@@ -1,4 +1,4 @@
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.http import HttpResponse, FileResponse
 from django.conf import settings
 from .forms import UploadTaskForm, PrintLabelTask
@@ -11,6 +11,7 @@ from uuid import uuid4
 from .dbisam import DBISAMDatabase
 from django.contrib import messages
 from datetime import datetime, time
+from .send_mail import notificar_creacion_lista, notificar_creacion_tarea
 import os
 
 
@@ -60,7 +61,8 @@ def ListFormView(request):
                     )
                     products = [ProductsTasks(task=task, **fila) for fila in filas[0]]   
                     ProductsTasks.objects.bulk_create(products) 
-                    programar_tarea(task)
+                    #programar_tarea(task)
+                    notificar_creacion_tarea(task)
                     if len(filas[1]) > 0:
                         request.session['duplicados_txt'] = ''.join(
                                 f"SKU: {sku} \n" for sku in filas[1]
@@ -94,7 +96,7 @@ def ListFormView(request):
                     )
                     #products = [ProductsTasks(task=task, **fila) for fila in filas[0]]   
                     #ProductsTasks.objects.bulk_create(products)
-
+                    notificar_creacion_lista(task)
                     if len(filas[1]) > 0:
                         request.session['duplicados_txt'] = ''.join(
                             f"-SKU: {sku} \n" for sku in filas[1]
@@ -137,6 +139,9 @@ def ListLabelView(request):
                 etiquetas_impresas = print_labels(productos, request)          
                 if etiquetas_impresas > 0:
                     messages.success(request, f'Impresion de {etiquetas_impresas} etiquetas realizada con éxito')
+                    return redirect('print-label')
+                else:    
+                    messages.warning(request, f'No se ha podido completar la impresion, comprueba la impresora o existencia de los items')
             except Tasks.DoesNotExist:
                 messages.error(request, 'No existe una tarea con ese ID', extra_tags='danger')
         return render(request, 'print-label.html', context={'form': form})    
