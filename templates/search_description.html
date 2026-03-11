@@ -13,6 +13,11 @@
     <td class="deposito d-none"> {{product.Deposito}} </td>
     <td class="descripcion d-none">{{product.Descripcion}}</td>
     <td class="autoincrement d-none">{{product.Autoincrement}}</td>
+    <td class="d-none"> {{product.Puesto}} </td>
+    <td class="d-none"> {{product.Referencia}} </td>
+    <td class="d-none"> {{product.Ref_proveedor}} </td>
+    <td class="d-none"> {{product.Iva_16_monto}} </td>
+    <td class="d-none comentario-orden"> {{product.Comentario}} </td>
     {% else %}
     <td class="fs-6">{{product.Descripcion}}</td>
     <td data-codigo={{product.Codigo}} type="number" class="cantidad-recepcion" contenteditable="true" onkeydown="handleEnterCantidad(event)" value="1">1</td>
@@ -20,6 +25,10 @@
     <td class="d-none"> {{product.CostoBS}} </td>
     <td class="d-none"> {{product.CostoUS}} </td>
     <td class="d-none"> {{product.Iva}} </td>
+    <td class="d-none"> {{product.Puesto}} </td>
+    <td class="d-none"> {{product.Referencia}} </td>
+    <td class="d-none"> {{product.Ref_proveedor}} </td>
+    <td class="d-none"> {{product.Iva_16_monto}} </td>
     <td>
         <button type="button" class="btn btn-success " onclick="addProductModal(event)">
             <i class="fa-solid fa-plus"></i>

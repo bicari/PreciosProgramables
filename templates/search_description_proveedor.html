@@ -1,0 +1,13 @@
+{%for proveedor in proveedores%}
+<tr>
+    {% csrf_token %}
+    <td>{{proveedor.Codigo}}</td>
+    <td>{{proveedor.Descripcion}}</td>
+    <td>{{proveedor.Direccion}}</td>
+    <td>
+        <button type="button" class="btn btn-success " onclick="agregarProveedor(event)">
+            <i class="fa-solid fa-plus"></i>
+        </button>
+    </td>
+</tr>
+{%endfor%}

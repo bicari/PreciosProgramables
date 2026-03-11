@@ -24,10 +24,19 @@
         if (errorMessage) {
             setInterval(() => {
                 errorMessage.style.display = 'none';
-            }, 5000); // Oculta el mensaje después de 5 segundos
+            }, 10000); // Oculta el mensaje después de 5 segundos
             
         }
     })
+
+    document.addEventListener('submit', function(event) {
+        const submitButton = event.submitter;
+        if (submitButton && submitButton.id === 'guardarLista') {
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Procesando...';
+        }
+        
+    });
 </script>
 
 
@@ -125,7 +134,7 @@
     
     {%endif%}
     <div class = "col-1 d-grid">
-        <button class="btn btn-primary",type="submit">Guardar</button>
+        <button class="btn btn-primary" type="submit" id="guardarLista" >Guardar</button>
     </div>
 </form>
 

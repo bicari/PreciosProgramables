@@ -11,25 +11,48 @@
         <h5 class="modal-title" id="modalGlobalLabel">Por favor confirma la operación</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      <div class="modal-body">
-        <div>
-          Esta seguro desea procesar la nota de recepción?
+      <form id="form-recepcion">
+        <div class="modal-body">
+          <div class="mb-3">
+            Esta seguro desea procesar la nota de recepción?
+          </div>
+          <div class="input-group w-100 mb-3">
+              <span class="input-group-text">Comentario:</span>
+              <textarea class="form-control" id="message-text"></textarea>
+          </div>
+          <div class="input-group w-100 mb-3">
+              <span class="input-group-text">Número Doc Proveedor:</span>
+              <input type="text" class="form-control" id="document-proveedor" required></input>
+          </div>
+          <div class="input-group w-100 mb-3">
+              <span class="input-group-text">Fecha vencimiento: </span>
+              <input type="date" class="form-control" id="fecha-vencimiento" 
+              hx-on:htmx:load="console.info('desde el load')" onkeydown='return false' required>
+              </input>
+          </div>
+          <div class="input-group w-100 mb-3">
+              <span class="input-group-text">Total Documento</span>
+              <input type="text" class="form-control" id="total" readonly value="">
+          </div>
         </div>
-        <label for="message-text" class="col-form-label">Comentario: </label>
-        <textarea class="form-control" id="message-text"></textarea>
-      </div>
 
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
-        <button 
-            id="procesar-modal" type="button" class="btn btn-primary"
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+          <button 
+            id="procesar-modal" type="submit" class="btn btn-primary"
               >
             <span id="spinner-button" role="status" aria-hidden="true"></span>
             Procesar
-        </button>
-        <div class="alert alert-danger alert-dismissible fade show w-100 d-none"
-        role="alert"></div>
-      </div>
+          </button>
+          <div class="alert alert-danger alert-dismissible fade show d-none"role="alert">
+            <span id="error-message">Error al procesar la nota.</span>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        </div>
+      </form>
+      
+
+      
     </div>
   </div>
 </div>
@@ -65,6 +88,17 @@
             const cantItems = document.getElementById('search-results').rows.length
             const bandaItems = document.getElementById('band-items')
             bandaItems.textContent = cantItems.toString();
+            const filas = document.querySelectorAll('#search-results tr');
+            let total = 0;
+            filas.forEach(fila => {
+              const cantidadCell = fila.cells[2]; // Asumiendo que la cantidad está en la tercera celda (índice 2)
+              const valor = parseFloat(cantidadCell.textContent.trim()) || 0;
+              total += valor;
+                }
+              );
+            const bandaTotal = document.getElementById('band-total')
+            bandaTotal.textContent = total.toString();
+            
 
           }"
           disabled
@@ -136,7 +170,26 @@
               "
           hx-target="#card-proveedor"
           hx-swap="outerHTML"
+          hx-indicator="#spinner-search"
+        
           >
+          
+          <button
+          type="button"
+          class="btn btn-info"
+          hx-get="/modal_search_proveedor"
+          hx-trigger="click"
+          hx-target="#modal-container"
+          hx-swap="innerHTML"
+        >
+          
+          <i class="fa-solid fa-magnifying-glass"></i>
+        </button>
+        <div id="spinner-search" class="htmx-indicator" style="display:inline;">
+            <div class="spinner-grow text-primary" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+          </div>
         <input
           type="text"
           class="form-control"
@@ -159,22 +212,13 @@
           disabled
         />
         
-        <button
-          type="button"
-          class="btn btn-info"
-          hx-get="/modal_search"
-          hx-trigger="click"
-          hx-target="#modal-container"
-          hx-swap="innerHTML"
-        >
-          <i class="fa-solid fa-magnifying-glass"></i>
-        </button>
+        
         <button
           type="button"
           class="btn btn-danger"
-          hx-delete="/product-delete/"
+          hx-post="/product-delete/"
           hx-trigger="click"
-          hx-include="#search-orden-compra"
+          hx-include="#search-orden"
           hx-target="#search-orden-compra"
           hx-on:htmx:after-request="
               document.getElementById('card-proveedor').classList.add('d-none'); 
@@ -182,9 +226,10 @@
               document.getElementById('search-producto').disabled=true;
               document.getElementById('totalizar-documento').classList.add('hidden');
               const tablaProductos = document.getElementById('search-results');
-              while (tablaProductos.rows.length > 0){
-                tablaProductos.deleteRow(0)
-              }
+              const tablaOrden = document.getElementById('search-orden-compra');
+              // En lugar de borrar la tabla entera, borra solo el contenido de los cuerpos
+              document.querySelector('#search-results tbody').innerHTML = '';
+              document.querySelector('#search-orden-compra tbody').innerHTML = '';
               "
           hx-swap="innerHTML"
         >
@@ -196,6 +241,7 @@
         class="alert alert-danger alert-dismissible fade show w-100 d-none"
         role="alert"
       >
+      
         <button
           type="button"
           class="btn-close"
@@ -258,9 +304,7 @@
               class="btn btn-success btn-sm px-4"
               data-bs-toggle="modal"
               data-bs-target="#modalGlobal"
-              id="procesar-recepcion"
-              
-            >
+              id="procesar-recepcion">
               <i class="fa-solid fa-check-circle me-2"></i> Procesar
             </button>
           </div>
@@ -268,7 +312,20 @@
       </div>
     </div>
     <div class="col-lg-2 col-md-8">
-      <div class="card shadow-sm border-0"></div>
+      <div class="card shadow-sm border-0">
+        <div class="card h-100 shadow-sm border-0">
+        <div class="card-body h-100">
+          <div
+            class="d-flex flex-column flex-md-row justify-content-between align-items-center"
+          >
+            <h5  class="mb-3 mb-md-0 text-primary fw-semibold">
+                <span>Total Items: </span>
+                <span id="band-total"></span>
+            </h5>
+          </div>
+        </div>
+      </div>
+      
     </div>
   </div>
 </div>
