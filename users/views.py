@@ -13,7 +13,7 @@ def LoginView(request: request):
     if request.method == 'GET':
         return render(request, 'login.html')
     else:
-        user, password = request.POST['username'].lower(), request.POST['password']
+        user, password = request.POST['username'], request.POST['password']
         user_auth = authenticate(request, username=user, password=password)
         print(user_auth)
         # For debugging purposes, print the received username and password
