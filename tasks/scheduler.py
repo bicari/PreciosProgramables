@@ -9,6 +9,7 @@ from .tasks import ejecutar_tarea_programada
 from datetime import datetime
 from django.db import transaction
 import threading
+from django_apscheduler.models import DjangoJob
 
 _scheduler_instance = None
 _scheduler_lock = threading.Lock()
@@ -39,8 +40,8 @@ def programar_correo():
     job=scheduler.add_job(
         enviar_correo,
         trigger='cron',
-        hour=20,
-        minute=30,
+        hour=18,
+        minute=40,
         second=15,
         id=job_id,
         replace_existing=True,
@@ -63,8 +64,17 @@ def iniciar_scheduler():
             
             # Iniciar scheduler
             scheduler.start()
-            
-            # Cargar tareas pendientes al inicio
+            #Watcher que revisa tareas cada minuto y las programa al scheduler
+            scheduler.add_job(
+                cargar_tareas_pendientes,
+                trigger='interval',
+                minutes=1,  # Revisa cada minuto
+                id='watcher_nuevas_tareas',
+                replace_existing=True,
+                jobstore='default',
+                max_instances=1,
+                coalesce=True
+            )
             cargar_tareas_pendientes()
             programar_correo()
             
@@ -74,13 +84,13 @@ def cargar_tareas_pendientes():
     from .models import Tasks  # Import local para evitar circular imports
     
     try:
-        with transaction.atomic():
-            tareas = Tasks.objects.select_for_update().filter(
-                check_process=False,
-                date_to_execute__gte=datetime.now()
-            )
-            
-            for tarea in tareas:
+        tareas = Tasks.objects.filter(
+            check_process=False,
+            date_to_execute__gte=datetime.now()
+        )
+        for tarea in tareas:
+            job_id = f'tarea_{tarea.task_number}'
+            if not DjangoJob.objects.filter(id=job_id).exists():
                 programar_tarea(tarea)
                 
     except Exception as e:
