@@ -24,20 +24,26 @@ class DBISAMDatabase:
                 with conn.cursor() as cursor:
                     rows = cursor.execute(f"""SELECT 
                                             FDI_CODIGO, 
-                                            FDI_CANTIDADPENDIENTE, 
+                                            SUM(FDI_CANTIDADPENDIENTE), 
                                             FDI_DOCUMENTO,
                                             FDI_COSTOOPERACION,
                                             FDI_IMPUESTO1,
                                             FDI_MONEDA,
                                             FDI_DEPOSITOSOURCE,
                                             FI_DESCRIPCION,
-                                            FTI_AUTOINCREMENT     
+                                            FTI_AUTOINCREMENT,
+                                            FI_PUESTO,
+                                            FI_REFERENCIA,
+                                            ZZCAMPO_001,
+                                            FDI_MONTOIMPUESTO1,
+                                            FTI_DETALLECOMENTARIO       
                                         --INTO "{self.tmp_table_tasks}\\{name_table_temp}"
                                         FROM SOPERACIONINV 
                                         INNER JOIN SDETALLECOMPRA ON FTI_AUTOINCREMENT = FDI_OPERACION_AUTOINCREMENT
                                         INNER JOIN SINVENTARIO ON FDI_CODIGO = FI_CODIGO
                                         WHERE FDI_CLIENTEPROVEEDOR = '{proveedor}' AND FDI_DOCUMENTO = '{order_numbers}' AND FDI_STATUS = 4
-                                        AND FDI_CANTIDADPENDIENTE > 0 AND FTI_TIPO = 5;
+                                        AND FDI_CANTIDADPENDIENTE > 0 AND FTI_TIPO = 5
+                                        GROUP BY FDI_CODIGO;
                                         --INDICE PARA EL CAMPO FDI_CODIGO
                                         --CREATE INDEX IF NOT EXISTS "INDEX_CODIGO" ON "{self.tmp_table_tasks}\\{name_table_temp}" (FDI_CODIGO);
                                         --SELECCION DE LOS DATOS""").fetchall()
@@ -65,7 +71,8 @@ class DBISAMDatabase:
                 with conn.cursor() as cursor:
                     rows = cursor.execute(f"""SELECT 
                                                 FP_CODIGO,
-                                                FP_DESCRIPCION
+                                                FP_DESCRIPCION,
+                                                FP_DIRECCION1
                                           FROM SPROVEEDOR
                                           WHERE FP_CODIGO = '{codigo_proveedor}' and FP_STATUS = 1
                                     """).fetchone()
@@ -78,7 +85,7 @@ class DBISAMDatabase:
                 with conn.cursor() as cursor:
                     row = cursor.execute(f"""SELECT 
                                                 FI_CODIGO, 
-                                                FI_DESCRIPCION, FIC_COSTOACTBOLIVARES, FIC_COSTOACTEXTRANJERO, FIC_IMP01MONTO
+                                                FI_DESCRIPCION, FIC_COSTOACTBOLIVARES, FIC_COSTOACTEXTRANJERO, FIC_IMP01MONTO, FI_PUESTO, FI_REFERENCIA, ZZCAMPO_001
                                         FROM SINVENTARIO
                                         INNER JOIN A2INVCOSTOSPRECIOS ON FI_CODIGO = FIC_CODEITEM  
                                         WHERE FI_REFERENCIA = '{sku}' OR FI_CODIGO = '{sku}' """).fetchone()
@@ -94,13 +101,29 @@ class DBISAMDatabase:
                                      FI_CODIGO, 
                                      FI_DESCRIPCION, 
                                      FI_CATEGORIA,
-                                     FIC_COSTOACTBOLIVARES, FIC_COSTOACTEXTRANJERO, FIC_IMP01MONTO 
+                                     FIC_COSTOACTBOLIVARES, FIC_COSTOACTEXTRANJERO, FIC_IMP01MONTO,
+                                     FI_PUESTO,
+                                     FI_REFERENCIA, ZZCAMPO_001     
                                      FROM SINVENTARIO
                                      INNER JOIN A2INVCOSTOSPRECIOS ON FI_CODIGO = FIC_CODEITEM  
                                      WHERE FI_DESCRIPCION LIKE '%{description}%' """).fetchmany(200)
                     return row 
         except Exception as e:
-            raise pyodbc.DatabaseError(str(e))                   
+            raise pyodbc.DatabaseError(str(e))   
+
+    def search_proveedor_by_description(self, description):
+        try:
+            with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    row = cursor.execute(f"""SELECT 
+                                        FP_CODIGO, 
+                                        FP_DESCRIPCION, 
+                                        FP_DIRECCION1
+                                        FROM SPROVEEDOR
+                                        WHERE FP_DESCRIPCION LIKE '%{description}%' """).fetchmany(200)
+                    return row 
+        except Exception as e:
+            raise pyodbc.DatabaseError(str(e))                 
 
     def create_table_tmp(self, name_table):
         conn = self.connect()
@@ -115,7 +138,8 @@ class DBISAMDatabase:
                     "PRECIOANTES" FLOAT, 
                     "PRECIO" FLOAT, 
                     "EXISTENCIA" FLOAT DEFAULT 0.00,
-                    "ACTUALIZADO" BOOLEAN DEFAULT FALSE);
+                    "ACTUALIZADO" BOOLEAN DEFAULT FALSE,
+                    "IVA" INTEGER);
             CREATE INDEX IF NOT EXISTS "INDEX_SKU" ON "{self.tmp_table_tasks}\\TMPDJANGO{name_table}" (SKU);           
         """)
         print(f"Tabla temporal {self.tmp_table_tasks}\\TMPDJANGO{name_table} creada.")
@@ -146,7 +170,8 @@ class DBISAMDatabase:
                     detalle_query = []
                     nro_documento = str(nro_nota).rjust(8,'0')
                     linea = 0
-                    moneda_operacion = 1
+                    moneda_operacion = int(request['moneda'])
+                    comentario = request['comentario'].replace("\r", "'+#13+'").replace("\n", "'+#10+'")
                     ordenes_compra = []
                     total_items = len(request['ordenes']) + len(request['productoSinOc'])
                     for ordenes, productos_sin_ordenes in zip_longest(request['ordenes'], request['productoSinOc'], fillvalue=None):
@@ -155,13 +180,12 @@ class DBISAMDatabase:
                             nro_oc = ordenes['orden']
                             codigo = ordenes['codigo']
                             cantidad = ordenes['cantidad']
-                            moneda_operacion = ordenes['moneda']
                             costo = ordenes['costo']
                             iva = ordenes['iva']
                             
                             fecha = datetime.now().strftime("%Y-%m-%d")
                             impuesto_porcentaje = 1 if iva == 16 else 0
-                            monto_impuesto = round(costo * 0.16, 2) if iva == 16 else 0
+                            monto_impuesto = ordenes['iva_16_monto']
 
                             sql = """
                                     INSERT INTO SDETALLECOMPRA (
@@ -312,12 +336,12 @@ class DBISAMDatabase:
                             detalle_query.append(sql_productos_sin_oc)
                             linea += 1
                 update_depositos = [
-                                    (f"UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {orden['recibido']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = {orden['deposito']};"
+                                    (f"UPDATE SINVDEP SET FT_EXISTENCIA = COALESCE(FT_EXISTENCIA, 0) + {orden['recibido']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = {orden['deposito']};"
                                     if orden['diferencia'] <= 0 
-                                    else f"""UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {orden['cantidad']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = {orden['deposito']};
-                                            UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {orden['diferencia']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = {self.almacen_items_sin_oc};""" )
+                                    else f"""UPDATE SINVDEP SET FT_EXISTENCIA = COALESCE(FT_EXISTENCIA, 0) + {orden['cantidad']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = {orden['deposito']};
+                                            UPDATE SINVDEP SET FT_EXISTENCIA = COALESCE(FT_EXISTENCIA, 0) + {orden['diferencia']} WHERE FT_CODIGOPRODUCTO = '{orden['codigo']}' AND FT_CODIGODEPOSITO = {self.almacen_items_sin_oc};""" )
                                         for orden in request['ordenes'] ]
-                update_depositos_productos_sin_oc = [(f"UPDATE SINVDEP SET FT_EXISTENCIA = FT_EXISTENCIA + {products['cantidad']}WHERE FT_CODIGOPRODUCTO = '{products['codigo']}' AND FT_CODIGODEPOSITO = {self.almacen_items_sin_oc};") 
+                update_depositos_productos_sin_oc = [(f"UPDATE SINVDEP SET FT_EXISTENCIA = COALESCE(FT_EXISTENCIA, 0) + {products['cantidad']}WHERE FT_CODIGOPRODUCTO = '{products['codigo']}' AND FT_CODIGODEPOSITO = {self.almacen_items_sin_oc};") 
                                                      for products in request['productoSinOc']]
                 
                 query_update_depositos = "\n".join(update_depositos) 
@@ -333,10 +357,10 @@ class DBISAMDatabase:
                                             AND FDI_CODIGO = '{orden['codigo']}'
                                             AND FDI_TIPOOPERACION = 5 \n"""
                                        for orden in request['ordenes']]
-                total_sin_oc ={1:sum(map(lambda x: float(x['costoBS']), request['productoSinOc'])), 
-                                 2:sum(map(lambda x: float(x['costoUS']), request['productoSinOc']))} 
-                print(total_sin_oc, moneda_operacion)
-                total_neto = sum(map(lambda x: float(x['costo']), request['ordenes'])) + total_sin_oc[int(moneda_operacion)]
+                #total_sin_oc ={1:sum(map(lambda x: float(x['costoBS']), request['productoSinOc'])), 
+                #                 2:sum(map(lambda x: float(x['costoUS']), request['productoSinOc']))} 
+                #print(total_sin_oc, moneda_operacion)
+                #total_neto = sum(map(lambda x: float(x['costo']), request['ordenes'])) + total_sin_oc[int(moneda_operacion)]
                 query = f"""
                                           ---INICIO DE LA TRANSACCION---
                                           START TRANSACTION;
@@ -367,7 +391,8 @@ class DBISAMDatabase:
                                                 FTI_ORDENCOMPRA,
                                                 FTI_DOCUMENTOORIGEN,
                                                 FTI_HORA,
-                                                FTI_FECHALIBRO)
+                                                FTI_FECHALIBRO,
+                                                FTI_DETALLECOMENTARIO)
                                       VALUES('{nro_documento}',
                                               8,
                                               4,
@@ -378,22 +403,23 @@ class DBISAMDatabase:
                                               {total_items},
                                               {moneda_operacion},
                                               1,
-                                              {total_neto},
+                                              {request['total_bruto']},
                                               1,
                                               '{request['rif']}',
                                               1,
-                                              {total_neto},
+                                              {request['total_bruto']},
                                               0,
                                               0,
-                                              {total_neto},
+                                              {request['base_imponible']},
                                               16,
-                                              0,
-                                              {total_neto},
+                                              {request['iva']},
+                                              {request['total_neto']},
                                               '{request['proveedor']}',
                                               '{''.join(ordenes_compra)}',
                                               '{''.join(ordenes_compra)}',
                                               '{datetime.now().strftime("%I:%M:%S %p")}',
-                                              '{datetime.now().strftime("%Y-%m-%d")}');                                     
+                                              '{datetime.now().strftime("%Y-%m-%d")}',
+                                              '{comentario}');                                     
                                       {''.join(detalle_query)}
                                       {''.join(query_update_depositos)}
                                       {''.join(query_update_depositos_sin_oc)}  
@@ -424,10 +450,11 @@ class DBISAMDatabase:
     def update_table_tmp(self, name_table):
         conn = self.connect()
         cursor  =  conn.cursor()
-        cursor.execute(f"""UPDATE "{self.tmp_table_tasks}\\TMPDJANGO{name_table}" SET DESCRIPCION = FI_DESCRIPCION, DEPARTAMENTO = FD_DESCRIPCION, CODBARRA = FI_REFERENCIA
+        cursor.execute(f"""UPDATE "{self.tmp_table_tasks}\\TMPDJANGO{name_table}" SET DESCRIPCION = FI_DESCRIPCION, DEPARTAMENTO = FD_DESCRIPCION, CODBARRA = FI_REFERENCIA, IVA = COALESCE(FIC_IMP01MONTO, 0.00)
                           FROM "{self.tmp_table_tasks}\\TMPDJANGO{name_table}"
                           INNER JOIN "{self.catalog}\\SINVENTARIO" ON SKU = FI_CODIGO
-                          INNER JOIN "{self.catalog}\\SCATEGORIA"  ON FI_CATEGORIA = FD_CODIGO""")
+                          INNER JOIN "{self.catalog}\\SCATEGORIA"  ON FI_CATEGORIA = FD_CODIGO
+                          INNER JOIN "{self.catalog}\\A2INVCOSTOSPRECIOS" ON SKU = FIC_CODEITEM  """)
         
         conn.commit()
         conn.close()
@@ -443,7 +470,19 @@ class DBISAMDatabase:
     def get_table_tmp_sin_existencia(self, name_table):
         conn = self.connect()
         cursor = conn.cursor()
-        cursor.execute(f'SELECT * FROM "{self.tmp_table_tasks}\\TMPDJANGO{name_table}" WHERE ACTUALIZADO = 1')
+        cursor.execute(f"""SELECT SKU,
+                       IFNULL(CODBARRA THEN 'N/A' ELSE CODBARRA) AS CODBARRA,
+                       IFNULL(DESCRIPCION THEN 'DESCRIPCION NO DISPONIBLE' ELSE DESCRIPCION) AS DESCRIPCION,
+                       IFNULL(DESCRIPCION_OFERTA THEN 'DESCRIPCION NO DISPONIBLE' ELSE DESCRIPCION_OFERTA) AS DESCRIPCION_OFERTA,
+                       FECHA_INICIO,
+                       FECHA_FINAL,
+                       IFNULL(DEPARTAMENTO THEN 'DESCRIPCION NO DISPONIBLE' ELSE DEPARTAMENTO) AS DEPARTAMENTO,
+                       PRECIOANTES,
+                       PRECIO,
+                       EXISTENCIA,
+                       ACTUALIZADO,
+                       IFNULL(IVA THEN 16 ELSE IVA) AS IVA
+                       FROM "{self.tmp_table_tasks}\\TMPDJANGO{name_table}" WHERE ACTUALIZADO = 1""")
         rows = cursor.fetchall()
         conn.close()
         return rows
