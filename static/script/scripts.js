@@ -1,82 +1,107 @@
 function handleEnterCantidad(event) {
-    const codigosExistentes = new Map()
-        const celdas = document.querySelectorAll('#search-results td[data-codigo]');
-        celdas.forEach(cell => {
+    // 1. Acumular cantidades por código (siempre, no solo en Enter)
+    const codigosExistentes = new Map();
+    const celdas = document.querySelectorAll('#search-results td[data-codigo]');
+    
+    celdas.forEach(cell => {
         const codigo = cell.dataset.codigo;
         const valor = parseInt(cell.innerText.trim()) || 0;
-
+        
         if (codigosExistentes.has(codigo)) {
-            const acumulado = codigosExistentes.get(codigo);
-            codigosExistentes.set(codigo, acumulado + valor);
+            codigosExistentes.set(codigo, codigosExistentes.get(codigo) + valor);
         } else {
             codigosExistentes.set(codigo, valor);
         }
     });
-    let valorTotal = 0
+
+    // 2. Validar diferencias usando totales acumulados por código único
+    const validarTodos = () => {
+        codigosExistentes.forEach((valorTotal, codigo) => {
+            const codigoNoEncontrado = actualizarEstadoRecepcion(codigo, valorTotal);
+            if (codigoNoEncontrado) {
+                // Marcar todas las filas del resultado con ese código
+                document.querySelectorAll(`#search-results td[data-codigo="${codigo}"]`)
+                    .forEach(cell => cell.parentElement.classList.add('table-danger'));
+            }
+        });
+    };
+
     if (event.key === 'Enter') {
         event.preventDefault();
+
+        // Calcular total general
+        let total = 0;
+        document.querySelectorAll('#search-results tr').forEach(fila => {
+            const cantidadCell = fila.cells[2];
+            total += parseFloat(cantidadCell?.textContent.trim()) || 0;
+        });
+        document.getElementById('band-total').textContent = total.toString();
+
         const cell = event.target;
-        cell.blur(); // saca el foco de la celda
-        const codigo = cell.dataset.codigo;
-        const valor = parseInt(cell.innerText.trim()) || 0;
-        if (codigosExistentes.has(codigo)){
-            valorTotal = codigosExistentes.get(codigo);   
-            } 
-        console.log(`Código: ${codigo}, Cantidad: ${valor}`);
-        console.log(cell);
-        const codigoNoEncontrado = actualizarEstadoRecepcion(codigo, valorTotal !== undefined ? valorTotal : valor);
-        if (codigoNoEncontrado){
-            cell.parentElement.classList.add('table-danger');
-        }
-    }
-    else{
-        celdas.forEach(cell => {
-        const codigo = cell.dataset.codigo;
-        const valor = parseInt(cell.innerText.trim()) || 0;
+        cell.blur();
         
-        if (codigosExistentes.has(codigo)){
-            valorTotal = codigosExistentes.get(codigo);   
-            } 
-        const codigoNoEncontrado = actualizarEstadoRecepcion(codigo, valorTotal !== undefined ? valorTotal : valor)
-        
-        if (codigoNoEncontrado){
-            cell.parentElement.classList.add('table-danger');
-        }
-     
-});
-    }
-}  
-function actualizarEstadoRecepcion(codigo, cantidadRecibida) {
-    const filaOC = document.querySelector(`#search-orden-compra tr[data-codigo="${codigo}"]`);
-    if (!filaOC) return codigo;
-
-    const pendienteCell = filaOC.querySelector('.pendiente');
-    const recibidoCell = filaOC.querySelector('.recibido');
-    const pendiente = parseInt(pendienteCell.dataset.pendiente);
-
-    filaOC.classList.remove('table-success', 'table-warning', 'table-danger');
-
-    if (cantidadRecibida === pendiente) {
-      filaOC.classList.add('table-success'); 
-    } else if (cantidadRecibida > pendiente) {
-      filaOC.classList.add('table-warning'); 
+        validarTodos();
     } else {
-      filaOC.classList.add('table-danger'); 
+        validarTodos();
     }
-    const diferenciaCell = filaOC.querySelector('.diferencia');
-    const diferencia = cantidadRecibida - pendiente;
-    
-    recibidoCell.innerText = cantidadRecibida;
-    diferenciaCell.innerText = diferencia;
-    diferenciaCell.dataset.diferencia = diferencia;
-  }
+} 
+function actualizarEstadoRecepcion(codigo, cantidadRecibida) {
+    // Obtener TODAS las filas con ese código en la orden de compra
+    const filasOC = document.querySelectorAll(`#search-orden-compra tr[data-codigo="${codigo}"]`);
+    if (!filasOC.length) return codigo;
 
-function updateTotal(event){
-    //const filas = document.querySelectorAll('#search-orden-compra tr');
+    let restante = cantidadRecibida;
+
+    filasOC.forEach(filaOC => {
+        const pendienteCell = filaOC.querySelector('.pendiente');
+        const recibidoCell = filaOC.querySelector('.recibido');
+        const diferenciaCell = filaOC.querySelector('.diferencia');
+        const pendiente = parseInt(pendienteCell.dataset.pendiente);
+
+        // Cuánto absorbe esta fila
+        const recibidoEnFila = Math.min(restante, pendiente);
+        restante -= recibidoEnFila;  // puede quedar 0 o positivo para la siguiente fila
+
+        const diferencia = recibidoEnFila - pendiente;
+
+        recibidoCell.innerText = recibidoEnFila;
+        diferenciaCell.innerText = diferencia;
+        diferenciaCell.dataset.diferencia = diferencia;
+
+        filaOC.classList.remove('table-success', 'table-warning', 'table-danger');
+
+        if (diferencia === 0) {
+            filaOC.classList.add('table-success');
+        } else if (diferencia > 0) {
+            filaOC.classList.add('table-warning');
+        } else {
+            filaOC.classList.add('table-danger');
+        }
+    });
+
+    // Si sobró cantidad después de llenar todas las filas, marcar la última como warning
+    if (restante > 0) {
+        const ultimaFila = filasOC[filasOC.length - 1];
+        const recibidoCell = ultimaFila.querySelector('.recibido');
+        const diferenciaCell = ultimaFila.querySelector('.diferencia');
+        const pendienteCell = ultimaFila.querySelector('.pendiente');
+        const pendiente = parseInt(pendienteCell.dataset.pendiente);
+
+        recibidoCell.innerText = pendiente + restante;
+        diferenciaCell.innerText = restante;
+        diferenciaCell.dataset.diferencia = restante;
+
+        ultimaFila.classList.remove('table-success', 'table-danger');
+        ultimaFila.classList.add('table-warning');
+    }
+}
+
+function updateTotal(event) {
     console.log('disparando update total');
-    const cantItems = document.getElementById('search-results').rows.length
-    const bandaItems = document.getElementById('band-items')
+    const cantItems = document.getElementById('search-results').rows.length;
+    const bandaItems = document.getElementById('band-items');
     bandaItems.textContent = cantItems.toString();
+
     const button = event.detail.target;
     if (!button) {
         console.warn('No se pudo obtener el botón desde event.detail.elt');
@@ -84,19 +109,32 @@ function updateTotal(event){
     }
 
     const codigo = button.dataset.codigo;
-    const filaOC = document.querySelector(`#search-orden-compra tr[data-codigo="${codigo}"]`);
-    console.log(filaOC, button, codigo, event.detail.target);
 
-    if (!filaOC) return;
+    // Recalcular el acumulado restante en search-results para ese código
+    const celdasRestantes = document.querySelectorAll(`#search-results td[data-codigo="${codigo}"]`);
+    let totalRestante = 0;
+    celdasRestantes.forEach(cell => {
+        totalRestante += parseInt(cell.innerText.trim()) || 0;
+    });
 
-    filaOC.classList.remove('table-success', 'table-warning', 'table-danger');
+    // Si no quedan celdas del código, resetear TODAS las filas de la OC con ese código
+    const filasOC = document.querySelectorAll(`#search-orden-compra tr[data-codigo="${codigo}"]`);
+    if (!filasOC.length) return;
 
-    const pendienteCell = filaOC.querySelector('.pendiente');
-    const diferenciaCell = filaOC.querySelector('.diferencia');
-
-    if (pendienteCell && diferenciaCell) {
-        const pendienteValue = parseInt(pendienteCell.dataset.pendiente);
-        diferenciaCell.innerText = '';
+    if (celdasRestantes.length === 0) {
+        filasOC.forEach(filaOC => {
+            filaOC.classList.remove('table-success', 'table-warning', 'table-danger');
+            const recibidoCell = filaOC.querySelector('.recibido');
+            const diferenciaCell = filaOC.querySelector('.diferencia');
+            if (recibidoCell) recibidoCell.innerText = 0;
+            if (diferenciaCell) {
+                diferenciaCell.innerText = '';
+                diferenciaCell.dataset.diferencia = '';
+            }
+        });
+    } else {
+        // Redistribuir el total restante entre todas las filas de la OC
+        actualizarEstadoRecepcion(codigo, totalRestante);
     }
 }
 
@@ -251,7 +289,11 @@ function recolectarDatos() {
     moneda: tr.cells[7].innerText.trim(),
     deposito: tr.cells[8].innerText.trim(),
     descripcion: tr.cells[9].innerText.trim(),
-    autoincrement: parseInt(tr.cells[10].innerText.trim())
+    autoincrement: parseInt(tr.cells[10].innerText.trim()),
+    puesto: tr.cells[11].innerText.trim(),
+    referencia: tr.cells[12].innerText.trim(),
+    ref_proveedor: tr.cells[13].innerText.trim(),
+    iva_16_monto: parseFloat(tr.cells[14].innerText.trim().replace(',', '.'))
   }));
 
   const productoSinOc = Array.from(document.querySelectorAll('#search-results tr')).filter(tr => clases.some(clase => tr.classList.contains(clase))).map(tr => ({
@@ -260,13 +302,15 @@ function recolectarDatos() {
     cantidad: parseFloat(tr.cells[2].innerText.trim().replace(',', '.')),
     costoBS: parseFloat(tr.cells[4].innerText.trim().replace(',', '.')),
     costoUS: parseFloat(tr.cells[5].innerText.trim().replace(',', '.')),
-    iva: parseInt(tr.cells[6].innerText.trim())
+    iva: parseInt(tr.cells[6].innerText.trim()),
+    puesto: tr.cells[7].innerText.trim()
   }));
   const [rif, proveedor]  =  document.getElementById('card-proveedor').innerText.trim().split('-')
   const comentario = document.getElementById('message-text').value.trim();
+  const direccion_proveedor = document.getElementById('direccion-proveedor').innerText.trim();
   //const numeroOrdenesOc   =
   console.info(ordenes)
-  return { ordenes, productoSinOc, proveedor, rif, comentario};
+  return { ordenes, productoSinOc, proveedor, rif, comentario, direccion_proveedor};
 }
 function getCookie(name) {
   let cookieValue = null;
@@ -295,8 +339,9 @@ function isPresentTableOc(event){
 
 }
 
-document.getElementById('procesar-modal').addEventListener('click', function () {
-  const botonProcesar = this;
+document.getElementById('form-recepcion').addEventListener('submit', function (event) {
+  event.preventDefault(); // Prevenir el comportamiento por defecto del formulario
+  const botonProcesar = document.getElementById('procesar-modal');
   const datos = recolectarDatos();
   const spinnerButton = document.getElementById('spinner-button');
   spinnerButton.classList.add('spinner-grow', 'spinner-grow-sm')
@@ -316,16 +361,72 @@ document.getElementById('procesar-modal').addEventListener('click', function () 
     console.log('Respuesta del servidor:', data);
     if (data.status === true){
       spinnerButton.classList.remove('spinner-grow', 'spinner-grow-sm');
-      window.location.href = data.redirect_url;
-      botonProcesar.disabled = false;
+      // 1. Convertir Base64 a un Blob de PDF
+      const byteCharacters = atob(data.document);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'application/pdf' });
+
+      // 2. Crear un enlace temporal para la descarga
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = data.filename || 'documento.pdf';
+      
+      // Añadir al documento, clickear y remover
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      // Limpiar la memoria del objeto URL
+      window.URL.revokeObjectURL(url);
+      setTimeout(() => {
+        window.location.href = data.redirect_url;
+        botonProcesar.disabled = false;
+        }, 1000);
       }
     else{
       spinnerButton.classList.remove('spinner-grow', 'spinner-grow-sm');
-      botonProcesar.disabled = true;
+      botonProcesar.disabled = false;
       const alertDiv = document.querySelector('.alert-danger');
       alertDiv.classList.remove('d-none');
       alertDiv.innerHTML = data.error;
 
     }  
   });
+});
+
+function agregarProveedor(event){
+  event.preventDefault();
+  const fila = event.target.closest('tr')
+  const celdas = fila.querySelectorAll('td')
+  console.info(celdas);
+  const codigo = celdas[0].innerText;
+  const descripcion = celdas[1].innerText;
+  const direccion = celdas[2].innerText;
+  const inputProveedor = document.getElementById('search-proveedor')
+  const contenedorProveedor = document.getElementById('card-proveedor')
+  console.info(codigo)
+  const contenidoHTML = `${codigo.trim()}-${descripcion}<div class="d-none" id="direccion-proveedor">${direccion}</div>`;
+  contenedorProveedor.innerHTML = contenidoHTML;
+  contenedorProveedor.classList.remove('d-none');
+  inputProveedor.value = codigo;
+  document.querySelector('#modal-container').innerHTML = '';
+  document.getElementById('search-orden').disabled=false; 
+  document.getElementById('search-orden').focus()
+}
+
+const botonProcesar = document.getElementById('procesar-recepcion');
+
+botonProcesar.addEventListener('click', function(event) {
+    console.log("Botón presionado, procesando...");
+    const comentario = document.getElementById('message-text')
+    const comentarioCelda = document.querySelector('.comentario-orden').textContent
+    comentario.innerText= comentarioCelda
+    
+    
+    
 });
