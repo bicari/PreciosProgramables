@@ -179,7 +179,7 @@ class DBISAMDatabase:
                         if ordenes is not None:
                             nro_oc = ordenes['orden']
                             codigo = ordenes['codigo']
-                            cantidad = ordenes['cantidad']
+                            cantidad = ordenes['recibido']
                             costo = ordenes['costo']
                             iva = ordenes['iva']
                             
@@ -446,6 +446,30 @@ class DBISAMDatabase:
         except Exception as e:
             print(e)
             return e    
+
+    def consultar_notas_entrega(self, fecha_desde, fecha_hasta):
+        try:
+            with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    rows = cursor.execute(f"""SELECT
+                                                FTI_DOCUMENTO,
+                                                FTI_TOTALITEMS,
+                                                FTI_FECHAEMISION,
+                                                FTI_RESPONSABLE,
+                                                FP_DESCRIPCION,
+                                                FTI_TOTALNETO,
+                                                FTI_MONEDA
+                                            FROM SOPERACIONINV
+                                            LEFT JOIN SPROVEEDOR ON FTI_RESPONSABLE = FP_CODIGO
+                                            WHERE FTI_TIPO = 8
+                                            AND FTI_STATUS = 4
+                                            AND FTI_FECHAEMISION BETWEEN '{fecha_desde}' AND '{fecha_hasta}'
+                                            ORDER BY FTI_FECHAEMISION DESC, FTI_DOCUMENTO DESC
+                                            """).fetchall()
+                    return rows
+        except Exception as e:
+            print(e)
+            raise e
 
     def update_table_tmp(self, name_table):
         conn = self.connect()

@@ -1,0 +1,138 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>Despachar Pedido #{{ pedido.numero_pedido }}</h2>
+        <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left"></i> Volver
+        </a>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="alert alert-info">
+        <i class="fas fa-info-circle"></i>
+        Solicitado por: <strong>{{ pedido.solicitante.username|capfirst }}</strong> |
+        Ingrese la cantidad a enviar de cada item. Los items con cantidad 0 quedaran en Back Order.
+    </div>
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="card">
+            <div class="card-body">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Codigo</th>
+                            <th>Descripcion</th>
+                            <th>Referencia</th>
+                            <th>Puesto</th>
+                            <th>Ref. Proveedor</th>
+                            <th>Solicitado</th>
+                            <th>Stock Disponible</th>
+                            <th>Cantidad a Enviar</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for data in items_con_stock %}
+                        <tr>
+                            <td>{{ data.item.codigo }}</td>
+                            <td>{{ data.item.descripcion }}</td>
+                            <td><small class="text-muted">{{ data.item.referencia|default:"-" }}</small></td>
+                            <td><small class="text-muted">{{ data.item.puesto|default:"-" }}</small></td>
+                            <td><small class="text-muted">{{ data.item.ref_proveedor|default:"-" }}</small></td>
+                            <td><strong>{{ data.item.cantidad_solicitada }}</strong></td>
+                            <td>
+                                {% if data.stock > 0 %}
+                                    <span class="text-success fw-bold">{{ data.stock }}</span>
+                                {% else %}
+                                    <span class="text-danger fw-bold">{{ data.stock }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <input type="number" class="form-control form-control-sm" style="width:100px"
+                                    name="cantidad_{{ data.item.id }}"
+                                    value="{{ data.item.cantidad_solicitada }}"
+                                    min="0" max="{{ data.item.cantidad_solicitada }}">
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="mt-3 d-flex gap-2">
+            <button type="submit" class="btn btn-success" id="btn-despachar">
+                <i class="fas fa-truck"></i> Confirmar Despacho
+            </button>
+            <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-secondary">Cancelar</a>
+        </div>
+    </form>
+</div>
+
+<!-- Overlay de confirmacion -->
+<div id="overlay-confirmar" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9998; align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:16px; padding:40px 50px; text-align:center; box-shadow:0 8px 32px rgba(0,0,0,0.25); max-width:420px; width:90%;">
+        <div style="font-size:2.5rem; margin-bottom:12px;">🚚</div>
+        <p class="fw-bold fs-5 mb-1 text-dark">¿Confirmar despacho del pedido?</p>
+        <p class="text-muted mb-4" style="font-size:0.9rem;">Los items con cantidad 0 quedaran en Back Order.</p>
+        <div class="d-flex gap-3 justify-content-center">
+            <button type="button" class="btn btn-secondary px-4" id="btn-cancelar-confirm">Cancelar</button>
+            <button type="button" class="btn btn-success px-4" id="btn-aceptar-confirm">
+                <i class="fas fa-truck"></i> Confirmar Despacho
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Overlay de carga -->
+<div id="overlay-carga" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9999; align-items:center; justify-content:center; flex-direction:column;">
+    <div style="background:#fff; border-radius:16px; padding:40px 50px; text-align:center; box-shadow:0 8px 32px rgba(0,0,0,0.25);">
+        <div style="width:64px; height:64px; margin:0 auto 20px; position:relative;">
+            <svg viewBox="0 0 64 64" style="width:64px;height:64px;">
+                <circle cx="32" cy="32" r="28" fill="none" stroke="#e9ecef" stroke-width="6"/>
+                <circle cx="32" cy="32" r="28" fill="none" stroke="#0d6efd" stroke-width="6"
+                    stroke-linecap="round"
+                    stroke-dasharray="44 132"
+                    transform="rotate(-90 32 32)">
+                    <animateTransform attributeName="transform" type="rotate"
+                        from="-90 32 32" to="270 32 32"
+                        dur="0.9s" repeatCount="indefinite"/>
+                </circle>
+            </svg>
+        </div>
+        <p class="fw-bold fs-5 mb-1 text-dark">Procesando despacho...</p>
+        <p class="text-muted mb-0" style="font-size:0.9rem;">Por favor espere, no cierre esta ventana</p>
+    </div>
+</div>
+
+<script>
+document.querySelector('form').addEventListener('submit', function(e) {
+    const btn = document.getElementById('btn-despachar');
+    if (btn.dataset.enviado === 'true') return;
+    e.preventDefault();
+    document.getElementById('overlay-confirmar').style.display = 'flex';
+});
+
+document.getElementById('btn-cancelar-confirm').addEventListener('click', function() {
+    document.getElementById('overlay-confirmar').style.display = 'none';
+});
+
+document.getElementById('btn-aceptar-confirm').addEventListener('click', function() {
+    document.getElementById('overlay-confirmar').style.display = 'none';
+    const btn = document.getElementById('btn-despachar');
+    btn.dataset.enviado = 'true';
+    btn.disabled = true;
+    document.getElementById('overlay-carga').style.display = 'flex';
+    document.querySelector('form').submit();
+});
+</script>
+{% endblock content %}

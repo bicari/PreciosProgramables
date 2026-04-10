@@ -1,0 +1,224 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 - Página no encontrada | Ksa Home</title>
+    <link href="{% static 'vendor/bootstrap/css/bootstrap.min.css' %}" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'vendor/fontawesome/css/all.min.css' %}">
+    <style>
+        :root {
+            --primary: #0d6efd;
+            --primary-dark: #0a58ca;
+            --bg-gradient-start: #0f172a;
+            --bg-gradient-end: #1e3a5f;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, var(--bg-gradient-start) 0%, var(--bg-gradient-end) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            overflow: hidden;
+        }
+
+        /* Círculos decorativos de fondo */
+        .bg-circle {
+            position: fixed;
+            border-radius: 50%;
+            opacity: 0.07;
+            background: var(--primary);
+            pointer-events: none;
+        }
+        .bg-circle-1 { width: 500px; height: 500px; top: -150px; right: -100px; }
+        .bg-circle-2 { width: 350px; height: 350px; bottom: -100px; left: -80px; }
+        .bg-circle-3 { width: 200px; height: 200px; top: 50%; left: 10%; }
+
+        .error-card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 1.5rem;
+            padding: 3rem 3.5rem;
+            max-width: 560px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.4);
+            animation: fadeInUp 0.6s ease both;
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .error-number {
+            font-size: clamp(5rem, 15vw, 8rem);
+            font-weight: 900;
+            line-height: 1;
+            background: linear-gradient(135deg, #60a5fa, #3b82f6, #1d4ed8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -4px;
+            text-shadow: none;
+            filter: drop-shadow(0 4px 24px rgba(59, 130, 246, 0.4));
+        }
+
+        .error-icon {
+            font-size: 3rem;
+            color: #60a5fa;
+            margin-bottom: 0.75rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50%       { transform: scale(1.1); opacity: 0.8; }
+        }
+
+        .error-title {
+            color: #f1f5f9;
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .error-subtitle {
+            color: #94a3b8;
+            font-size: 1rem;
+            margin-bottom: 2rem;
+            line-height: 1.6;
+        }
+
+        .divider {
+            height: 1px;
+            background: linear-gradient(to right, transparent, rgba(255,255,255,0.15), transparent);
+            margin: 1.75rem 0;
+        }
+
+        .btn-home {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            border: none;
+            color: #fff;
+            padding: 0.75rem 2rem;
+            border-radius: 0.75rem;
+            font-weight: 600;
+            font-size: 0.95rem;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.25s ease;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.35);
+        }
+
+        .btn-home:hover {
+            background: linear-gradient(135deg, #60a5fa, #3b82f6);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.5);
+            color: #fff;
+        }
+
+        .btn-back {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #94a3b8;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.75rem;
+            font-weight: 500;
+            font-size: 0.95rem;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.25s ease;
+        }
+
+        .btn-back:hover {
+            border-color: rgba(255, 255, 255, 0.4);
+            color: #e2e8f0;
+            transform: translateY(-2px);
+        }
+
+        .error-url {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 0.5rem;
+            padding: 0.5rem 1rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.82rem;
+            color: #f87171;
+            word-break: break-all;
+            margin-bottom: 1.5rem;
+        }
+
+        .brand-footer {
+            margin-top: 2rem;
+            color: rgba(255, 255, 255, 0.2);
+            font-size: 0.8rem;
+            letter-spacing: 0.05em;
+        }
+    </style>
+</head>
+<body>
+    <!-- Círculos decorativos -->
+    <div class="bg-circle bg-circle-1"></div>
+    <div class="bg-circle bg-circle-2"></div>
+    <div class="bg-circle bg-circle-3"></div>
+
+    <div class="error-card">
+
+        <!-- Ícono animado -->
+        <div class="error-icon">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+
+        <!-- Número de error -->
+        <div class="error-number">404</div>
+
+        <!-- Título y descripción -->
+        <h1 class="error-title">Página no encontrada</h1>
+        <p class="error-subtitle">
+            La URL que intentas acceder no existe o fue movida.<br>
+            Verifica la dirección o regresa al inicio.
+        </p>
+
+        <!-- URL que causó el error -->
+        {% if request.path %}
+        <div class="error-url">
+            <i class="fa-solid fa-link me-1"></i> {{ request.path }}
+        </div>
+        {% endif %}
+
+        <div class="divider"></div>
+
+        <!-- Botones de acción -->
+        <div class="d-flex justify-content-center gap-3 flex-wrap">
+            <a href="/dashboard" class="btn-home">
+                <i class="fa-solid fa-house"></i> Ir al Dashboard
+            </a>
+            <a href="javascript:history.back()" class="btn-back">
+                <i class="fa-solid fa-arrow-left"></i> Volver atrás
+            </a>
+        </div>
+
+        <p class="brand-footer">
+            <i class="fa-solid fa-store"></i> &nbsp; KSA HOME CENTER
+        </p>
+    </div>
+
+    <script src="{% static 'vendor/bootstrap/js/bootstrap.bundle.min.js' %}"></script>
+</body>
+</html>

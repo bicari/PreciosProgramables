@@ -11,5 +11,6 @@ urlpatterns = [
     path('product-delete/', delete_product, name='product-delete'),
     path('search-proveedor/', search_proveedor, name='search-proveedor'),
     path('procesar-recepcion/', procesar_recepcion, name='procesar-recepcion'),
-    path('confirmar-nota-entrega/', obtener_confirmacion, name='confirmar-nota-entrega')
+    path('confirmar-nota-entrega/', obtener_confirmacion, name='confirmar-nota-entrega'),
+    path('consultar-notas/', consultar_notas, name='consultar-notas'),
 ]

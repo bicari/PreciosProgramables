@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+</head>
+<body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5;">
+    <div style="max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        <h2 style="color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px;">{{ titulo }}</h2>
+        <p style="color: #555;">{{ mensaje }}</p>
+
+        <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+            <thead>
+                <tr style="background-color: #007bff; color: white;">
+                    <th style="padding: 8px; text-align: left;">Codigo</th>
+                    <th style="padding: 8px; text-align: left;">Descripcion</th>
+                    <th style="padding: 8px; text-align: center;">Solicitado</th>
+                    <th style="padding: 8px; text-align: center;">Despachado</th>
+                    <th style="padding: 8px; text-align: center;">Recibido</th>
+                    <th style="padding: 8px; text-align: center;">Estado</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr style="border-bottom: 1px solid #eee;">
+                    <td style="padding: 8px;">{{ item.codigo }}</td>
+                    <td style="padding: 8px;">{{ item.descripcion }}</td>
+                    <td style="padding: 8px; text-align: center;">{{ item.cantidad_solicitada }}</td>
+                    <td style="padding: 8px; text-align: center;">{{ item.cantidad_despachada }}</td>
+                    <td style="padding: 8px; text-align: center;">{{ item.cantidad_recibida }}</td>
+                    <td style="padding: 8px; text-align: center;">{{ item.get_estado_display }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <p style="color: #999; font-size: 12px; margin-top: 20px; text-align: center;">
+            App Ksa Home Center - Notificacion automatica
+        </p>
+    </div>
+</body>
+</html>

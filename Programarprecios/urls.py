@@ -16,11 +16,13 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.conf import settings
 from django.conf.urls.static import static
 
 redirect_login = lambda request: redirect('login')
+
+handler404 = lambda request, exception: render(request, '404.html', status=404)
 admin.site.site_title = "Ksa Home Admin"
 admin.site.site_header = "Ksa Home Administración"
 admin.site.index_title = "Panel de Administración"
@@ -31,6 +33,6 @@ urlpatterns = [
     path('', include('users.urls')),
     path('', redirect_login),
     path('', include('tasks.urls')),
-    path('', include('notas_entrega.urls'))
-    
+    path('', include('notas_entrega.urls')),
+    path('', include('PedidosAlmacen.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

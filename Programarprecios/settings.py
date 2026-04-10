@@ -92,7 +92,8 @@ HORA_EJECUCION = '15:54'  # Hora de ejecución diaria en formato HH:MM (24 horas
 APSCHEDULER_DATETIME_FORMAT = "N j, Y, f:s a"
 APSCHEDULER_RUN_NOW_TIMEOUT = 25  # segundos
 APSCHEDULER_DB_ALIAS = 'default'
-INSTALLED_APPS = ['notas_entrega',
+INSTALLED_APPS = ['PedidosAlmacen',
+    'notas_entrega',
     'users',
     'tasks',
     'django_apscheduler',

@@ -1,0 +1,435 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<div class="container mt-4">
+    <h2>Nuevo Pedido</h2>
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="card mb-3 border-primary">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0"><i class="fas fa-tags"></i> Datos del Pedido</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label for="selector-categoria" class="form-label fw-bold">Categoria <span class="text-danger">*</span></label>
+                    <select id="selector-categoria" class="form-select" onchange="seleccionarCategoria(this)">
+                        <option value="">-- Seleccione categoria --</option>
+                        {% for cat in categorias %}
+                        <option value="{{ cat.0 }}" data-nombre="{{ cat.1 }}">{{ cat.1 }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label for="selector-condicion" class="form-label fw-bold">Condicion <span class="text-danger">*</span></label>
+                    <select id="selector-condicion" class="form-select" onchange="validarFormulario()">
+                        <option value="">-- Seleccione condicion --</option>
+                        {% for val, label in condiciones %}
+                        <option value="{{ val }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label for="selector-deposito" class="form-label fw-bold">Deposito de origen <span class="text-danger">*</span></label>
+                    <select id="selector-deposito" class="form-select" onchange="validarFormulario()">
+                        <option value="">-- Seleccione deposito --</option>
+                        {% for dep in depositos %}
+                        <option value="{{ dep.0 }}" data-nombre="{{ dep.1 }}">{{ dep.1 }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="row mt-3">
+                <div class="col-12">
+                    <div id="info-categoria" class="alert alert-warning mb-0" style="display:none">
+                        <i class="fas fa-lock"></i> Categoria: <strong id="nombre-categoria-display"></strong>
+                        &nbsp;|&nbsp; <small>Una vez agregado el primer producto la categoria queda fija</small>
+                    </div>
+                    <div id="aviso-categoria" class="alert alert-info mb-0">
+                        <i class="fas fa-info-circle"></i> Seleccione la categoria, condicion y deposito para poder buscar y agregar productos
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3" id="card-busqueda" style="opacity:0.5; pointer-events:none;">
+        <div class="card-body">
+            <h5 class="card-title">Buscar Producto</h5>
+            <div class="row g-2 align-items-end">
+                <div class="col-md-3">
+                    <select id="tipo-busqueda" name="tipo" class="form-select">
+                        <option value="codigo">Por Codigo</option>
+                        <option value="descripcion">Por Descripcion</option>
+                    </select>
+                </div>
+                <div class="col-md-7 position-relative">
+                    <input
+                        type="text"
+                        class="form-control pe-5"
+                        id="buscar-producto"
+                        placeholder="Ingrese codigo o descripcion..."
+                        hx-get="/pedidos/buscar-producto/"
+                        hx-trigger="input changed delay:500ms, keyup[key=='Enter']"
+                        hx-target="#resultados-busqueda"
+                        hx-swap="innerHTML"
+                        hx-include="#tipo-busqueda, #campo-categoria"
+                        hx-indicator="#loader-busqueda, #texto-buscando, #skeleton-busqueda"
+                        name="q"
+                        autocomplete="off"
+                    >
+                    <!-- Loader dentro del input -->
+                    <span id="loader-busqueda" class="htmx-indicator position-absolute top-50 end-0 translate-middle-y me-3" style="display:none;">
+                        <span class="loader-dots">
+                            <span></span><span></span><span></span>
+                        </span>
+                    </span>
+                </div>
+                <div class="col-md-2 d-flex align-items-center">
+                    <small id="texto-buscando" class="htmx-indicator text-primary fw-semibold" style="display:none;">
+                        <i class="fas fa-search fa-spin me-1"></i>Buscando...
+                    </small>
+                </div>
+            </div>
+
+            <div class="mt-2">
+                <table class="table table-sm table-hover" id="skeleton-busqueda" style="display:none;">
+                    <thead>
+                        <tr>
+                            <th>Codigo</th>
+                            <th>Descripcion</th>
+                            <th>Referencia</th>
+                            <th>Puesto</th>
+                            <th>Existencia</th>
+                            <th>Ref. Proveedor</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for i in "123" %}
+                        <tr>
+                            <td><div class="skeleton-cell" style="width:70px; height:13px;"></div></td>
+                            <td><div class="skeleton-cell" style="height:13px;"></div></td>
+                            <td><div class="skeleton-cell" style="width:80px; height:13px;"></div></td>
+                            <td><div class="skeleton-cell" style="width:60px; height:13px;"></div></td>
+                            <td><div class="skeleton-cell" style="width:40px; height:20px; border-radius:10px;"></div></td>
+                            <td><div class="skeleton-cell" style="width:80px; height:13px;"></div></td>
+                            <td><div class="skeleton-cell" style="width:70px; height:26px; border-radius:6px;"></div></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div id="resultados-busqueda"></div>
+            </div>
+        </div>
+    </div>
+
+    <form method="post" action="{% url 'pedidos-crear' %}" id="form-pedido">
+        {% csrf_token %}
+        <input type="hidden" name="categoria" id="campo-categoria" value="">
+        <input type="hidden" name="categoria_nombre" id="campo-categoria-nombre" value="">
+        <input type="hidden" name="condicion" id="campo-condicion" value="">
+        <input type="hidden" name="deposito" id="campo-deposito" value="">
+        <input type="hidden" name="deposito_nombre" id="campo-deposito-nombre" value="">
+
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Items del Pedido</h5>
+                <span class="badge bg-primary" id="total-items">0 items</span>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm" id="tabla-items">
+                    <thead>
+                        <tr>
+                            <th>Codigo</th>
+                            <th>Descripcion</th>
+                            <th>Referencia</th>
+                            <th>Puesto</th>
+                            <th>Ref. Proveedor</th>
+                            <th>Cantidad</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="items-body">
+                    </tbody>
+                </table>
+                <p class="text-muted text-center" id="sin-items">Busque y agregue productos al pedido</p>
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label for="observaciones" class="form-label">Observaciones</label>
+            {{ form.observaciones }}
+        </div>
+
+        <input type="hidden" name="items_json" id="items-json" value="[]">
+
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary" id="btn-enviar" disabled>
+                <i class="fas fa-paper-plane"></i> Enviar Pedido
+            </button>
+            <a href="{% url 'pedidos-lista' %}" class="btn btn-secondary">Cancelar</a>
+        </div>
+    </form>
+</div>
+
+<!-- Overlay de confirmacion -->
+<div id="overlay-confirmar" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9998; align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:16px; padding:40px 50px; text-align:center; box-shadow:0 8px 32px rgba(0,0,0,0.25); max-width:420px; width:90%;">
+        <div style="font-size:2.5rem; margin-bottom:12px;">📋</div>
+        <p class="fw-bold fs-5 mb-1 text-dark">¿Confirmar envio del pedido?</p>
+        <p class="text-muted mb-4" style="font-size:0.9rem;">Esta accion creara el pedido y notificara al almacen.</p>
+        <div class="d-flex gap-3 justify-content-center">
+            <button type="button" class="btn btn-secondary px-4" id="btn-cancelar-confirm">Cancelar</button>
+            <button type="button" class="btn btn-primary px-4" id="btn-aceptar-confirm">
+                <i class="fas fa-paper-plane"></i> Enviar Pedido
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Overlay de carga -->
+<div id="overlay-carga" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9999; align-items:center; justify-content:center; flex-direction:column;">
+    <div style="background:#fff; border-radius:16px; padding:40px 50px; text-align:center; box-shadow:0 8px 32px rgba(0,0,0,0.25);">
+        <div style="width:64px; height:64px; margin:0 auto 20px; position:relative;">
+            <svg viewBox="0 0 64 64" style="width:64px;height:64px;">
+                <circle cx="32" cy="32" r="28" fill="none" stroke="#e9ecef" stroke-width="6"/>
+                <circle cx="32" cy="32" r="28" fill="none" stroke="#0d6efd" stroke-width="6"
+                    stroke-linecap="round"
+                    stroke-dasharray="44 132"
+                    transform="rotate(-90 32 32)">
+                    <animateTransform attributeName="transform" type="rotate"
+                        from="-90 32 32" to="270 32 32"
+                        dur="0.9s" repeatCount="indefinite"/>
+                </circle>
+            </svg>
+        </div>
+        <p class="fw-bold fs-5 mb-1 text-dark">Enviando pedido...</p>
+        <p class="text-muted mb-0" style="font-size:0.9rem;">Por favor espere, no cierre esta ventana</p>
+    </div>
+</div>
+
+<style>
+/* Loader de tres puntos pulsantes */
+.loader-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.loader-dots span {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background-color: #0d6efd;
+    animation: pulse-dot 1.2s ease-in-out infinite;
+}
+.loader-dots span:nth-child(1) { animation-delay: 0s; }
+.loader-dots span:nth-child(2) { animation-delay: 0.2s; }
+.loader-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes pulse-dot {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40%            { transform: scale(1);   opacity: 1;   }
+}
+
+/* Skeleton shimmer */
+.skeleton-cell {
+    background: linear-gradient(90deg, #e9ecef 25%, #dee2e6 50%, #e9ecef 75%);
+    background-size: 200% 100%;
+    border-radius: 4px;
+    animation: shimmer 1.4s infinite;
+}
+@keyframes shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* HTMX muestra el indicator mientras la peticion esta activa */
+.htmx-indicator { display: none !important; }
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator { display: inline-flex !important; }
+
+#skeleton-busqueda.htmx-indicator,
+#skeleton-busqueda.htmx-request.htmx-indicator {
+    display: table !important;
+}
+</style>
+
+<script>
+let itemsPedido = [];
+let categoriaFijada = false;
+
+function formularioCompleto() {
+    return document.getElementById('selector-categoria').value &&
+           document.getElementById('selector-condicion').value &&
+           document.getElementById('selector-deposito').value;
+}
+
+function habilitarBusqueda() {
+    const card = document.getElementById('card-busqueda');
+    if (formularioCompleto()) {
+        card.style.opacity = '1';
+        card.style.pointerEvents = 'auto';
+        document.getElementById('info-categoria').style.display = 'block';
+        document.getElementById('aviso-categoria').style.display = 'none';
+    } else {
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+        document.getElementById('info-categoria').style.display = 'none';
+        document.getElementById('aviso-categoria').style.display = 'block';
+    }
+}
+
+function validarFormulario() {
+    // Sincronizar condicion
+    const condicion = document.getElementById('selector-condicion').value;
+    document.getElementById('campo-condicion').value = condicion;
+
+    // Sincronizar deposito
+    const selDep = document.getElementById('selector-deposito');
+    document.getElementById('campo-deposito').value = selDep.value;
+    document.getElementById('campo-deposito-nombre').value =
+        selDep.options[selDep.selectedIndex]?.dataset.nombre || '';
+
+    habilitarBusqueda();
+}
+
+function seleccionarCategoria(select) {
+    const codigo = select.value;
+    const nombre = select.options[select.selectedIndex]?.dataset.nombre || '';
+
+    document.getElementById('campo-categoria').value = codigo;
+    document.getElementById('campo-categoria-nombre').value = nombre;
+    document.getElementById('nombre-categoria-display').textContent = nombre;
+
+    // Limpiar busqueda anterior
+    document.getElementById('buscar-producto').value = '';
+    document.getElementById('resultados-busqueda').innerHTML = '';
+
+    habilitarBusqueda();
+}
+
+function bloquearCategoria() {
+    if (!categoriaFijada && itemsPedido.length > 0) {
+        categoriaFijada = true;
+        document.getElementById('selector-categoria').disabled = true;
+        document.getElementById('selector-condicion').disabled = true;
+        document.getElementById('selector-deposito').disabled = true;
+        document.getElementById('info-categoria').classList.remove('alert-warning');
+        document.getElementById('info-categoria').classList.add('alert-success');
+    } else if (itemsPedido.length === 0) {
+        categoriaFijada = false;
+        document.getElementById('selector-categoria').disabled = false;
+        document.getElementById('selector-condicion').disabled = false;
+        document.getElementById('selector-deposito').disabled = false;
+        document.getElementById('info-categoria').classList.remove('alert-success');
+        document.getElementById('info-categoria').classList.add('alert-warning');
+    }
+}
+
+function agregarItem(codigo, descripcion, referencia, puesto, ref_proveedor) {
+    const existe = itemsPedido.find(i => i.codigo === codigo);
+    if (existe) {
+        existe.cantidad++;
+        renderItems();
+        return;
+    }
+    itemsPedido.push({ codigo, descripcion, referencia: referencia || '', puesto: puesto || '', ref_proveedor: ref_proveedor || '', cantidad: 1 });
+    renderItems();
+}
+
+function eliminarItem(index) {
+    itemsPedido.splice(index, 1);
+    renderItems();
+}
+
+function actualizarCantidad(index, valor) {
+    const cantidad = parseInt(valor);
+    if (cantidad > 0) {
+        itemsPedido[index].cantidad = cantidad;
+    }
+    actualizarJSON();
+}
+
+function renderItems() {
+    const tbody = document.getElementById('items-body');
+    const sinItems = document.getElementById('sin-items');
+    const totalBadge = document.getElementById('total-items');
+    const btnEnviar = document.getElementById('btn-enviar');
+
+    if (itemsPedido.length === 0) {
+        tbody.innerHTML = '';
+        sinItems.style.display = 'block';
+        btnEnviar.disabled = true;
+        totalBadge.textContent = '0 items';
+        actualizarJSON();
+        bloquearCategoria();
+        return;
+    }
+
+    sinItems.style.display = 'none';
+    btnEnviar.disabled = false;
+    totalBadge.textContent = itemsPedido.length + ' items';
+
+    tbody.innerHTML = itemsPedido.map((item, i) => `
+        <tr>
+            <td>${item.codigo}</td>
+            <td>${item.descripcion}</td>
+            <td><small class="text-muted">${item.referencia}</small></td>
+            <td><small class="text-muted">${item.puesto}</small></td>
+            <td><small class="text-muted">${item.ref_proveedor}</small></td>
+            <td>
+                <input type="number" class="form-control form-control-sm" style="width:80px"
+                    value="${item.cantidad}" min="1"
+                    onchange="actualizarCantidad(${i}, this.value)">
+            </td>
+            <td>
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="eliminarItem(${i})">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+
+    actualizarJSON();
+    bloquearCategoria();
+}
+
+function actualizarJSON() {
+    document.getElementById('items-json').value = JSON.stringify(itemsPedido);
+}
+
+document.getElementById('tipo-busqueda').addEventListener('change', function() {
+    const input = document.getElementById('buscar-producto');
+    htmx.process(input);
+});
+
+document.getElementById('form-pedido').addEventListener('submit', function(e) {
+    const btn = document.getElementById('btn-enviar');
+    if (btn.dataset.enviado === 'true') return;
+    e.preventDefault();
+    document.getElementById('overlay-confirmar').style.display = 'flex';
+});
+
+document.getElementById('btn-cancelar-confirm').addEventListener('click', function() {
+    document.getElementById('overlay-confirmar').style.display = 'none';
+});
+
+document.getElementById('btn-aceptar-confirm').addEventListener('click', function() {
+    document.getElementById('overlay-confirmar').style.display = 'none';
+    const btn = document.getElementById('btn-enviar');
+    btn.dataset.enviado = 'true';
+    btn.disabled = true;
+    document.getElementById('overlay-carga').style.display = 'flex';
+    document.getElementById('form-pedido').submit();
+});
+</script>
+{% endblock content %}

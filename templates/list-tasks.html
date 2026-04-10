@@ -1,15 +1,16 @@
 {% extends "dashboard.html" %}
 {% block content %}
-<link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css">
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
-<script src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
+{%load static%}
+<link rel="stylesheet" href="{% static 'vendor/datatables/css/dataTables.bootstrap5.min.css' %}">
+<script src="{% static 'vendor/jquery/jquery-3.6.0.min.js' %}"></script>
+<script src="{% static 'vendor/datatables/js/jquery.dataTables.min.js' %}"></script>
+<script src="{% static 'vendor/datatables/js/dataTables.bootstrap5.min.js' %}"></script>
 <script>
     $(document).ready(function() {
 // Initialize DataTable
         $('#myDataTable').DataTable({
             "language": {
-            "url": "//cdn.datatables.net/plug-ins/1.11.5/i18n/es-ES.json"
+            "url": "/static/vendor/datatables/i18n/es-ES.json"
         },
         paging: true, // Enable pagination
         searching: true, // Enable search

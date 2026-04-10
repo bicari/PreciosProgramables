@@ -225,7 +225,6 @@ class PrinterLabel(zpl.Label):
 ^FT0,243^A0N,14,10^FB127,1,3,C^FH\^CI28^FD{datos['Departamento']}^FS^CI27
 ^FO95,14
 ^FB300,4,0,L,0^A0N,28,28^FD{datos['Descripcion']}^FS
-^LRY^FO14,185^GB139,0,28^FS^LRN
 ^PQ1,0,1,Y
 ^XZ
 
@@ -242,16 +241,16 @@ class PrinterLabel(zpl.Label):
 ^PW400
 ^LL248
 ^LS0
-^FO2,1{KSA_HOME_LOGO if datos['Logo'] == 'Ksa Home' else KSA_CONSTRUCTOR_LOGO}
-^FT238,156^A0N,45,46^FH\^CI28^FD{datos['Precio'].replace(".",",")}^FS^CI27
-^FT201,156^A0N,23,23^FH\^CI28^FDRef^FS^CI27
+^FO2,1{KSA_HOME_LOGO if datos['Logo'] == 'KsaHome' else KSA_CONSTRUCTOR_LOGO}
+^FT238,180^A0N,45,46^FH\^CI28^FD{datos['Precio'].replace(".",",")}^FS^CI27
+^FT201,180^A0N,23,23^FH\^CI28^FDRef^FS^CI27
 ^FT11,109^A0N,11,10^FH\^CI28^FDJ-5019245-6^FS^CI27
 ^FT16,202^A0N,14,15^FH\^CI28^FDSKU:^FS^CI27
 ^FT16,225^A0N,14,15^FH\^CI28^FDCOD. BARRA:^FS^CI27
-^FT50,202^A0N,14,15^FH\^CI28^FD{datos['SKU']}^FS^CI27
-^FT111,225^A0N,14,15^FH\^CI28^FD{datos['CodBarra']}^FS^CI27
-^FT273,224^A0N,11,10^FH\^CI28^FD{datos['Departamento']}^FS^CI27
-^FT273,238^A0N,11,10^FH\^CI28^FD{datetime.date.today().strftime('%d/%m/%Y')}^FS^CI27
+^FT50,202^A0N,19,17^FH\^CI28^FD{datos['SKU']}^FS^CI27
+^FT111,225^A0N,19,17^FH\^CI28^FD{datos['CodBarra']}^FS^CI27
+^FT273,224^A0N,14,13^FH\^CI28^FD{datos['Departamento']}^FS^CI27
+^FT273,238^A0N,14,13^FH\^CI28^FD{datetime.date.today().strftime('%d/%m/%Y')}^FS^CI27
 ^FO86,14
 ^FB312,4,0,L,0^A0N,30,30^FD{datos['Descripcion']}
 ^PQ1,0,1,Y

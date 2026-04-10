@@ -1,0 +1,315 @@
+{% extends "dashboard.html" %}
+{% load permisos_tags %}
+{% block content %}
+{% load static %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="fas fa-chart-bar me-2"></i>Reporte de Pedidos Almacen</h2>
+        <div class="d-flex gap-2">
+            <a href="{% url 'pedidos-reporte-pdf' %}?fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&categoria={{ categoria_filtro }}&condicion={{ condicion_filtro }}"
+               class="btn btn-danger">
+                <i class="fas fa-file-pdf"></i> Exportar PDF
+            </a>
+            <a href="{% url 'pedidos-lista' %}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left"></i> Volver
+            </a>
+        </div>
+    </div>
+
+    <!-- Filtros -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h6 class="mb-0"><i class="fas fa-filter me-1"></i>Filtros</h6>
+        </div>
+        <div class="card-body">
+            <form method="get" class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Fecha inicio</label>
+                    <input type="date" name="fecha_inicio" class="form-control" value="{{ fecha_inicio }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Fecha fin</label>
+                    <input type="date" name="fecha_fin" class="form-control" value="{{ fecha_fin }}">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label fw-semibold">Categoria</label>
+                    <select name="categoria" class="form-select">
+                        <option value="">Todas</option>
+                        {% for cat in categorias_disponibles %}
+                        <option value="{{ cat }}" {% if categoria_filtro == cat %}selected{% endif %}>{{ cat }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label fw-semibold">Condicion</label>
+                    <select name="condicion" class="form-select">
+                        <option value="">Todas</option>
+                        {% for value, label in condiciones %}
+                        <option value="{{ value }}" {% if condicion_filtro == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-search"></i> Aplicar
+                    </button>
+                    <a href="{% url 'pedidos-reporte' %}" class="btn btn-outline-secondary">
+                        <i class="fas fa-times"></i>
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- KPIs principales -->
+    <div class="row g-3 mb-4 align-items-stretch">
+        <div class="col">
+            <div class="card text-center border-primary h-100">
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <div class="fs-1 fw-bold text-primary">{{ total_pedidos }}</div>
+                    <div class="text-muted small">Total Pedidos</div>
+                    <div class="mt-1 invisible"><span class="badge fs-6">&nbsp;</span></div>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card text-center border-secondary h-100">
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <div class="fs-1 fw-bold text-secondary">{{ total_solicitado }}</div>
+                    <div class="text-muted small">Unidades Solicitadas</div>
+                    <div class="mt-1 invisible"><span class="badge fs-6">&nbsp;</span></div>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card text-center border-success h-100">
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <div class="fs-1 fw-bold text-success">{{ total_despachado }}</div>
+                    <div class="text-muted small">Unidades Despachadas</div>
+                    <div class="mt-1 invisible"><span class="badge fs-6">&nbsp;</span></div>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card text-center border-info h-100">
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <div class="fs-1 fw-bold text-info">{{ total_recibido }}</div>
+                    <div class="text-muted small">Unidades Recibidas</div>
+                    <div class="mt-1 invisible"><span class="badge fs-6">&nbsp;</span></div>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card text-center h-100 {% if pct_incidencias > 20 %}border-danger bg-danger bg-opacity-10{% elif pct_incidencias > 10 %}border-warning{% else %}border-success{% endif %}">
+                <div class="card-body d-flex flex-column justify-content-center">
+                    <div class="fs-1 fw-bold {% if pct_incidencias > 20 %}text-danger{% elif pct_incidencias > 10 %}text-warning{% else %}text-success{% endif %}">{{ pct_incidencias }}%</div>
+                    <div class="text-muted small">Pedidos con Incidencia</div>
+                    <div class="mt-1">
+                        <span class="badge {% if pct_incidencias > 20 %}bg-danger{% elif pct_incidencias > 10 %}bg-warning text-dark{% else %}bg-success{% endif %} fs-6">
+                            {{ pedidos_con_incidencia }} pedido{{ pedidos_con_incidencia|pluralize }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tiempo promedio + destacados -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <i class="fas fa-clock fa-2x text-warning mb-2"></i>
+                    <h6 class="card-title">Tiempo Promedio de Despacho</h6>
+                    {% if tiempo_horas is not None %}
+                        <div class="fs-3 fw-bold text-warning">{{ tiempo_horas }}h {{ tiempo_minutos }}m</div>
+                        <div class="text-muted small">desde creacion hasta despacho</div>
+                    {% else %}
+                        <div class="text-muted">Sin datos suficientes</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <i class="fas fa-tag fa-2x text-primary mb-2"></i>
+                    <h6 class="card-title">Categoria Mas Despachada</h6>
+                    {% if categoria_top %}
+                        <div class="fs-5 fw-bold text-primary">{{ categoria_top.categoria }}</div>
+                        <div class="badge bg-primary mt-1">{{ categoria_top.total }} pedido{{ categoria_top.total|pluralize }}</div>
+                    {% else %}
+                        <div class="text-muted">Sin datos</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <i class="fas fa-star fa-2x text-danger mb-2"></i>
+                    <h6 class="card-title">Condicion Mas Usada</h6>
+                    {% if condicion_top %}
+                        {% if condicion_top.condicion == 'URGENTE' %}
+                            <div class="fs-5 fw-bold text-danger">Urgente</div>
+                            <div class="badge bg-danger mt-1">{{ condicion_top.total }} pedido{{ condicion_top.total|pluralize }}</div>
+                        {% elif condicion_top.condicion == 'SURTIDO' %}
+                            <div class="fs-5 fw-bold text-success">Surtido</div>
+                            <div class="badge bg-success mt-1">{{ condicion_top.total }} pedido{{ condicion_top.total|pluralize }}</div>
+                        {% elif condicion_top.condicion == 'CLIENTE_RETIRA' %}
+                            <div class="fs-5 fw-bold text-info">Cliente Retira</div>
+                            <div class="badge bg-info mt-1">{{ condicion_top.total }} pedido{{ condicion_top.total|pluralize }}</div>
+                        {% else %}
+                            <div class="fs-5 fw-bold">{{ condicion_top.condicion }}</div>
+                            <div class="badge bg-secondary mt-1">{{ condicion_top.total }} pedido{{ condicion_top.total|pluralize }}</div>
+                        {% endif %}
+                    {% else %}
+                        <div class="text-muted">Sin datos</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100 {% if pct_incidencias > 20 %}border-danger{% elif pct_incidencias > 10 %}border-warning{% else %}border-success{% endif %}">
+                <div class="card-body text-center">
+                    <i class="fas fa-triangle-exclamation fa-2x {% if pct_incidencias > 20 %}text-danger{% elif pct_incidencias > 10 %}text-warning{% else %}text-success{% endif %} mb-2"></i>
+                    <h6 class="card-title">Incidencias</h6>
+                    <div class="fs-3 fw-bold {% if pct_incidencias > 20 %}text-danger{% elif pct_incidencias > 10 %}text-warning{% else %}text-success{% endif %}">
+                        {{ pct_incidencias }}%
+                    </div>
+                    <div class="text-muted small">{{ pedidos_con_incidencia }} pedido{{ pedidos_con_incidencia|pluralize }} con incidencia</div>
+                    <div class="text-muted small">{{ total_items_incidencia }} item{{ total_items_incidencia|pluralize }} afectado{{ total_items_incidencia|pluralize }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tablas de distribucion -->
+    <div class="row g-3">
+        <!-- Por estado -->
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h6 class="mb-0"><i class="fas fa-list me-1"></i>Pedidos por Estado</h6>
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Estado</th>
+                                <th class="text-end">Cantidad</th>
+                                <th class="text-end">%</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in por_estado %}
+                            <tr>
+                                <td>
+                                    {% if item.estado == 'PENDIENTE' %}
+                                        <span class="badge bg-warning text-dark">Pendiente</span>
+                                    {% elif item.estado == 'PICKING' %}
+                                        <span class="badge bg-info">Picking</span>
+                                    {% elif item.estado == 'DESPACHADO' %}
+                                        <span class="badge bg-primary">Despachado</span>
+                                    {% elif item.estado == 'RECIBIDO' %}
+                                        <span class="badge bg-success">Recibido</span>
+                                    {% elif item.estado == 'CERRADO' %}
+                                        <span class="badge bg-secondary">Cerrado</span>
+                                    {% else %}
+                                        <span class="badge bg-dark">{{ item.estado }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end fw-bold">{{ item.total }}</td>
+                                <td class="text-end text-muted">
+                                    {% if total_pedidos %}
+                                        {% widthratio item.total total_pedidos 100 %}%
+                                    {% else %}0%{% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="3" class="text-center text-muted py-3">Sin datos</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Por condicion -->
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h6 class="mb-0"><i class="fas fa-exclamation-circle me-1"></i>Pedidos por Condicion</h6>
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Condicion</th>
+                                <th class="text-end">Cantidad</th>
+                                <th class="text-end">%</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in por_condicion %}
+                            <tr>
+                                <td>
+                                    {% if item.condicion == 'URGENTE' %}
+                                        <span class="badge bg-danger">Urgente</span>
+                                    {% elif item.condicion == 'SURTIDO' %}
+                                        <span class="badge bg-success">Surtido</span>
+                                    {% elif item.condicion == 'CLIENTE_RETIRA' %}
+                                        <span class="badge bg-info">Cliente Retira</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ item.condicion|default:"-" }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end fw-bold">{{ item.total }}</td>
+                                <td class="text-end text-muted">
+                                    {% if total_pedidos %}
+                                        {% widthratio item.total total_pedidos 100 %}%
+                                    {% else %}0%{% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="3" class="text-center text-muted py-3">Sin datos</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top categorias -->
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h6 class="mb-0"><i class="fas fa-tags me-1"></i>Top Categorias</h6>
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Categoria</th>
+                                <th class="text-end">Pedidos</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in por_categoria %}
+                            <tr>
+                                <td>{{ item.categoria }}</td>
+                                <td class="text-end">
+                                    <span class="badge bg-primary rounded-pill">{{ item.total }}</span>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="2" class="text-center text-muted py-3">Sin datos</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock content %}

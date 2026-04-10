@@ -10,7 +10,8 @@ media
 *.cvs
 # Backup files # 
 *.bak 
-
+*.pdf
+*.prn
 # If you are using PyCharm # 
 # User-specific stuff
 .idea/**/workspace.xml

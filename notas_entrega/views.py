@@ -10,6 +10,8 @@ from .pdf import generar_factura
 import logging
 import base64
 
+from .pdf import generar_reporte_notas
+
 logger = logging.getLogger(__name__)
 # Create your views here.
 
@@ -125,6 +127,41 @@ def procesar_recepcion(request):
 def obtener_confirmacion(request):
     nro_nota_entrega=request.session.pop('nota_entrega', {})
     return render(request, 'confirm-nota.html', context={'document': nro_nota_entrega})
+
+@login_required(login_url='/login/')
+def consultar_notas(request):
+    fecha_desde = request.GET.get('fecha_desde', '')
+    fecha_hasta = request.GET.get('fecha_hasta', '')
+    notas = []
+
+    if fecha_desde and fecha_hasta:
+        try:
+            dbisam = DBISAMDatabase()
+            rows = dbisam.consultar_notas_entrega(fecha_desde, fecha_hasta)
+            notas = [{
+                'documento': row[0],
+                'total_items': int(row[1]) if row[1] else 0,
+                'fecha': row[2].strftime('%d/%m/%Y') if row[2] else '',
+                'rif': row[3] or '',
+                'proveedor': row[4] or 'Sin proveedor',
+                'total_neto': float(row[5]) if row[5] else 0,
+                'moneda': 'Bs' if str(row[6]) == '1' else 'USD',
+            } for row in rows]
+        except Exception as e:
+            logger.error(f"Error consultando notas: {e}")
+
+    if request.GET.get('formato') == 'pdf' and notas:
+        pdf_bytes = generar_reporte_notas(notas, fecha_desde, fecha_hasta)
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="reporte_notas_{fecha_desde}_{fecha_hasta}.pdf"'
+        return response
+
+    return render(request, 'consultar-notas.html', {
+        'notas': notas,
+        'fecha_desde': fecha_desde,
+        'fecha_hasta': fecha_hasta,
+    })
+
 
 @csrf_exempt
 def delete_product(request):

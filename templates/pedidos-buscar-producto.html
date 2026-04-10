@@ -1,0 +1,41 @@
+{% if resultados %}
+<table class="table table-sm table-hover">
+    <thead>
+        <tr>
+            <th>Codigo</th>
+            <th>Descripcion</th>
+            <th>Referencia</th>
+            <th>Puesto</th>
+            <th>Existencia</th>
+            <th>Ref. Proveedor</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for producto in resultados %}
+        <tr>
+            <td>{{ producto.0 }}</td>
+            <td>{{ producto.1 }}</td>
+            <td>{{ producto.2 }}</td>
+            <td>{{ producto.3 }}</td>
+            <td>
+                {% if producto.4 > 0 %}
+                    <span class="badge bg-success">{{ producto.4|floatformat:0 }}</span>
+                {% else %}
+                    <span class="badge bg-danger">0</span>
+                {% endif %}
+            </td>
+            <td>{{ producto.5 }}</td>
+            <td>
+                <button type="button" class="btn btn-sm btn-success"
+                    onclick="agregarItem('{{ producto.0 }}', '{{ producto.1|escapejs }}', '{{ producto.2|escapejs }}', '{{ producto.3|escapejs }}', '{{ producto.5|escapejs }}')">
+                    <i class="fas fa-plus"></i> Agregar
+                </button>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="text-muted">No se encontraron productos</p>
+{% endif %}

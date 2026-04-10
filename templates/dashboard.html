@@ -8,11 +8,11 @@
     <title>App Ksa Home Center</title>
     
     <!-- Bootstrap 5 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{% static 'vendor/bootstrap/css/bootstrap.min.css' %}" rel="stylesheet">
     <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.7/dist/htmx.min.js" integrity="sha384-ZBXiYtYQ6hJ2Y0ZNoYuI+Nq5MqWBr+chMrS/RkXpNzQCApHEhOt2aY8EJgqwHLkJ" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="{% static 'vendor/fontawesome/css/all.min.css' %}">
+    <script src="{% static 'vendor/bootstrap/js/bootstrap.bundle.min.js' %}"></script>
+    <script src="{% static 'vendor/htmx/htmx.min.js' %}"></script>
 
     
    
@@ -49,7 +49,7 @@
                     </label>
                     <ul class="sub-menu">
                         <li><a href="/notas-entrega">Generar Nota</a></li>
-                        <li><a href="#">Consultar Nota</a></li>
+                        <li><a href="/consultar-notas/">Consultar Nota</a></li>
                     </ul>
                 </li>
                 {%endif%}
@@ -83,6 +83,27 @@
                     </ul>
                 </li>
                 {%endif%}
+
+                {% if request.user|has_any_group:"Pedidos Tienda,Pedidos Almacen,Pedidos Supervisor" %}
+                <li class="menu-item">
+                    <input type="checkbox" id="menu-pedidos" class="menu-toggle">
+                    <label for="menu-pedidos" class="menu-label">
+                        <i class="fas fa-boxes-stacked"></i>
+                        <span class="menu-text">Pedidos Almacen</span>
+                        <span hx-get="/pedidos/pendientes-count/" hx-trigger="load, every 60s" hx-swap="innerHTML"></span>
+                        <span class="arrow">></span>
+                    </label>
+                    <ul class="sub-menu">
+                        <li><a href="/pedidos/">Ver Pedidos</a></li>
+                        {% if request.user|has_group:"Pedidos Tienda" %}
+                        <li><a href="/pedidos/crear/">Nuevo Pedido</a></li>
+                        {% endif %}
+                        {% if request.user|has_group:"Pedidos Supervisor" %}
+                        <li><a href="/pedidos/reporte/">Reporte</a></li>
+                        {% endif %}
+                    </ul>
+                </li>
+                {% endif %}
             </ul>
         </div>
         <div>

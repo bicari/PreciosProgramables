@@ -1,0 +1,174 @@
+{% extends "dashboard.html" %}
+{% load permisos_tags %}
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>Pedido #{{ pedido.numero_pedido }}</h2>
+        <a href="{% url 'pedidos-lista' %}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left"></i> Volver
+        </a>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Informacion del Pedido</h5>
+                    <table class="table table-borderless mb-0">
+                        <tr>
+                            <th>Solicitante:</th>
+                            <td>{{ pedido.solicitante.username|capfirst }}</td>
+                        </tr>
+                        <tr>
+                            <th>Despachador:</th>
+                            <td>{{ pedido.despachador.username|capfirst|default:"-" }}</td>
+                        </tr>
+                        <tr>
+                            <th>Estado:</th>
+                            <td>
+                                {% if pedido.estado == 'PENDIENTE' %}
+                                    <span class="badge bg-warning text-dark">Pendiente</span>
+                                {% elif pedido.estado == 'EN_PROCESO' %}
+                                    <span class="badge bg-info">En Proceso</span>
+                                {% elif pedido.estado == 'DESPACHADO' %}
+                                    <span class="badge bg-primary">Despachado</span>
+                                {% elif pedido.estado == 'RECIBIDO' %}
+                                    <span class="badge bg-success">Recibido</span>
+                                {% elif pedido.estado == 'CERRADO' %}
+                                    <span class="badge bg-secondary">Cerrado</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Categoria:</th>
+                            <td><span class="badge bg-secondary">{{ pedido.categoria|default:"-" }}</span></td>
+                        </tr>
+                        <tr>
+                            <th>Condicion:</th>
+                            <td>
+                                {% if pedido.condicion == 'URGENTE' %}
+                                    <span class="badge bg-danger">Urgente</span>
+                                {% elif pedido.condicion == 'SURTIDO' %}
+                                    <span class="badge bg-success">Surtido</span>
+                                {% elif pedido.condicion == 'CLIENTE_RETIRA' %}
+                                    <span class="badge bg-info">Cliente Retira</span>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Deposito origen:</th>
+                            <td>{{ pedido.deposito|default:"-" }}</td>
+                        </tr>
+                        {% if pedido.observaciones %}
+                        <tr>
+                            <th>Observaciones:</th>
+                            <td>{{ pedido.observaciones }}</td>
+                        </tr>
+                        {% endif %}
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Fechas</h5>
+                    <table class="table table-borderless mb-0">
+                        <tr>
+                            <th>Creacion:</th>
+                            <td>{{ pedido.fecha_creacion|date:"d/m/Y H:i" }}</td>
+                        </tr>
+                        <tr>
+                            <th>Despacho:</th>
+                            <td>{{ pedido.fecha_despacho|date:"d/m/Y H:i"|default:"-" }}</td>
+                        </tr>
+                        <tr>
+                            <th>Recepcion:</th>
+                            <td>{{ pedido.fecha_recepcion|date:"d/m/Y H:i"|default:"-" }}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Items del Pedido</h5>
+            <div>
+                {% if pedido.estado == 'PENDIENTE' or pedido.estado == 'EN_PROCESO' %}
+                    {% if es_despachador %}
+                    <a href="{% url 'pedidos-despachar' pedido.numero_pedido %}" class="btn btn-sm btn-success">
+                        <i class="fas fa-truck"></i> Despachar
+                    </a>
+                    {% endif %}
+                {% endif %}
+                {% if pedido.estado == 'DESPACHADO' %}
+                    {% if puede_recibir %}
+                    <a href="{% url 'pedidos-recibir' pedido.numero_pedido %}" class="btn btn-sm btn-info">
+                        <i class="fas fa-box-open"></i> Recibir
+                    </a>
+                    {% endif %}
+                {% endif %}
+            </div>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Codigo</th>
+                        <th>Descripcion</th>
+                        <th>Referencia</th>
+                        <th>Puesto</th>
+                        <th>Ref. Proveedor</th>
+                        <th>Solicitado</th>
+                        {% if ver_despachado %}<th>Despachado</th>{% endif %}
+                        <th>Recibido</th>
+                        <th>Estado</th>
+                        <th>Observacion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td>{{ item.codigo }}</td>
+                        <td>{{ item.descripcion }}</td>
+                        <td><small class="text-muted">{{ item.referencia|default:"-" }}</small></td>
+                        <td><small class="text-muted">{{ item.puesto|default:"-" }}</small></td>
+                        <td><small class="text-muted">{{ item.ref_proveedor|default:"-" }}</small></td>
+                        <td>{{ item.cantidad_solicitada }}</td>
+                        {% if ver_despachado %}<td>{{ item.cantidad_despachada }}</td>{% endif %}
+                        <td>{{ item.cantidad_recibida }}</td>
+                        <td>
+                            {% if item.estado == 'PENDIENTE' %}
+                                <span class="badge bg-warning text-dark">Pendiente</span>
+                            {% elif item.estado == 'DESPACHADO' %}
+                                <span class="badge bg-primary">Despachado</span>
+                            {% elif item.estado == 'RECIBIDO' %}
+                                <span class="badge bg-success">Recibido</span>
+                            {% elif item.estado == 'BACK_ORDER' %}
+                                <span class="badge bg-danger">Back Order</span>
+                            {% elif item.estado == 'INCIDENCIA' %}
+                                <span class="badge bg-dark">Incidencia</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ item.observacion|default:"-" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock content %}

@@ -266,6 +266,69 @@ def generar_factura(filename, pedido: dict[list[dict]], logo_path=None, prelimin
     except Exception as e:
         print(f"Error al generar la factura: {e}")
 
+def generar_reporte_notas(notas: list[dict], fecha_desde: str, fecha_hasta: str):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=LETTER,
+        leftMargin=30, rightMargin=30, topMargin=20, bottomMargin=20
+    )
+    elements = []
+    styles = getSampleStyleSheet()
+
+    # Titulo
+    elements.append(Paragraph("<b>Reporte de Notas de Entrega</b>", styles["Heading2"]))
+    elements.append(Paragraph(
+        f"Desde: {fecha_desde} &nbsp;&nbsp; Hasta: {fecha_hasta} &nbsp;&nbsp; Total: {len(notas)} notas",
+        styles["Normal"]
+    ))
+    elements.append(Spacer(1, 15))
+
+    # Tabla
+    estilo_celda = styles['Normal'].clone('celda_reporte')
+    estilo_celda.fontSize = 8.5
+
+    data = [["#", "Nro Documento", "Fecha Recepcion", "Proveedor", "RIF", "Items", "Total", "Moneda"]]
+
+    for i, nota in enumerate(notas, 1):
+        data.append([
+            str(i),
+            nota['documento'],
+            nota['fecha'],
+            Paragraph(nota['proveedor'], estilo_celda),
+            nota['rif'],
+            str(nota['total_items']),
+            formatear_numeros(nota['total_neto']),
+            nota['moneda'],
+        ])
+
+    tabla = Table(data, colWidths=[25, 75, 75, 155, 75, 40, 70, 40], repeatRows=1)
+    tabla.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 9),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 1), (-1, -1), 8.5),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("ALIGN", (5, 0), (5, -1), "CENTER"),
+        ("ALIGN", (6, 0), (6, -1), "RIGHT"),
+        ("ALIGN", (7, 0), (7, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f2f2f2")]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(tabla)
+
+    doc.build(elements)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes
+
+
 #pedido = {'id':'PRELIMINAR', 'direccion_cliente':'Maracay', 'cliente': 'E80338646', 'productos': {'01010001': {'cantidad': 23.0, 'descuento': 10, 'descripcion': 'MARCADOR PIZARRA PUNTA CINCEL OFIMAK REF OK93P', 'impuesto': 16, 'precio_sin_iva': 48.5, 'precio': 56.26, 'precio_con_descuento': 43.65, 'monto_iva': 6.98, 'precio_venta': 50.63, 'subtotal': 1164.49}, '01010009': {'cantidad': 2.0, 'descuento': 0, 'descripcion': 'TABLA D/INVENTARIO T/OFICIO OFIMAK REF  EN MADERA', 'impuesto': 0, 'precio_sin_iva': 2.0, 'precio': 2.0, 'precio_con_descuento': 2.0, 'monto_iva': 0.0, 'precio_venta': 2.0, 'subtotal': 4.0}, '01020003': {'cantidad': 1.0, 'descuento': 0, 'descripcion': 'ENGRAPADORA OFIMAK REF OK07B C/AZUL P/GRAPAS LISAS/CORRUG 120X60X20MM', 'impuesto': 16, 'precio_sin_iva': 5.87, 'precio': 6.81, 'precio_con_descuento': 5.87, 'monto_iva': 0.94, 'precio_venta': 6.81, 'subtotal': 6.81}, '07080059': {'cantidad': 2.0, 'descuento': 0, 'descripcion': 'TALADRO 1/2 BRUSHLESS BARETOOL GBS 18V-150 C BOCHS REF. 06019J51E0 / 03-32-011', 'impuesto': 16, 'precio_sin_iva': 867.98, 'precio': 1006.86, 'precio_con_descuento': 867.98, 'monto_iva': 138.88, 'precio_venta': 1006.86, 'subtotal': 2013.72}}, 'precio': 'P1', 'comentario': 'Despacho en 2 dias para entregar el 30 de agosto de 2025', 'total': 0.0, 'descripcion_cliente': 'RAUL ARAGUNDI', 'vendedor': '04', 'baseimponible': 2745.78, 'exento': 4.0, 'total_bruto': 2749.78, 'iva_16': 439.32, 'total_neto': 3189.1, 'nombre_vendedor': 'Carlos Aranguren', 'pedido':11}
 # nota = {'ordenes': [{'codigo': '01020003', 'referencia':'7598002881124','ref_proveedor':'7594544454','orden': '00009921', 'descripcion':'Ratón recarcagable' ,'cantidad': 16, 'diferencia': -15, 'recibido': 1, 'costo': 20, 'iva': 16, 'iva_16_monto': 3.2, 'moneda': '1', 'deposito': '1', 'puesto': '25-LS-A'},
 #                     {'codigo': '01020003', 'referencia':'7598002881124','orden': '00009922', 'descripcion':'Ratón recarcagable' ,'cantidad': 16, 'diferencia': -15, 'recibido': 1, 'costo': 1500, 'iva': 16, 'iva_16_monto':240,'moneda': '1', 'deposito': '1', 'puesto': '25-LS-A'},
