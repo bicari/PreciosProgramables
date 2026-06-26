@@ -1,6 +1,8 @@
 from typing import Any, Iterable
 
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.shortcuts import redirect
+from django.urls import path
 from .models import Pedido, PedidoItem, DepositoPermitido
 from .dbisam import PedidosDBISAM
 
@@ -59,18 +61,34 @@ class DepositoPermitidoAdmin(admin.ModelAdmin):
     list_filter = ('activo',)
     search_fields = ('codigo', 'nombre')
     ordering = ('nombre',)
+    change_list_template = 'admin/depositopermitido_changelist.html'
 
-    actions = ['accion_sincronizar']
+    def get_urls(self):
+        """Añade la URL del botón 'Sincronizar depósitos desde a2'."""
+        urls = super().get_urls()
+        custom = [
+            path(
+                'sincronizar/',
+                self.admin_site.admin_view(self.sincronizar_view),
+                name='pedidosalmacen_depositopermitido_sincronizar',
+            ),
+        ]
+        return custom + urls
 
-    @admin.action(description='Sincronizar depósitos desde a2')
-    def accion_sincronizar(self, request, queryset):
+    def sincronizar_view(self, request):
+        """Sincroniza los depósitos desde DBISAM y vuelve al listado.
+
+        No depende de una selección de filas, por eso es una vista propia
+        (un botón siempre visible) y no una acción de changelist.
+        """
         try:
             rows = PedidosDBISAM().obtener_depositos()
         except Exception as e:
-            self.message_user(request, f'Error al conectar con a2: {e}', level='error')
-            return
+            self.message_user(request, f'Error al conectar con a2: {e}', level=messages.ERROR)
+            return redirect('..')
         creados, actualizados = sincronizar_depositos_permitidos(rows)
         self.message_user(
             request,
             f'Sincronización completa: {creados} creados, {actualizados} actualizados.',
         )
+        return redirect('..')

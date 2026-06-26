@@ -138,3 +138,34 @@ class BotonAgregarBloqueoTest(TestCase):
         html = self._buscar(7)
         self.assertIn("agregarItem('P1'", html)
         self.assertNotIn('Sin stock', html)
+
+
+class SincronizarViewTest(TestCase):
+    """La sincronización se ejecuta desde una vista propia (botón), no desde
+    una acción de changelist, para que funcione con la tabla vacía."""
+
+    def setUp(self):
+        from users.models import User
+        from django.urls import reverse
+        self.user = User.objects.create_superuser(username='admin3', password='x')
+        self.client.force_login(self.user)
+        self.url = reverse('admin:pedidosalmacen_depositopermitido_sincronizar')
+
+    @patch('PedidosAlmacen.admin.PedidosDBISAM')
+    def test_sincroniza_con_tabla_vacia(self, mock_db):
+        mock_db.return_value.obtener_depositos.return_value = [
+            NS(FDP_CODIGO=4, FDP_DESCRIPCION='Tienda Sur'),
+            NS(FDP_CODIGO=7, FDP_DESCRIPCION='Tienda Norte'),
+        ]
+        # Tabla vacía: el botón debe poder ejecutarse igualmente.
+        self.assertEqual(DepositoPermitido.objects.count(), 0)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 302)  # redirect al listado
+        self.assertEqual(DepositoPermitido.objects.count(), 2)
+
+    @patch('PedidosAlmacen.admin.PedidosDBISAM')
+    def test_error_dbisam_no_rompe(self, mock_db):
+        mock_db.return_value.obtener_depositos.side_effect = Exception('odbc down')
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(DepositoPermitido.objects.count(), 0)
