@@ -1,3 +1,5 @@
+from typing import Any, Iterable
+
 from django.contrib import admin
 from .models import Pedido, PedidoItem, DepositoPermitido
 from .dbisam import PedidosDBISAM
@@ -27,7 +29,7 @@ class PedidoItemAdmin(admin.ModelAdmin):
     list_per_page = 30
 
 
-def sincronizar_depositos_permitidos(rows) -> tuple[int, int]:
+def sincronizar_depositos_permitidos(rows: Iterable[Any]) -> tuple[int, int]:
     """Upsert de depósitos desde filas de SDEPOSITOS, preservando `activo`.
 
     Args:
