@@ -1,5 +1,6 @@
 from django.contrib import admin
 from .models import Pedido, PedidoItem, DepositoPermitido
+from .dbisam import PedidosDBISAM
 
 
 class PedidoItemInline(admin.TabularInline):
@@ -26,6 +27,29 @@ class PedidoItemAdmin(admin.ModelAdmin):
     list_per_page = 30
 
 
+def sincronizar_depositos_permitidos(rows) -> tuple[int, int]:
+    """Upsert de depósitos desde filas de SDEPOSITOS, preservando `activo`.
+
+    Args:
+        rows: iterable de filas con atributos FDP_CODIGO y FDP_DESCRIPCION.
+
+    Returns:
+        Tupla (creados, actualizados).
+    """
+    creados = 0
+    actualizados = 0
+    for row in rows:
+        _, created = DepositoPermitido.objects.update_or_create(
+            codigo=int(row.FDP_CODIGO),
+            defaults={'nombre': (row.FDP_DESCRIPCION or '').strip()},
+        )
+        if created:
+            creados += 1
+        else:
+            actualizados += 1
+    return creados, actualizados
+
+
 @admin.register(DepositoPermitido)
 class DepositoPermitidoAdmin(admin.ModelAdmin):
     list_display = ('codigo', 'nombre', 'activo', 'fecha_sync')
@@ -33,3 +57,18 @@ class DepositoPermitidoAdmin(admin.ModelAdmin):
     list_filter = ('activo',)
     search_fields = ('codigo', 'nombre')
     ordering = ('nombre',)
+
+    actions = ['accion_sincronizar']
+
+    @admin.action(description='Sincronizar depósitos desde a2')
+    def accion_sincronizar(self, request, queryset):
+        try:
+            rows = PedidosDBISAM().obtener_depositos()
+        except Exception as e:
+            self.message_user(request, f'Error al conectar con a2: {e}', level='error')
+            return
+        creados, actualizados = sincronizar_depositos_permitidos(rows)
+        self.message_user(
+            request,
+            f'Sincronización completa: {creados} creados, {actualizados} actualizados.',
+        )
