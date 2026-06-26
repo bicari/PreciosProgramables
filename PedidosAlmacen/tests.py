@@ -169,3 +169,150 @@ class SincronizarViewTest(TestCase):
         resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(DepositoPermitido.objects.count(), 0)
+
+
+class GenerarPedidoPDFVistaTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        u = User.objects.create_superuser(username='pdfu', password='x')
+        self.pedido = Pedido.objects.create(solicitante=u)
+        PedidoItem.objects.create(
+            pedido=self.pedido, codigo='A', descripcion='Articulo A',
+            cantidad_solicitada=5, estado='PARCIAL',
+            cantidad_despachada=2, cantidad_back_order=3, cantidad_recibida=0,
+        )
+
+    def test_genera_pdf_para_cada_vista(self):
+        from .pdf import generar_pedido_pdf
+        for vista in ['todos', 'despachado', 'back_order', 'recibido', 'parcial']:
+            pdf = generar_pedido_pdf(self.pedido, self.pedido.items.all(), vista=vista)
+            self.assertTrue(pdf.startswith(b'%PDF'), f'vista={vista} no produjo PDF')
+
+    def test_vista_default_es_todos(self):
+        from .pdf import generar_pedido_pdf
+        pdf = generar_pedido_pdf(self.pedido, self.pedido.items.all())
+        self.assertTrue(pdf.startswith(b'%PDF'))
+
+
+class ExportarPedidoVistaTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from .models import Pedido, PedidoItem
+        from django.urls import reverse
+        self.reverse = reverse
+        self.almacen = User.objects.create_superuser(username='alm', password='x')
+        self.tienda = User.objects.create_user(username='tnd', password='x')
+        g, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.tienda.groups.add(g)
+        self.pedido = Pedido.objects.create(solicitante=self.tienda)
+        for codigo, estado in [('A', 'DESPACHADO'), ('B', 'BACK_ORDER'),
+                               ('C', 'RECIBIDO'), ('D', 'PARCIAL')]:
+            PedidoItem.objects.create(
+                pedido=self.pedido, codigo=codigo, descripcion=codigo.lower(),
+                cantidad_solicitada=1, estado=estado,
+            )
+
+    def _url(self, vista=None):
+        u = self.reverse('pedidos-pdf', args=[self.pedido.numero_pedido])
+        return f'{u}?vista={vista}' if vista else u
+
+    @patch('PedidosAlmacen.views.generar_pedido_pdf', return_value=b'%PDF-x')
+    def test_filtra_por_estado_exacto(self, mock_pdf):
+        self.client.force_login(self.almacen)
+        resp = self.client.get(self._url('despachado'))
+        self.assertEqual(resp.status_code, 200)
+        args, kwargs = mock_pdf.call_args
+        self.assertEqual([i.estado for i in args[1]], ['DESPACHADO'])
+        self.assertEqual(kwargs.get('vista'), 'despachado')
+
+    @patch('PedidosAlmacen.views.generar_pedido_pdf', return_value=b'%PDF-x')
+    def test_vista_invalida_cae_a_todos(self, mock_pdf):
+        self.client.force_login(self.almacen)
+        resp = self.client.get(self._url('inexistente'))
+        self.assertEqual(resp.status_code, 200)
+        args, kwargs = mock_pdf.call_args
+        self.assertEqual(len(list(args[1])), 4)
+        self.assertEqual(kwargs.get('vista'), 'todos')
+
+    @patch('PedidosAlmacen.views.generar_pedido_pdf', return_value=b'%PDF-x')
+    def test_tienda_no_puede_despachado(self, mock_pdf):
+        self.client.force_login(self.tienda)
+        resp = self.client.get(self._url('despachado'))
+        self.assertEqual(resp.status_code, 302)
+        mock_pdf.assert_not_called()
+
+    @patch('PedidosAlmacen.views.generar_pedido_pdf', return_value=b'%PDF-x')
+    def test_tienda_puede_recibido(self, mock_pdf):
+        self.client.force_login(self.tienda)
+        resp = self.client.get(self._url('recibido'))
+        self.assertEqual(resp.status_code, 200)
+        args, kwargs = mock_pdf.call_args
+        self.assertEqual([i.estado for i in args[1]], ['RECIBIDO'])
+
+    @patch('PedidosAlmacen.views.generar_pedido_pdf', return_value=b'%PDF-x')
+    def test_variante_vacia_responde_200(self, mock_pdf):
+        from .models import Pedido, PedidoItem
+        pedido2 = Pedido.objects.create(solicitante=self.almacen)
+        PedidoItem.objects.create(pedido=pedido2, codigo='Z', descripcion='z',
+                                  cantidad_solicitada=1, estado='DESPACHADO')
+        self.client.force_login(self.almacen)
+        url = self.reverse('pedidos-pdf', args=[pedido2.numero_pedido]) + '?vista=back_order'
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        args, _ = mock_pdf.call_args
+        self.assertEqual(len(list(args[1])), 0)
+
+
+class DetallePedidoVistasPdfTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from .models import Pedido, PedidoItem
+        from django.urls import reverse
+        self.reverse = reverse
+        self.almacen = User.objects.create_superuser(username='alm2', password='x')
+        self.tienda = User.objects.create_user(username='tnd2', password='x')
+        g, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.tienda.groups.add(g)
+        self.pedido = Pedido.objects.create(solicitante=self.tienda)
+        for codigo, estado in [('A', 'DESPACHADO'), ('B', 'BACK_ORDER'),
+                               ('C', 'RECIBIDO'), ('D', 'PARCIAL')]:
+            PedidoItem.objects.create(
+                pedido=self.pedido, codigo=codigo, descripcion=codigo.lower(),
+                cantidad_solicitada=1, estado=estado,
+            )
+
+    def test_almacen_ve_todas_las_variantes_con_conteo(self):
+        self.client.force_login(self.almacen)
+        resp = self.client.get(self.reverse('pedidos-detalle', args=[self.pedido.numero_pedido]))
+        por_clave = {v['clave']: v['count'] for v in resp.context['vistas_pdf']}
+        self.assertEqual(por_clave['todos'], 4)
+        self.assertEqual(por_clave['despachado'], 1)
+        self.assertEqual(por_clave['parcial'], 1)
+
+    def test_tienda_no_ve_despachado_ni_parcial(self):
+        self.client.force_login(self.tienda)
+        resp = self.client.get(self.reverse('pedidos-detalle', args=[self.pedido.numero_pedido]))
+        claves = [v['clave'] for v in resp.context['vistas_pdf']]
+        self.assertNotIn('despachado', claves)
+        self.assertNotIn('parcial', claves)
+        self.assertIn('recibido', claves)
+        self.assertIn('back_order', claves)
+        self.assertIn('todos', claves)
+
+
+class DetallePedidoModalTest(TestCase):
+    def test_detalle_incluye_modal_y_variantes(self):
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        from django.urls import reverse
+        almacen = User.objects.create_superuser(username='alm3', password='x')
+        pedido = Pedido.objects.create(solicitante=almacen)
+        PedidoItem.objects.create(pedido=pedido, codigo='A', descripcion='a',
+                                  cantidad_solicitada=1, estado='DESPACHADO')
+        self.client.force_login(almacen)
+        resp = self.client.get(reverse('pedidos-detalle', args=[pedido.numero_pedido]))
+        self.assertContains(resp, 'modalImprimirPedido')
+        self.assertContains(resp, 'vista=despachado')

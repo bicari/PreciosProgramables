@@ -4,8 +4,8 @@ from datetime import datetime
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 
 
 _AZUL_OSCURO = colors.HexColor("#2c3e50")
@@ -27,6 +27,28 @@ _LABEL_CONDICION = {
     "URGENTE": "Urgente",
     "SURTIDO": "Surtido",
     "CLIENTE_RETIRA": "Cliente Retira",
+}
+
+# Sufijo de título por variante de impresión ('' = sin sufijo).
+_VISTA_LABEL = {
+    "todos": "",
+    "despachado": "Despachado",
+    "back_order": "Back Order",
+    "recibido": "Recibido",
+    "parcial": "Parcial",
+}
+# Columnas de cantidad (encabezado, atributo del item) por variante filtrada.
+_VISTA_CANTIDADES = {
+    "despachado": [("Despachado", "cantidad_despachada")],
+    "back_order": [("Back Order", "cantidad_back_order")],
+    "recibido": [("Recibido", "cantidad_recibida")],
+    "parcial": [("Despachado", "cantidad_despachada"), ("Back Order", "cantidad_back_order")],
+}
+# Anchos de columna (suman 542 pt) segun cantidad de columnas de cantidad extra.
+# Cols fijas: Codigo, Descripcion, Referencia, Puesto, Ref.Prov, Solicitado, <cant...>, Observacion
+_VISTA_WIDTHS = {
+    1: [50, 150, 65, 52, 52, 45, 48, 80],
+    2: [48, 132, 60, 48, 48, 42, 44, 44, 76],
 }
 
 
@@ -246,6 +268,420 @@ def generar_reporte_pedidos_pdf(ctx: dict) -> bytes:
         ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
     ]))
     elements.append(datos)
+
+    doc.build(elements)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes
+
+
+
+def generar_pedido_pdf(pedido, items, vista: str = "todos", mostrar_cantidades: bool = False) -> bytes:
+    """
+    Genera el PDF de un pedido individual.
+
+    Args:
+        pedido: Instancia del modelo Pedido.
+        items: QuerySet o lista de PedidoItem relacionados al pedido.
+        mostrar_cantidades: Si es True, incluye las columnas de cantidad
+            despachada y recibida (solo para usuarios con privilegios).
+
+    Returns:
+        Bytes del PDF generado.
+    """
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=LETTER,
+        leftMargin=35, rightMargin=35, topMargin=25, bottomMargin=25,
+    )
+    elements = []
+
+    # ---- Estilos ----
+    st_titulo = ParagraphStyle(
+        "t", fontSize=16, textColor=_AZUL_OSCURO,
+        spaceAfter=2, alignment=TA_CENTER, fontName="Helvetica-Bold",
+    )
+    st_sub = ParagraphStyle(
+        "s", fontSize=9, textColor=colors.grey,
+        spaceAfter=2, alignment=TA_CENTER,
+    )
+    st_label = ParagraphStyle(
+        "lbl", fontSize=9, textColor=colors.grey,
+        fontName="Helvetica-Bold", leading=13,
+    )
+    st_valor = ParagraphStyle(
+        "val", fontSize=9, leading=13,
+    )
+    st_th = ParagraphStyle(
+        "th", fontSize=8, fontName="Helvetica-Bold",
+        textColor=colors.white, alignment=TA_CENTER,
+    )
+    st_td = ParagraphStyle("td", fontSize=8, leading=10)
+    st_td_c = ParagraphStyle("tdc", fontSize=8, leading=10, alignment=TA_CENTER)
+
+    # ---- Encabezado ----
+    estado_label = _LABEL_ESTADO.get(pedido.estado, pedido.estado)
+    condicion_label = _LABEL_CONDICION.get(pedido.condicion, pedido.condicion) if pedido.condicion else "-"
+
+    sufijo_vista = _VISTA_LABEL.get(vista, "")
+    titulo_pedido = f"Pedido de Almacen  #{pedido.numero_pedido}"
+    if sufijo_vista:
+        titulo_pedido += f"  —  {sufijo_vista}"
+    elements.append(Paragraph(titulo_pedido, st_titulo))
+    elements.append(Paragraph(
+        f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+        st_sub,
+    ))
+    elements.append(Spacer(1, 10))
+    elements.append(HRFlowable(width="100%", thickness=1, color=_AZUL_OSCURO))
+    elements.append(Spacer(1, 10))
+
+    # ---- Bloque de informacion del pedido (2 columnas) ----
+    def _fila(etiqueta: str, valor: str):
+        return [Paragraph(etiqueta, st_label), Paragraph(valor or "-", st_valor)]
+
+    solicitante = pedido.solicitante.get_username() or pedido.solicitante.username
+    despachador = (
+        (pedido.despachador.get_username() or pedido.despachador.username)
+        if pedido.despachador else "-"
+    )
+    fecha_creacion = pedido.fecha_creacion.strftime("%d/%m/%Y %H:%M") if pedido.fecha_creacion else "-"
+    fecha_despacho = pedido.fecha_despacho.strftime("%d/%m/%Y %H:%M") if pedido.fecha_despacho else "-"
+    fecha_recepcion = pedido.fecha_recepcion.strftime("%d/%m/%Y %H:%M") if pedido.fecha_recepcion else "-"
+
+    col_izq = [
+        _fila("Solicitante:", solicitante),
+        _fila("Despachador:", despachador),
+        _fila("Categoria:", pedido.categoria or "-"),
+        _fila("Deposito origen:", pedido.deposito or "-"),
+    ]
+    col_der = [
+        _fila("Estado:", estado_label),
+        _fila("Condicion:", condicion_label),
+        _fila("Fecha creacion:", fecha_creacion),
+        _fila("Fecha despacho:", fecha_despacho),
+    ]
+
+    ancho_campo = 75
+    ancho_valor = 170
+
+    tabla_izq = Table(col_izq, colWidths=[ancho_campo, ancho_valor])
+    tabla_der = Table(col_der, colWidths=[ancho_campo, ancho_valor])
+
+    for t in (tabla_izq, tabla_der):
+        t.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ]))
+
+    info_general = Table(
+        [[tabla_izq, tabla_der]],
+        colWidths=[255, 255],
+    )
+    info_general.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    elements.append(info_general)
+
+    if pedido.observaciones:
+        elements.append(Spacer(1, 6))
+        obs_tabla = Table(
+            [[Paragraph("Observaciones:", st_label), Paragraph(pedido.observaciones, st_valor)]],
+            colWidths=[ancho_campo, ancho_valor * 2 + 10],
+        )
+        obs_tabla.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        elements.append(obs_tabla)
+
+    elements.append(Spacer(1, 12))
+
+    # ---- Encabezado de la tabla de items ----
+    sec_items = Table(
+        [[Paragraph("Items del Pedido", ParagraphStyle(
+            "si", fontSize=10, textColor=colors.white,
+            fontName="Helvetica-Bold", leftPadding=6,
+        ))]],
+        colWidths=[542],
+    )
+    sec_items.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), _AZUL_OSCURO),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(sec_items)
+
+    # ---- Tabla de items ----
+    # Ancho util = 542 pt (612 - margenes 35*2)
+    # Sin cantidades: 55+175+75+60+60+47+70 = 542
+    # Con cantidades: 50+148+68+55+55+42+40+44+40 = 542
+    es_filtrada = vista in _VISTA_CANTIDADES
+    if es_filtrada:
+        cantidad_cols = _VISTA_CANTIDADES[vista]
+        cabeceras = [
+            Paragraph("Codigo", st_th),
+            Paragraph("Descripcion", st_th),
+            Paragraph("Referencia", st_th),
+            Paragraph("Puesto", st_th),
+            Paragraph("Ref. Prov.", st_th),
+            Paragraph("Solicitado", st_th),
+        ]
+        for encabezado, _attr in cantidad_cols:
+            cabeceras.append(Paragraph(encabezado, st_th))
+        cabeceras.append(Paragraph("Observacion", st_th))
+        col_widths = _VISTA_WIDTHS[len(cantidad_cols)]
+    elif mostrar_cantidades:
+        cabeceras = [
+            Paragraph("Codigo", st_th),
+            Paragraph("Descripcion", st_th),
+            Paragraph("Referencia", st_th),
+            Paragraph("Puesto", st_th),
+            Paragraph("Ref. Prov.", st_th),
+            Paragraph("Solicitado", st_th),
+            Paragraph("Despachado", st_th),
+            Paragraph("Recibido", st_th),
+            Paragraph("Observacion", st_th),
+        ]
+        col_widths = [50, 148, 68, 55, 55, 42, 40, 44, 40]
+    else:
+        cabeceras = [
+            Paragraph("Codigo", st_th),
+            Paragraph("Descripcion", st_th),
+            Paragraph("Referencia", st_th),
+            Paragraph("Puesto", st_th),
+            Paragraph("Ref. Prov.", st_th),
+            Paragraph("Solicitado", st_th),
+            Paragraph("Observacion", st_th),
+        ]
+        col_widths = [55, 175, 75, 60, 60, 47, 70]
+
+    data = [cabeceras]
+
+    for item in items:
+        fila = [
+            Paragraph(item.codigo, st_td),
+            Paragraph(item.descripcion, st_td),
+            Paragraph(item.referencia or "-", st_td),
+            Paragraph(item.puesto or "-", st_td),
+            Paragraph(item.ref_proveedor or "-", st_td),
+            Paragraph(str(item.cantidad_solicitada), st_td_c),
+        ]
+        if es_filtrada:
+            for _encabezado, attr in cantidad_cols:
+                fila.append(Paragraph(str(getattr(item, attr)), st_td_c))
+        elif mostrar_cantidades:
+            fila += [
+                Paragraph(str(item.cantidad_despachada), st_td_c),
+                Paragraph(str(item.cantidad_recibida), st_td_c),
+            ]
+        fila.append(Paragraph(item.observacion or "-", st_td))
+        data.append(fila)
+
+    tabla_items = Table(data, colWidths=col_widths, repeatRows=1)
+
+    item_styles = [
+        ("BACKGROUND", (0, 0), (-1, 0), _AZUL_CLARO),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _GRIS_CLARO]),
+        ("ALIGN", (5, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]
+    tabla_items.setStyle(TableStyle(item_styles))
+    elements.append(tabla_items)
+
+    # ---- Pie de pagina ----
+    elements.append(Spacer(1, 14))
+    elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.grey))
+    elements.append(Spacer(1, 4))
+    elements.append(Paragraph(
+        f"Pedido #{pedido.numero_pedido}  —  {solicitante}  —  {fecha_creacion}",
+        ParagraphStyle("footer", fontSize=7, textColor=colors.grey, alignment=TA_CENTER),
+    ))
+
+    doc.build(elements)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes
+
+
+def generar_despacho_pdf(despacho, despacho_items) -> bytes:
+    """
+    Genera el PDF de un despacho individual con sus items.
+
+    Args:
+        despacho: Instancia del modelo Despacho.
+        despacho_items: QuerySet de DespachoItem con select_related('pedido_item').
+
+    Returns:
+        Bytes del PDF generado.
+    """
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=LETTER,
+        leftMargin=35, rightMargin=35, topMargin=25, bottomMargin=25,
+    )
+    elements = []
+
+    st_titulo = ParagraphStyle(
+        "t", fontSize=16, textColor=_AZUL_OSCURO,
+        spaceAfter=2, alignment=TA_CENTER, fontName="Helvetica-Bold",
+    )
+    st_sub = ParagraphStyle(
+        "s", fontSize=9, textColor=colors.grey,
+        spaceAfter=2, alignment=TA_CENTER,
+    )
+    st_label = ParagraphStyle(
+        "lbl", fontSize=9, textColor=colors.grey,
+        fontName="Helvetica-Bold", leading=13,
+    )
+    st_valor = ParagraphStyle("val", fontSize=9, leading=13)
+    st_th = ParagraphStyle(
+        "th", fontSize=8, fontName="Helvetica-Bold",
+        textColor=colors.white, alignment=TA_CENTER,
+    )
+    st_td = ParagraphStyle("td", fontSize=8, leading=10)
+    st_td_c = ParagraphStyle("tdc", fontSize=8, leading=10, alignment=TA_CENTER)
+
+    pedido = despacho.pedido
+
+    elements.append(Paragraph(f"Despacho #{despacho.numero_despacho}", st_titulo))
+    elements.append(Paragraph(f"Pedido de Almacen #{pedido.numero_pedido}", st_sub))
+    elements.append(Paragraph(
+        f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+        st_sub,
+    ))
+    elements.append(Spacer(1, 10))
+    elements.append(HRFlowable(width="100%", thickness=1, color=_AZUL_OSCURO))
+    elements.append(Spacer(1, 10))
+
+    _LABEL_ESTADO_DESPACHO = {
+        "PREPARANDO": "Preparando",
+        "ENVIADO": "Enviado",
+        "RECIBIDO": "Recibido",
+        "PARCIAL": "Parcial",
+    }
+
+    def _fila(etiqueta, valor):
+        return [Paragraph(etiqueta, st_label), Paragraph(valor or "-", st_valor)]
+
+    despachador = despacho.despachador.get_username() if despacho.despachador else "-"
+    pickeador = despacho.picker.get_username() if despacho.picker else "-"
+    receptor = despacho.receptor.get_username() if despacho.receptor else "-"
+    fecha_despacho = despacho.fecha_despacho.strftime("%d/%m/%Y %H:%M") if despacho.fecha_despacho else "-"
+    fecha_recepcion = despacho.fecha_recepcion.strftime("%d/%m/%Y %H:%M") if despacho.fecha_recepcion else "-"
+    estado_label = _LABEL_ESTADO_DESPACHO.get(despacho.estado, despacho.estado)
+
+    col_izq = [
+        _fila("Solicitante:", pedido.solicitante.get_username()),
+        _fila("Despachador:", despachador),
+        _fila("Pickeador:", pickeador),
+        _fila("Deposito origen:", pedido.deposito or "-"),
+    ]
+    col_der = [
+        _fila("Estado:", estado_label),
+        _fila("Fecha despacho:", fecha_despacho),
+        _fila("Fecha recepcion:", fecha_recepcion),
+    ]
+
+    ancho_campo = 80
+    ancho_valor = 175
+
+    tabla_izq = Table(col_izq, colWidths=[ancho_campo, ancho_valor])
+    tabla_der = Table(col_der, colWidths=[ancho_campo, ancho_valor])
+    for t in (tabla_izq, tabla_der):
+        t.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ]))
+
+    info = Table([[tabla_izq, tabla_der]], colWidths=[255, 255])
+    info.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    elements.append(info)
+    elements.append(Spacer(1, 12))
+
+    sec = Table(
+        [[Paragraph("Items del Despacho", ParagraphStyle(
+            "si", fontSize=10, textColor=colors.white,
+            fontName="Helvetica-Bold", leftPadding=6,
+        ))]],
+        colWidths=[542],
+    )
+    sec.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), _AZUL_OSCURO),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(sec)
+
+    # Codigo 55 | Descripcion 210 | Despachado 60 | Recibido 60 | Observacion 157 = 542
+    cabeceras = [
+        Paragraph("Codigo", st_th),
+        Paragraph("Descripcion", st_th),
+        Paragraph("Despachado", st_th),
+        Paragraph("Recibido", st_th),
+        Paragraph("Observacion", st_th),
+    ]
+    col_widths = [55, 210, 60, 60, 157]
+    data = [cabeceras]
+
+    for di in despacho_items:
+        item = di.pedido_item
+        recibido = str(di.cantidad_recibida) if di.cantidad_recibida else "-"
+        data.append([
+            Paragraph(item.codigo, st_td),
+            Paragraph(item.descripcion, st_td),
+            Paragraph(str(di.cantidad_despachada), st_td_c),
+            Paragraph(recibido, st_td_c),
+            Paragraph(di.observacion or "-", st_td),
+        ])
+
+    tabla = Table(data, colWidths=col_widths, repeatRows=1)
+    tabla.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), _AZUL_CLARO),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _GRIS_CLARO]),
+        ("ALIGN", (2, 0), (3, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(tabla)
+
+    elements.append(Spacer(1, 14))
+    elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.grey))
+    elements.append(Spacer(1, 4))
+    elements.append(Paragraph(
+        f"Despacho #{despacho.numero_despacho}  —  Pedido #{pedido.numero_pedido}  —  {fecha_despacho}",
+        ParagraphStyle("footer", fontSize=7, textColor=colors.grey, alignment=TA_CENTER),
+    ))
 
     doc.build(elements)
     pdf_bytes = buffer.getvalue()

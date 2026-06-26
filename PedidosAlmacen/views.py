@@ -103,6 +103,27 @@ def _solo_picker(user):
     return is_pedidos_picker(user) and not is_pedidos_almacen(user) and not is_pedidos_supervisor(user)
 
 
+# Variantes de impresión de un pedido. 'estado' None = sin filtro (todos los items).
+# 'tienda' indica si un usuario solo-Tienda puede generarla.
+VISTAS_PEDIDO = {
+    'todos':      {'label': 'Todos',      'estado': None,         'tienda': True},
+    'despachado': {'label': 'Despachado', 'estado': 'DESPACHADO', 'tienda': False},
+    'back_order': {'label': 'Back Order', 'estado': 'BACK_ORDER', 'tienda': True},
+    'recibido':   {'label': 'Recibido',   'estado': 'RECIBIDO',   'tienda': True},
+    'parcial':    {'label': 'Parcial',    'estado': 'PARCIAL',    'tienda': False},
+}
+
+
+def _puede_vista_pedido(user, vista: str) -> bool:
+    """True si el usuario puede generar la variante de impresión indicada."""
+    cfg = VISTAS_PEDIDO.get(vista)
+    if cfg is None:
+        return False
+    if _solo_tienda(user):
+        return cfg['tienda']
+    return True
+
+
 def _pickers_disponibles():
     """Pickers activos anotados con su carga actual (pedidos ASIGNADO/PICKING en cola), ordenados por menor carga."""
     from users.models import User as UserModel
@@ -251,6 +272,20 @@ def detalle_pedido(request, pk):
 
     items = pedido.items.all()
     despachos = pedido.despachos.prefetch_related('items__pedido_item').order_by('fecha_despacho')
+
+    from django.db.models import Count
+    conteos = {
+        fila['estado']: fila['c']
+        for fila in items.values('estado').annotate(c=Count('id'))
+    }
+    total_items = items.count()
+    vistas_pdf = []
+    for clave, cfg in VISTAS_PEDIDO.items():
+        if not _puede_vista_pedido(request.user, clave):
+            continue
+        count = total_items if cfg['estado'] is None else conteos.get(cfg['estado'], 0)
+        vistas_pdf.append({'clave': clave, 'label': cfg['label'], 'count': count})
+
     es_supervisor = is_pedidos_supervisor(request.user)
     es_despachador = is_pedidos_almacen(request.user)
     es_picker_asignado = _solo_picker(request.user) and pedido.picker == request.user
@@ -266,6 +301,7 @@ def detalle_pedido(request, pk):
         'puede_imprimir_despacho': request.user.is_superuser or is_pedidos_almacen(request.user) or is_pedidos_supervisor(request.user),
         'es_superuser': request.user.is_superuser,
         'es_picker_asignado': es_picker_asignado,
+        'vistas_pdf': vistas_pdf,
     })
 
 
@@ -1249,11 +1285,23 @@ def exportar_pedido_pdf(request, pk):
         messages.error(request, 'No tienes permiso para descargar este pedido')
         return redirect('pedidos-lista')
 
-    items = pedido.items.all()
-    mostrar_cantidades = is_pedidos_almacen(request.user) or is_pedidos_supervisor(request.user)
+    vista = request.GET.get('vista', 'todos')
+    if vista not in VISTAS_PEDIDO:
+        vista = 'todos'
+    if not _puede_vista_pedido(request.user, vista):
+        messages.error(request, 'No tienes permiso para imprimir esa variante del pedido')
+        return redirect('pedidos-detalle', pk=pk)
 
-    pdf_bytes = generar_pedido_pdf(pedido, items, mostrar_cantidades=mostrar_cantidades)
-    nombre_archivo = f"pedido_{pedido.numero_pedido}.pdf"
+    items = pedido.items.all()
+    estado_filtro = VISTAS_PEDIDO[vista]['estado']
+    if estado_filtro is not None:
+        items = items.filter(estado=estado_filtro)
+
+    mostrar_cantidades = is_pedidos_almacen(request.user) or is_pedidos_supervisor(request.user)
+    pdf_bytes = generar_pedido_pdf(pedido, items, vista=vista, mostrar_cantidades=mostrar_cantidades)
+
+    sufijo = '' if vista == 'todos' else f'_{vista}'
+    nombre_archivo = f"pedido_{pedido.numero_pedido}{sufijo}.pdf"
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
     return response
