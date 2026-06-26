@@ -1,11 +1,13 @@
 {% if resultados %}
-<table class="table table-sm table-hover">
+<div class="table-responsive">
+<table class="table table-sm table-hover table-mobile-card mb-0">
     <thead>
         <tr>
             <th>Codigo</th>
             <th>Descripcion</th>
             <th>Referencia</th>
             <th>Puesto</th>
+            <th>Ubicaciones internas</th>
             <th>Existencia</th>
             <th>Ref. Proveedor</th>
             <th></th>
@@ -14,28 +16,47 @@
     <tbody>
         {% for producto in resultados %}
         <tr>
-            <td>{{ producto.0 }}</td>
-            <td>{{ producto.1 }}</td>
-            <td>{{ producto.2 }}</td>
-            <td>{{ producto.3 }}</td>
-            <td>
-                {% if producto.4 > 0 %}
-                    <span class="badge bg-success">{{ producto.4|floatformat:0 }}</span>
+            <td data-label="Código">{{ producto.codigo }}</td>
+            <td data-label="Descripción">{{ producto.descripcion }}</td>
+            <td data-label="Referencia">{{ producto.referencia }}</td>
+            <td data-label="Puesto">{{ producto.puesto }}</td>
+            <td data-label="Ubicaciones">
+                {% for u in producto.ubicaciones_internas %}
+                    <span class="badge me-1
+                        {% if u.tipo_nivel == 'PICKING' %}bg-info text-dark{% else %}bg-secondary{% endif %}"
+                        title="{{ u.tipo_nivel_display }}">
+                        {{ u.codigo }}
+                    </span>
+                {% empty %}
+                    <small class="text-muted">—</small>
+                {% endfor %}
+            </td>
+            <td data-label="Existencia">
+                {% if producto.existencia > 0 %}
+                    <span class="badge bg-success">{{ producto.existencia|floatformat:0 }}</span>
                 {% else %}
                     <span class="badge bg-danger">0</span>
                 {% endif %}
             </td>
-            <td>{{ producto.5 }}</td>
+            <td data-label="Ref. Prov.">{{ producto.ref_proveedor }}</td>
             <td>
-                <button type="button" class="btn btn-sm btn-success"
-                    onclick="agregarItem('{{ producto.0 }}', '{{ producto.1|escapejs }}', '{{ producto.2|escapejs }}', '{{ producto.3|escapejs }}', '{{ producto.5|escapejs }}')">
+                {% if producto.existencia > 0 %}
+                <button type="button" class="btn btn-sm btn-success w-100"
+                    onclick="agregarItem('{{ producto.codigo }}', '{{ producto.descripcion|escapejs }}', '{{ producto.referencia|escapejs }}', '{{ producto.puesto|escapejs }}', '{{ producto.ref_proveedor|escapejs }}')">
                     <i class="fas fa-plus"></i> Agregar
                 </button>
+                {% else %}
+                <button type="button" class="btn btn-sm btn-secondary w-100" disabled
+                    title="Sin existencia en almacen">
+                    <i class="fas fa-ban"></i> Sin stock
+                </button>
+                {% endif %}
             </td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
+</div>
 {% else %}
-<p class="text-muted">No se encontraron productos</p>
+<p class="text-muted p-2">No se encontraron productos</p>
 {% endif %}

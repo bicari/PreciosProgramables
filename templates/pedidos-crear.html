@@ -1,7 +1,7 @@
 {% extends "dashboard.html" %}
 {% block content %}
 <div class="container mt-4">
-    <h2>Nuevo Pedido</h2>
+    <h2 class="mb-3">Nuevo Pedido</h2>
 
     {% if messages %}
         {% for message in messages %}
@@ -64,23 +64,39 @@
         <div class="card-body">
             <h5 class="card-title">Buscar Producto</h5>
             <div class="row g-2 align-items-end">
-                <div class="col-md-3">
+                <div class="col-6 col-md-3">
                     <select id="tipo-busqueda" name="tipo" class="form-select">
                         <option value="codigo">Por Codigo</option>
                         <option value="descripcion">Por Descripcion</option>
+                        <option value="referencia">Por Cod. Barras</option>
+                        <option value="ref_proveedor">Por Ref. Proveedor</option>
                     </select>
                 </div>
-                <div class="col-md-7 position-relative">
+                <div class="col-6 col-md-3 d-flex align-items-center">
+                    <div class="form-check mb-0">
+                        <input class="form-check-input" type="checkbox" value="1"
+                            id="solo-existencia" name="solo_existencia" checked>
+                        <label class="form-check-label small" for="solo-existencia">
+                            Solo con existencia
+                        </label>
+                    </div>
+                </div>
+                <div class="col-6 col-md-2 d-flex align-items-center">
+                    <small id="texto-buscando" class="htmx-indicator text-primary fw-semibold" style="display:none;">
+                        <i class="fas fa-search fa-spin me-1"></i>Buscando...
+                    </small>
+                </div>
+                <div class="col-12 col-md-7 position-relative">
                     <input
                         type="text"
                         class="form-control pe-5"
                         id="buscar-producto"
                         placeholder="Ingrese codigo o descripcion..."
                         hx-get="/pedidos/buscar-producto/"
-                        hx-trigger="input changed delay:500ms, keyup[key=='Enter']"
+                        hx-trigger="input changed delay:500ms, keyup[key=='Enter'], cambioFiltro"
                         hx-target="#resultados-busqueda"
                         hx-swap="innerHTML"
-                        hx-include="#tipo-busqueda, #campo-categoria"
+                        hx-include="#tipo-busqueda, #campo-categoria, #solo-existencia"
                         hx-indicator="#loader-busqueda, #texto-buscando, #skeleton-busqueda"
                         name="q"
                         autocomplete="off"
@@ -91,11 +107,6 @@
                             <span></span><span></span><span></span>
                         </span>
                     </span>
-                </div>
-                <div class="col-md-2 d-flex align-items-center">
-                    <small id="texto-buscando" class="htmx-indicator text-primary fw-semibold" style="display:none;">
-                        <i class="fas fa-search fa-spin me-1"></i>Buscando...
-                    </small>
                 </div>
             </div>
 
@@ -144,8 +155,9 @@
                 <h5 class="mb-0">Items del Pedido</h5>
                 <span class="badge bg-primary" id="total-items">0 items</span>
             </div>
-            <div class="card-body">
-                <table class="table table-sm" id="tabla-items">
+            <div class="card-body p-0 p-md-3">
+                <div class="table-responsive">
+                <table class="table table-sm table-mobile-card mb-0" id="tabla-items">
                     <thead>
                         <tr>
                             <th>Codigo</th>
@@ -160,7 +172,8 @@
                     <tbody id="items-body">
                     </tbody>
                 </table>
-                <p class="text-muted text-center" id="sin-items">Busque y agregue productos al pedido</p>
+                </div>
+                <p class="text-muted text-center p-3" id="sin-items">Busque y agregue productos al pedido</p>
             </div>
         </div>
 
@@ -171,8 +184,8 @@
 
         <input type="hidden" name="items_json" id="items-json" value="[]">
 
-        <div class="d-flex gap-2">
-            <button type="submit" class="btn btn-primary" id="btn-enviar" disabled>
+        <div class="d-flex gap-2 flex-wrap">
+            <button type="submit" class="btn btn-primary flex-grow-1 flex-sm-grow-0" id="btn-enviar" disabled>
                 <i class="fas fa-paper-plane"></i> Enviar Pedido
             </button>
             <a href="{% url 'pedidos-lista' %}" class="btn btn-secondary">Cancelar</a>
@@ -381,13 +394,13 @@ function renderItems() {
 
     tbody.innerHTML = itemsPedido.map((item, i) => `
         <tr>
-            <td>${item.codigo}</td>
-            <td>${item.descripcion}</td>
-            <td><small class="text-muted">${item.referencia}</small></td>
-            <td><small class="text-muted">${item.puesto}</small></td>
-            <td><small class="text-muted">${item.ref_proveedor}</small></td>
-            <td>
-                <input type="number" class="form-control form-control-sm" style="width:80px"
+            <td data-label="Código">${item.codigo}</td>
+            <td data-label="Descripción">${item.descripcion}</td>
+            <td data-label="Referencia"><small class="text-muted">${item.referencia}</small></td>
+            <td data-label="Puesto"><small class="text-muted">${item.puesto}</small></td>
+            <td data-label="Ref. Prov."><small class="text-muted">${item.ref_proveedor}</small></td>
+            <td data-label="Cantidad">
+                <input type="number" class="form-control form-control-sm" style="width:90px"
                     value="${item.cantidad}" min="1"
                     onchange="actualizarCantidad(${i}, this.value)">
             </td>
@@ -410,6 +423,13 @@ function actualizarJSON() {
 document.getElementById('tipo-busqueda').addEventListener('change', function() {
     const input = document.getElementById('buscar-producto');
     htmx.process(input);
+});
+
+document.getElementById('solo-existencia').addEventListener('change', function() {
+    const input = document.getElementById('buscar-producto');
+    if (input.value.trim().length >= 2) {
+        htmx.trigger(input, 'cambioFiltro');
+    }
 });
 
 document.getElementById('form-pedido').addEventListener('submit', function(e) {

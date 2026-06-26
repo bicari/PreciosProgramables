@@ -111,3 +111,30 @@ class BuscarProductoVistaTest(TestCase):
                         {'q': 'abc', 'categoria': 'CAT'})
         _, kwargs = mock_db.return_value.buscar_en_categoria.call_args
         self.assertFalse(kwargs.get('solo_existencia'))
+
+
+class BotonAgregarBloqueoTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        self.user = User.objects.create_superuser(username='admin2', password='x')
+        self.client.force_login(self.user)
+
+    def _buscar(self, existencia):
+        # (FI_CODIGO, FI_DESCRIPCION, FI_REFERENCIA, FI_PUESTO, existencia, ZZCAMPO_001)
+        fila = ('P1', 'Producto Uno', 'REF1', 'A1', existencia, 'RP1')
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.buscar_en_categoria.return_value = [fila]
+            resp = self.client.get('/pedidos/buscar-producto/',
+                                   {'q': 'pro', 'categoria': 'CAT'})
+        return resp.content.decode()
+
+    def test_existencia_cero_boton_deshabilitado(self):
+        html = self._buscar(0)
+        self.assertIn('disabled', html)
+        self.assertIn('Sin stock', html)
+        self.assertNotIn("agregarItem('P1'", html)
+
+    def test_con_existencia_boton_habilitado(self):
+        html = self._buscar(7)
+        self.assertIn("agregarItem('P1'", html)
+        self.assertNotIn('Sin stock', html)
