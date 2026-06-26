@@ -1,23 +1,75 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse, HttpResponse
+from django.contrib.auth import authenticate as django_authenticate
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib import messages
-from django.db.models import Sum, Avg, Count, F, ExpressionWrapper, DurationField
-from datetime import datetime
-from .models import Pedido, PedidoItem
+from django.db.models import Sum, Count, IntegerField, Q
+from django.db.models import Case, When, Value
+from django.utils import timezone
+from datetime import datetime, timedelta, time as dtime
+from .models import Pedido, PedidoItem, Despacho, DespachoItem, DepositoPermitido
 from .forms import PedidoForm
-from .dbisam import PedidosDBISAM
-from .notifications import notificar_nuevo_pedido, notificar_despacho, notificar_recepcion
-from .pdf import generar_reporte_pedidos_pdf
+from .dbisam import PedidosDBISAM, DEPOSITO_ALMACEN
+from .notifications import notificar_nuevo_pedido, notificar_despacho, notificar_despacho_parcial
+from .pdf import generar_reporte_pedidos_pdf, generar_pedido_pdf, generar_despacho_pdf
 import logging
 import json
 
 logger = logging.getLogger(__name__)
 
+_HORA_INICIO_LABORAL = dtime(8, 0)
+_HORA_FIN_LABORAL = dtime(17, 0)
+
+
+def _segundos_laborales(inicio: datetime, fin: datetime) -> float:
+    """Segundos laborales entre dos momentos. Horario L-V 08:00-17:00."""
+    if fin <= inicio:
+        return 0.0
+    total = 0.0
+    current = inicio
+    while current < fin:
+        wd = current.weekday()
+        if wd >= 5:  # sábado=5, domingo=6
+            current = datetime.combine(current.date() + timedelta(days=7 - wd), _HORA_INICIO_LABORAL)
+            continue
+        dia_inicio = datetime.combine(current.date(), _HORA_INICIO_LABORAL)
+        dia_fin = datetime.combine(current.date(), _HORA_FIN_LABORAL)
+        if current < dia_inicio:
+            current = dia_inicio
+        if current >= dia_fin:
+            current = datetime.combine(current.date() + timedelta(days=1), _HORA_INICIO_LABORAL)
+            continue
+        corte = min(fin, dia_fin)
+        total += (corte - current).total_seconds()
+        current = datetime.combine(current.date() + timedelta(days=1), _HORA_INICIO_LABORAL)
+    return total
+
+
+def _depositos_para_selector() -> list[tuple[int, str]]:
+    """Depósitos seleccionables al crear un pedido.
+
+    Devuelve los DepositoPermitido activos (codigo, nombre). Si no hay ninguno
+    activo, cae al listado de a2 (todos menos el almacén) como fallback.
+    """
+    activos = list(
+        DepositoPermitido.objects.filter(activo=True)
+        .order_by('nombre')
+        .values_list('codigo', 'nombre')
+    )
+    if activos:
+        return [(c, n) for c, n in activos]
+    try:
+        rows = PedidosDBISAM().obtener_depositos()
+        return [(int(r.FDP_CODIGO), r.FDP_DESCRIPCION or '') for r in rows]
+    except Exception:
+        logger.exception('Fallback de depositos: error al consultar DBISAM')
+        return []
+
 
 GROUP_TIENDA = 'Pedidos Tienda'
 GROUP_ALMACEN = 'Pedidos Almacen'
 GROUP_SUPERVISOR = 'Pedidos Supervisor'
+GROUP_PICKER = 'Pedidos Picker'
 
 
 def is_pedidos_tienda(user):
@@ -32,8 +84,13 @@ def is_pedidos_supervisor(user):
     return user.groups.filter(name=GROUP_SUPERVISOR).exists() or user.is_superuser
 
 
+def is_pedidos_picker(user):
+    return user.groups.filter(name=GROUP_PICKER).exists() or user.is_superuser
+
+
 def is_pedidos_any(user):
-    return user.groups.filter(name__in=[GROUP_TIENDA, GROUP_ALMACEN, GROUP_SUPERVISOR]).exists() or user.is_superuser
+    grupos = [GROUP_TIENDA, GROUP_ALMACEN, GROUP_SUPERVISOR, GROUP_PICKER]
+    return user.groups.filter(name__in=grupos).exists() or user.is_superuser
 
 
 def _solo_tienda(user):
@@ -41,25 +98,57 @@ def _solo_tienda(user):
     return is_pedidos_tienda(user) and not is_pedidos_almacen(user) and not is_pedidos_supervisor(user)
 
 
+def _solo_picker(user):
+    """True si el usuario es Picker pero NO Almacen ni Supervisor."""
+    return is_pedidos_picker(user) and not is_pedidos_almacen(user) and not is_pedidos_supervisor(user)
+
+
+def _pickers_disponibles():
+    """Pickers activos anotados con su carga actual (pedidos ASIGNADO/PICKING en cola), ordenados por menor carga."""
+    from users.models import User as UserModel
+    return UserModel.objects.filter(
+        groups__name=GROUP_PICKER, status=True,
+    ).annotate(
+        carga=Count('pedidos_picking', filter=Q(pedidos_picking__estado__in=['ASIGNADO', 'PICKING']))
+    ).order_by('carga', 'username')
+
+
 @login_required(login_url='/login/')
 @user_passes_test(is_pedidos_any, login_url='dashboard')
 def lista_pedidos(request):
     if is_pedidos_supervisor(request.user):
-        pedidos = Pedido.objects.select_related('solicitante', 'despachador').order_by('-fecha_creacion')
+        pedidos = Pedido.objects.select_related('solicitante', 'despachador', 'picker').order_by('-fecha_creacion')
     elif is_pedidos_almacen(request.user):
-        pedidos = Pedido.objects.select_related('solicitante', 'despachador').exclude(estado='CERRADO').order_by('-fecha_creacion')
+        pedidos = Pedido.objects.select_related('solicitante', 'despachador', 'picker').exclude(estado='CERRADO').order_by('-fecha_creacion')
+    elif _solo_picker(request.user):
+        pedidos = Pedido.objects.filter(
+            picker=request.user, estado__in=['ASIGNADO', 'PICKING', 'EN_PREPARACION'],
+        ).select_related('solicitante', 'despachador', 'picker').order_by('fecha_asignacion', 'fecha_creacion')
     else:
-        pedidos = Pedido.objects.filter(solicitante=request.user).select_related('solicitante', 'despachador').order_by('-fecha_creacion')
+        pedidos = Pedido.objects.filter(solicitante=request.user).select_related('solicitante', 'despachador', 'picker').order_by('-fecha_creacion')
 
     estado_filter = request.GET.get('estado', '')
     if estado_filter:
         pedidos = pedidos.filter(estado=estado_filter)
+
+    pedidos = pedidos.annotate(
+        items_back_order=Count(
+            Case(When(items__estado='BACK_ORDER', then=Value(1)), output_field=IntegerField())
+        )
+    )
+
+    lista_pickers_disponibles = []
+    if is_pedidos_supervisor(request.user):
+        lista_pickers_disponibles = list(_pickers_disponibles())
 
     return render(request, 'pedidos-lista.html', {
         'pedidos': pedidos,
         'estado_filter': estado_filter,
         'estados': Pedido.ESTADO_CHOICES,
         'es_tienda': _solo_tienda(request.user),
+        'es_picker': _solo_picker(request.user),
+        'es_supervisor': is_pedidos_supervisor(request.user),
+        'pickers_disponibles': lista_pickers_disponibles,
     })
 
 
@@ -67,13 +156,11 @@ def lista_pedidos(request):
 @user_passes_test(is_pedidos_tienda, login_url='dashboard')
 def crear_pedido(request):
     categorias = []
-    depositos = []
     try:
-        dbisam = PedidosDBISAM()
-        categorias = dbisam.obtener_categorias()
-        depositos = dbisam.obtener_depositos()
+        categorias = PedidosDBISAM().obtener_categorias()
     except Exception:
         pass
+    depositos = _depositos_para_selector()
 
     ctx = {
         'form': PedidoForm(),
@@ -122,7 +209,8 @@ def crear_pedido(request):
         pedido = Pedido.objects.create(
             solicitante=request.user,
             observaciones=form.data.get('observaciones', ''),
-            categoria=categoria_nombre or categoria_codigo,
+            categoria=categoria_codigo,
+            categoria_nombre=categoria_nombre,
             condicion=condicion,
             deposito=deposito_nombre or deposito_codigo,
             deposito_codigo=deposito_codigo_int,
@@ -151,21 +239,33 @@ def crear_pedido(request):
 @login_required(login_url='/login/')
 @user_passes_test(is_pedidos_any, login_url='dashboard')
 def detalle_pedido(request, pk):
-    pedido = get_object_or_404(Pedido.objects.select_related('solicitante', 'despachador'), numero_pedido=pk)
+    pedido = get_object_or_404(Pedido.objects.select_related('solicitante', 'despachador', 'picker'), numero_pedido=pk)
 
     if _solo_tienda(request.user) and pedido.solicitante != request.user:
         messages.error(request, 'No tienes permiso para ver este pedido')
         return redirect('pedidos-lista')
 
+    if _solo_picker(request.user) and pedido.picker != request.user:
+        messages.error(request, 'No tienes permiso para ver este pedido')
+        return redirect('pedidos-lista')
+
     items = pedido.items.all()
+    despachos = pedido.despachos.prefetch_related('items__pedido_item').order_by('fecha_despacho')
     es_supervisor = is_pedidos_supervisor(request.user)
     es_despachador = is_pedidos_almacen(request.user)
+    es_picker_asignado = _solo_picker(request.user) and pedido.picker == request.user
     return render(request, 'pedidos-detalle.html', {
         'pedido': pedido,
         'items': items,
+        'despachos': despachos,
         'ver_despachado': es_supervisor,
+        'es_supervisor': es_supervisor,
         'es_despachador': es_despachador,
         'puede_recibir': is_pedidos_tienda(request.user),
+        'ver_cantidad_despacho': es_despachador or request.user.is_superuser,
+        'puede_imprimir_despacho': request.user.is_superuser or is_pedidos_almacen(request.user) or is_pedidos_supervisor(request.user),
+        'es_superuser': request.user.is_superuser,
+        'es_picker_asignado': es_picker_asignado,
     })
 
 
@@ -174,56 +274,119 @@ def detalle_pedido(request, pk):
 def despachar_pedido(request, pk):
     pedido = get_object_or_404(Pedido, numero_pedido=pk)
 
-    if pedido.estado not in ('PENDIENTE', 'PICKING'):
+    if pedido.estado not in ('PENDIENTE', 'ASIGNADO', 'PICKING', 'EN_PREPARACION', 'PARCIAL'):
         messages.warning(request, 'Este pedido no puede ser despachado en su estado actual')
         return redirect('pedidos-detalle', pk=pk)
 
-    items = pedido.items.filter(estado__in=['PENDIENTE', 'BACK_ORDER'])
+    # En PARCIAL solo se despachan los items pendientes (BACK_ORDER y PARCIAL)
+    if pedido.estado == 'PARCIAL':
+        items = pedido.items.filter(estado__in=['BACK_ORDER', 'PARCIAL'])
+    else:
+        items = pedido.items.filter(estado__in=['PENDIENTE', 'BACK_ORDER', 'PARCIAL'])
 
     # Consultar stock en DBISAM
     stock_info = {}
     try:
         dbisam = PedidosDBISAM()
         codigos = [item.codigo for item in items]
-        stock_info = dbisam.consultar_stock_multiple(codigos)
+        stock_info = dbisam.consultar_stock_multiple(codigos, deposito=DEPOSITO_ALMACEN)
     except Exception as e:
         messages.warning(request, f'No se pudo consultar el stock: {e}')
 
     if request.method == 'POST':
-        pedido.despachador = request.user
-        pedido.fecha_despacho = datetime.now()
-        hay_despacho = False
+        accion = request.POST.get('accion', 'despachar')
 
-        for item in items:
-            cantidad_enviar = request.POST.get(f'cantidad_{item.id}', '0')
-            try:
-                cantidad_enviar = int(cantidad_enviar)
-            except ValueError:
-                cantidad_enviar = 0
-
-            if cantidad_enviar > 0:
-                item.cantidad_despachada = cantidad_enviar
-                item.estado = 'DESPACHADO'
-                hay_despacho = True
-            else:
-                item.estado = 'BACK_ORDER'
-            item.save()
-
-        if hay_despacho:
-            pedido.estado = 'DESPACHADO'
+        if accion == 'guardar':
+            pedido.estado = 'EN_PREPARACION'
             pedido.save()
-            notificar_despacho(pedido)
-            messages.success(request, f'Pedido #{pedido.numero_pedido} despachado')
-        else:
-            messages.warning(request, 'No se despacharon items')
+            for item in items:
+                cantidad = request.POST.get(f'cantidad_{item.id}', '0')
+                try:
+                    item.cantidad_preparada = int(cantidad)
+                except ValueError:
+                    item.cantidad_preparada = 0
+                item.save()
+            messages.success(request, f'Pedido #{pedido.numero_pedido} guardado en preparación')
+            return redirect('pedidos-despachar', pk=pk)
 
+        # accion == 'despachar' → crear Despacho registrado
+        # Leer cantidades de todos los items del formulario
+        cantidades = {}
+        for item in items:
+            try:
+                cantidades[item.id] = (item, int(request.POST.get(f'cantidad_{item.id}', '0')))
+            except ValueError:
+                cantidades[item.id] = (item, 0)
+
+        items_a_despachar = [(item, qty) for item, qty in cantidades.values() if qty > 0]
+
+        if not items_a_despachar:
+            messages.warning(request, 'No se despacharon items')
+            return redirect('pedidos-despachar', pk=pk)
+
+        # Validar que ningún ítem supere el stock disponible en DBISAM
+        excesos = [
+            f"{item.descripcion or item.codigo} (enviando {qty}, stock disponible: {stock_info.get(item.codigo, 0)})"
+            for item, qty in items_a_despachar
+            if qty > stock_info.get(item.codigo, 0)
+        ]
+        if excesos:
+            detalle = '; '.join(excesos)
+            messages.error(
+                request,
+                f'No se puede despachar más del stock disponible en los siguientes ítems: {detalle}',
+            )
+            return redirect('pedidos-despachar', pk=pk)
+
+        despacho = Despacho.objects.create(
+            pedido=pedido,
+            picker=pedido.picker or request.user,
+            estado='PENDIENTE_APROBACION',
+            fecha_despacho=datetime.now(),
+        )
+
+        ids_despachados = set()
+        for item, cantidad_enviar in items_a_despachar:
+            DespachoItem.objects.create(
+                despacho=despacho,
+                pedido_item=item,
+                cantidad_despachada=cantidad_enviar,
+            )
+            item.cantidad_despachada = (item.cantidad_despachada or 0) + cantidad_enviar
+            item.cantidad_back_order = max(0, item.cantidad_solicitada - item.cantidad_despachada)
+            item.cantidad_preparada = None
+            item.estado = 'DESPACHADO' if item.cantidad_back_order == 0 else 'PARCIAL'
+            item.save()
+            ids_despachados.add(item.id)
+
+        # Items con cantidad 0 quedan en BACK_ORDER con su pendiente actualizado
+        for item, _ in cantidades.values():
+            if item.id not in ids_despachados:
+                item.cantidad_back_order = item.cantidad_solicitada - (item.cantidad_despachada or 0)
+                item.cantidad_preparada = None
+                item.estado = 'BACK_ORDER'
+                item.save()
+
+        if not pedido.fecha_despacho:
+            pedido.fecha_despacho = datetime.now()
+
+        pedido.estado = 'EN_PREPARACION'
+        pedido.save()
+
+        messages.success(
+            request,
+            f'Despacho #{despacho.numero_despacho} creado — pendiente de aprobación por supervisor'
+        )
         return redirect('pedidos-detalle', pk=pk)
 
     items_con_stock = []
     for item in items:
+        cantidad_pendiente = item.cantidad_back_order if item.estado == 'PARCIAL' else item.cantidad_solicitada
         items_con_stock.append({
             'item': item,
             'stock': stock_info.get(item.codigo, 0),
+            'cantidad_pendiente': cantidad_pendiente,
+            'cantidad_inicial': item.cantidad_preparada if item.cantidad_preparada is not None else 0,
         })
 
     return render(request, 'pedidos-despachar.html', {
@@ -233,71 +396,587 @@ def despachar_pedido(request, pk):
 
 
 @login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def asignar_picker(request, pk):
+    if request.method != 'POST':
+        return redirect('pedidos-lista')
+    pedido = get_object_or_404(Pedido, numero_pedido=pk)
+    tiene_bo = pedido.items.filter(estado='BACK_ORDER').exists()
+    if pedido.estado not in ('PENDIENTE',) and not (pedido.estado == 'PARCIAL' and tiene_bo):
+        messages.warning(request, f'El pedido #{pk} no puede asignarse picker en su estado actual')
+        return redirect('pedidos-lista')
+    picker_id = request.POST.get('picker_id', '').strip()
+    if not picker_id:
+        messages.error(request, 'Debe seleccionar un picker')
+        return redirect('pedidos-lista')
+    from users.models import User as UserModel
+    try:
+        picker = UserModel.objects.get(pk=picker_id, groups__name=GROUP_PICKER, status=True)
+    except UserModel.DoesNotExist:
+        messages.error(request, 'El picker seleccionado no existe o no tiene el rol correspondiente')
+        return redirect('pedidos-lista')
+    pedido.picker = picker
+    pedido.estado = 'ASIGNADO'
+    pedido.fecha_asignacion = timezone.now()
+    pedido.save()
+    posicion = picker.pedidos_picking.filter(estado__in=['ASIGNADO', 'PICKING']).count()
+    messages.success(request, f'Pedido #{pk} asignado a {picker.username} — posición {posicion} en su cola')
+    return redirect('pedidos-lista')
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def desasignar_picker(request, pk):
+    if request.method != 'POST':
+        return redirect('pedidos-lista')
+    pedido = get_object_or_404(Pedido, numero_pedido=pk)
+    if pedido.estado not in ('ASIGNADO', 'PICKING'):
+        messages.warning(request, f'El pedido #{pk} no está en estado Asignado o Picking y no puede liberarse')
+        return redirect('pedidos-lista')
+    picker_anterior = pedido.picker.username if pedido.picker else '—'
+    pedido.picker = None
+    pedido.fecha_asignacion = None
+    tiene_bo = pedido.items.filter(estado='BACK_ORDER').exists()
+    pedido.estado = 'PARCIAL' if tiene_bo else 'PENDIENTE'
+    pedido.save()
+    messages.success(request, f'Pedido #{pk} liberado (picker {picker_anterior} desasignado) — estado: {"Parcial" if tiene_bo else "Pendiente"}')
+    return redirect('pedidos-lista')
+
+
+@login_required(login_url='/login/')
+def preparar_pedido(request, pk):
+    pedido = get_object_or_404(Pedido.objects.select_related('picker', 'solicitante'), numero_pedido=pk)
+    es_supervisor = is_pedidos_supervisor(request.user)
+    es_picker_asignado = is_pedidos_picker(request.user) and pedido.picker == request.user
+
+    if not es_supervisor and not es_picker_asignado:
+        messages.error(request, 'No tienes permiso para preparar este pedido')
+        return redirect('pedidos-lista')
+
+    if pedido.estado not in ('ASIGNADO', 'PICKING', 'EN_PREPARACION'):
+        messages.warning(request, 'Este pedido no está en estado de preparación')
+        return redirect('pedidos-detalle', pk=pk)
+
+    if pedido.estado == 'ASIGNADO' and request.method == 'GET':
+        otro_en_picking = Pedido.objects.filter(
+            picker=pedido.picker, estado='PICKING'
+        ).exclude(pk=pedido.pk).exists()
+        if otro_en_picking:
+            messages.warning(request, 'Ya tienes otro pedido en Picking. Finalízalo antes de iniciar este.')
+            return redirect('pedidos-lista')
+        pedido.estado = 'PICKING'
+        pedido.save()
+
+    items = pedido.items.filter(estado__in=['PENDIENTE', 'BACK_ORDER', 'PARCIAL'])
+
+    stock_info = {}
+    try:
+        dbisam = PedidosDBISAM()
+        codigos = [item.codigo for item in items]
+        stock_info = dbisam.consultar_stock_multiple(codigos, deposito=DEPOSITO_ALMACEN)
+    except Exception as e:
+        messages.warning(request, f'No se pudo consultar el stock: {e}')
+
+    if request.method == 'POST':
+        for item in items:
+            try:
+                item.cantidad_preparada = int(request.POST.get(f'cantidad_{item.id}', '0'))
+            except ValueError:
+                item.cantidad_preparada = 0
+            item.save()
+        pedido.estado = 'EN_PREPARACION'
+        pedido.save()
+        messages.success(request, f'Pedido #{pk} marcado como En Preparación')
+        return redirect('pedidos-lista')
+
+    items_con_stock = []
+    for item in items:
+        cantidad_pendiente = item.cantidad_back_order if item.estado == 'PARCIAL' else item.cantidad_solicitada
+        items_con_stock.append({
+            'item': item,
+            'stock': stock_info.get(item.codigo, 0),
+            'cantidad_pendiente': cantidad_pendiente,
+            'cantidad_inicial': item.cantidad_preparada if item.cantidad_preparada is not None else 0,
+        })
+
+    return render(request, 'pedidos-preparar.html', {
+        'pedido': pedido,
+        'items_con_stock': items_con_stock,
+    })
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def confirmar_despacho(request, pk, despacho_id):
+    if request.method != 'POST':
+        return redirect('pedidos-detalle', pk=pk)
+
+    pedido = get_object_or_404(Pedido, numero_pedido=pk)
+    despacho = get_object_or_404(Despacho, numero_despacho=despacho_id, pedido=pedido)
+
+    if despacho.estado != 'PENDIENTE_APROBACION':
+        messages.warning(request, f'El despacho #{despacho_id} ya fue confirmado o no está pendiente de aprobación')
+        if request.POST.get('next') == 'despachos-lista':
+            return redirect('despachos-lista')
+        return redirect('pedidos-detalle', pk=pk)
+
+    # Correcciones de cantidad del supervisor (POST desde el detalle).
+    # Campo ausente = sin cambio (p. ej. al confirmar desde la lista global).
+    nuevas = {}
+    for di in despacho.items.select_related('pedido_item'):
+        raw = request.POST.get(f'cantidad_{di.id}')
+        if raw is None:
+            nuevas[di.id] = (di, di.cantidad_despachada)
+            continue
+        try:
+            nuevas[di.id] = (di, max(0, int(raw)))
+        except (TypeError, ValueError):
+            nuevas[di.id] = (di, di.cantidad_despachada)
+
+    if not any(val > 0 for _, val in nuevas.values()):
+        messages.error(request, 'No puedes confirmar un despacho sin ítems. Asigna al menos una cantidad mayor a cero.')
+        return redirect('pedidos-detalle', pk=pk)
+
+    # Validar que ninguna cantidad corregida supere el stock disponible en DBISAM
+    stock_info_conf: dict = {}
+    try:
+        codigos_conf = [
+            di.pedido_item.codigo
+            for di, _ in nuevas.values()
+            if di.pedido_item and di.pedido_item.codigo
+        ]
+        if codigos_conf:
+            dbisam_conf = PedidosDBISAM()
+            stock_info_conf = dbisam_conf.consultar_stock_multiple(codigos_conf, deposito=DEPOSITO_ALMACEN)
+    except Exception as e_stock:
+        logger.warning(f'No se pudo consultar stock al confirmar despacho #{despacho_id}: {e_stock}')
+
+    if stock_info_conf:
+        excesos_conf = []
+        for di, val in nuevas.values():
+            if val <= 0 or not di.pedido_item:
+                continue
+            stock_disp = stock_info_conf.get(di.pedido_item.codigo, 0)
+            if val > stock_disp:
+                desc = di.pedido_item.descripcion or di.pedido_item.codigo
+                excesos_conf.append(f'{desc} (confirmando {val}, stock disponible: {stock_disp})')
+        if excesos_conf:
+            detalle_conf = '; '.join(excesos_conf)
+            messages.error(
+                request,
+                f'No se puede confirmar: la cantidad supera el stock disponible en los siguientes ítems: {detalle_conf}',
+            )
+            return redirect('pedidos-detalle', pk=pk)
+
+    for di, val in nuevas.values():
+        delta = val - di.cantidad_despachada
+        pi = di.pedido_item
+        if delta != 0 and pi:
+            pi.cantidad_despachada = max(0, (pi.cantidad_despachada or 0) + delta)
+            pi.cantidad_back_order = max(0, pi.cantidad_solicitada - pi.cantidad_despachada)
+            if pi.cantidad_back_order == 0:
+                pi.estado = 'DESPACHADO'
+            elif pi.cantidad_despachada > 0:
+                pi.estado = 'PARCIAL'
+            else:
+                pi.estado = 'BACK_ORDER'
+            pi.save()
+        if val == 0:
+            di.delete()        # cantidad 0 → quitar ítem del despacho
+        elif delta != 0:
+            di.cantidad_despachada = val
+            di.save()
+
+    despacho.despachador = request.user
+    despacho.estado = 'ENVIADO'
+    despacho.save()
+
+    quedan_sin_despachar = pedido.items.filter(estado__in=['PENDIENTE', 'BACK_ORDER', 'PARCIAL']).exists()
+    pedido.estado = 'PARCIAL' if quedan_sin_despachar else 'DESPACHADO'
+    pedido.despachador = request.user
+    pedido.save()
+
+    if pedido.estado == 'DESPACHADO':
+        notificar_despacho(pedido)
+    elif pedido.estado == 'PARCIAL':
+        notificar_despacho_parcial(pedido)
+
+    items_dbisam = [
+        {'codigo': di.pedido_item.codigo, 'cantidad': di.cantidad_despachada}
+        for di in despacho.items.select_related('pedido_item')
+        if di.pedido_item and di.cantidad_despachada > 0
+    ]
+    try:
+        dbisam = PedidosDBISAM()
+        dbisam.insertar_traslado_despacho(
+            despacho.numero_despacho,
+            items_dbisam,
+            responsable=request.user.username,
+            proposito=pedido.condicion,
+        )
+        despacho.traslado_a2_registrado = True
+        despacho.save(update_fields=['traslado_a2_registrado'])
+    except Exception as e:
+        logger.error(f'Error al registrar traslado del despacho #{despacho_id} en a2: {e}')
+        messages.warning(
+            request,
+            f'Despacho confirmado, pero ocurrió un error al registrar el traslado en a2 — se recomienda realizarlo manualmente: {e}'
+        )
+
+    messages.success(request, f'Despacho #{despacho_id} confirmado y enviado')
+    next_url = request.POST.get('next', '')
+    if next_url == 'despachos-lista':
+        return redirect('despachos-lista')
+    return redirect('pedidos-detalle', pk=pk)
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def lista_despachos(request):
+    despachos = Despacho.objects.select_related(
+        'pedido__solicitante', 'despachador', 'picker'
+    ).order_by('-fecha_despacho')
+
+    estado_filter = request.GET.get('estado', '')
+    if estado_filter:
+        despachos = despachos.filter(estado=estado_filter)
+
+    return render(request, 'despachos-lista.html', {
+        'despachos': despachos,
+        'estado_filter': estado_filter,
+        'estados': Despacho.ESTADO_CHOICES,
+    })
+
+
+@login_required(login_url='/login/')
+def verificar_autorizacion_despacho(request):
+    """AJAX: valida credenciales de supervisor/admin para autorizar incidencias especiales."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False})
+    username = request.POST.get('username', '').strip()
+    password = request.POST.get('password', '')
+    auth_user = django_authenticate(request, username=username, password=password)
+    if auth_user and (auth_user.is_superuser or is_pedidos_supervisor(auth_user)):
+        request.session['despacho_auth_user_id'] = auth_user.id
+        return JsonResponse({'ok': True, 'nombre': auth_user.username})
+    request.session.pop('despacho_auth_user_id', None)
+    return JsonResponse({'ok': False, 'error': 'Credenciales inválidas o usuario sin permisos de autorización'})
+
+
+@login_required(login_url='/login/')
 @user_passes_test(is_pedidos_tienda, login_url='dashboard')
-def recibir_pedido(request, pk):
+def recibir_despacho(request, pk, despacho_id):
     pedido = get_object_or_404(Pedido, numero_pedido=pk)
 
     if _solo_tienda(request.user) and pedido.solicitante != request.user:
         messages.error(request, 'No tienes permiso para recibir este pedido')
         return redirect('pedidos-lista')
 
-    if pedido.estado != 'DESPACHADO':
-        messages.warning(request, 'Este pedido no tiene despachos pendientes de recepcion')
+    despacho = get_object_or_404(Despacho, numero_despacho=despacho_id, pedido=pedido)
+
+    if despacho.estado != 'ENVIADO':
+        messages.warning(request, 'Este despacho ya fue recibido o no está disponible para recepción')
         return redirect('pedidos-detalle', pk=pk)
 
-    items = pedido.items.filter(estado='DESPACHADO')
+    despacho_items = list(despacho.items.select_related('pedido_item'))
 
     if request.method == 'POST':
-        items_traslado = []
+        # ── Verificar si hay incidencias especiales ──────────────────────────
+        tiene_producto_erroneo = any(
+            request.POST.get(f'tipo_incidencia_{di.id}') == 'PRODUCTO_ERRONEO'
+            for di in despacho_items
+        )
+        productos_extra_raw = request.POST.get('productos_extra', '[]').strip()
+        try:
+            productos_extra_parsed = json.loads(productos_extra_raw)
+            tiene_sku_extra = bool(productos_extra_parsed)
+        except (json.JSONDecodeError, ValueError):
+            productos_extra_parsed = []
+            tiene_sku_extra = False
 
-        for item in items:
-            cantidad_recibida = request.POST.get(f'recibido_{item.id}', '0')
-            observacion = request.POST.get(f'observacion_{item.id}', '')
+        auth_user = None
+        if tiene_producto_erroneo or tiene_sku_extra:
+            auth_user_id = request.session.get('despacho_auth_user_id')
             try:
-                cantidad_recibida = int(cantidad_recibida)
+                from users.models import User as UserModel
+                auth_user = UserModel.objects.get(pk=auth_user_id)
+                if not (auth_user.is_superuser or is_pedidos_supervisor(auth_user)):
+                    raise ValueError('Sin permisos')
+            except Exception:
+                messages.error(
+                    request,
+                    'Se requiere autorización de un supervisor o administrador para registrar incidencias especiales.'
+                )
+                return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
+            request.session.pop('despacho_auth_user_id', None)
+
+        # ── Validar que se reciba al menos 1 unidad ──────────────────────────
+        total_cant_recibida = 0
+        for di in despacho_items:
+            if request.POST.get(f'tipo_incidencia_{di.id}', '') == 'PRODUCTO_ERRONEO':
+                continue
+            try:
+                total_cant_recibida += max(int(request.POST.get(f'recibido_{di.id}', '0') or '0'), 0)
+            except (ValueError, TypeError):
+                pass
+        for extra in productos_extra_parsed:
+            try:
+                cant_extra = int(extra.get('cantidad', 0))
+            except (ValueError, TypeError):
+                cant_extra = 0
+            if str(extra.get('codigo', '')).strip() and cant_extra > 0:
+                total_cant_recibida += cant_extra
+        if total_cant_recibida == 0:
+            messages.error(request, 'Debe ingresar al menos una cantidad mayor a 0 para confirmar la recepción.')
+            return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
+
+        # ── Validar fotos obligatorias en incidencias ────────────────────────
+        errores_foto = []
+        for di in despacho_items:
+            tipo_inc_pre = request.POST.get(f'tipo_incidencia_{di.id}', '')
+            try:
+                cant_pre = int(request.POST.get(f'recibido_{di.id}', '0') or '0')
+            except ValueError:
+                cant_pre = 0
+            if tipo_inc_pre == 'PRODUCTO_ERRONEO':
+                if not request.FILES.get(f'foto_{di.id}'):
+                    codigo = di.pedido_item.codigo if di.pedido_item else '—'
+                    errores_foto.append(f'{codigo} (Cambio SKU)')
+        if tiene_sku_extra and not request.FILES.get('foto_extras'):
+            errores_foto.append('productos adicionales (SKU no contemplado)')
+        if errores_foto:
+            messages.error(
+                request,
+                'Se requiere foto de evidencia para: ' + ', '.join(errores_foto),
+            )
+            return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
+
+        foto_extras = request.FILES.get('foto_extras')
+        items_traslado = []
+        hay_incidencia = False
+
+        # ── Procesar items normales y con producto erróneo ───────────────────
+        for di in despacho_items:
+            try:
+                cantidad_recibida = int(request.POST.get(f'recibido_{di.id}', '0'))
             except ValueError:
                 cantidad_recibida = 0
+            observacion = request.POST.get(f'observacion_{di.id}', '')
+            tipo_inc = request.POST.get(f'tipo_incidencia_{di.id}', '')
 
-            item.cantidad_recibida = cantidad_recibida
+            di.cantidad_recibida = cantidad_recibida
+            di.observacion = observacion
+
+            if tipo_inc == 'PRODUCTO_ERRONEO':
+                di.tipo_incidencia = 'PRODUCTO_ERRONEO'
+                di.codigo_real = request.POST.get(f'codigo_real_{di.id}', '').strip()
+                di.descripcion_real = request.POST.get(f'descripcion_real_{di.id}', '').strip()
+                di.autorizado_por = auth_user
+                di.foto_incidencia = request.FILES.get(f'foto_{di.id}')
+                hay_incidencia = True
+            elif cantidad_recibida < di.cantidad_despachada:
+                di.tipo_incidencia = 'CANTIDAD_MENOR'
+                hay_incidencia = True
+            elif cantidad_recibida > di.cantidad_despachada:
+                di.tipo_incidencia = 'CANTIDAD_MAYOR'
+                hay_incidencia = True
+            di.save()
+
+            item = di.pedido_item
+            item.cantidad_recibida = (item.cantidad_recibida or 0) + cantidad_recibida
             item.observacion = observacion
 
-            if cantidad_recibida >= item.cantidad_despachada:
-                item.estado = 'RECIBIDO'
-            else:
+            if tipo_inc == 'PRODUCTO_ERRONEO':
                 item.estado = 'INCIDENCIA'
+            elif item.cantidad_recibida >= item.cantidad_solicitada:
+                item.estado = 'RECIBIDO'
+            elif item.cantidad_back_order > 0:
+                item.estado = 'BACK_ORDER'
+            else:
+                tiene_otros_enviados = DespachoItem.objects.filter(
+                    pedido_item=item, despacho__estado='ENVIADO',
+                ).exclude(despacho=despacho).exists()
+                if tiene_otros_enviados:
+                    item.estado = 'DESPACHADO'
+                elif item.cantidad_recibida < item.cantidad_despachada:
+                    item.estado = 'INCIDENCIA'
+                else:
+                    item.estado = 'RECIBIDO'
             item.save()
 
             if cantidad_recibida > 0:
-                items_traslado.append({'codigo': item.codigo, 'cantidad': cantidad_recibida})
+                codigo_traslado = di.codigo_real if tipo_inc == 'PRODUCTO_ERRONEO' and di.codigo_real else item.codigo
+                items_traslado.append({'codigo': codigo_traslado, 'cantidad': cantidad_recibida})
 
-        # Verificar si todos los items del pedido estan finalizados
-        items_pendientes = pedido.items.filter(estado__in=['PENDIENTE', 'DESPACHADO', 'BACK_ORDER']).exists()
-        if not items_pendientes:
+        # ── Procesar SKUs no contemplados ────────────────────────────────────
+        if tiene_sku_extra:
+            extras = productos_extra_parsed
+
+            for extra in extras:
+                codigo = str(extra.get('codigo', '')).strip()
+                descripcion = str(extra.get('descripcion', '')).strip()
+                try:
+                    cantidad = int(extra.get('cantidad', 0))
+                except (ValueError, TypeError):
+                    cantidad = 0
+
+                if not codigo or cantidad <= 0:
+                    continue
+
+                # Crear PedidoItem ficticio para trazabilidad
+                nuevo_item = PedidoItem.objects.create(
+                    pedido=pedido,
+                    codigo=codigo,
+                    descripcion=descripcion,
+                    cantidad_solicitada=0,
+                    cantidad_despachada=cantidad,
+                    cantidad_recibida=cantidad,
+                    estado='INCIDENCIA',
+                    observacion='SKU no contemplado en el pedido original',
+                )
+                di_extra = DespachoItem(
+                    despacho=despacho,
+                    pedido_item=nuevo_item,
+                    cantidad_despachada=cantidad,
+                    cantidad_recibida=cantidad,
+                    tipo_incidencia='SKU_NO_CONTEMPLADO',
+                    autorizado_por=auth_user,
+                )
+                if foto_extras:
+                    di_extra.foto_incidencia = foto_extras
+                di_extra.save()
+                items_traslado.append({'codigo': codigo, 'cantidad': cantidad})
+                hay_incidencia = True
+
+        despacho.receptor = request.user
+        despacho.fecha_recepcion = datetime.now()
+        despacho.estado = 'PARCIAL' if hay_incidencia else 'RECIBIDO'
+        despacho.save()
+
+        estados_items = list(pedido.items.values_list('estado', flat=True))
+        if all(e == 'RECIBIDO' for e in estados_items):
             pedido.estado = 'RECIBIDO'
             pedido.fecha_recepcion = datetime.now()
+        elif any(e in ('PENDIENTE', 'BACK_ORDER', 'PARCIAL', 'DESPACHADO') for e in estados_items):
+            pedido.estado = 'PARCIAL'
         pedido.save()
 
-        # Insertar traslado en DBISAM
         if items_traslado and pedido.deposito_codigo:
             try:
                 dbisam = PedidosDBISAM()
-                dbisam.insertar_traslado(pedido.numero_pedido, pedido.deposito_codigo, items_traslado)
+                dbisam.insertar_traslado_recepcion(
+                    pedido.numero_pedido,
+                    pedido.deposito_codigo,
+                    items_traslado,
+                    responsable=request.user.username,
+                    proposito=pedido.condicion,
+                )
             except Exception as e:
-                logger.error(f'Error al insertar traslado DBISAM para pedido #{pedido.numero_pedido}: {e}')
+                logger.error(f'Error al insertar traslado DBISAM para despacho #{despacho_id}: {e}')
                 messages.error(
                     request,
-                    f'Recepción registrada, pero ocurrió un error al registrar el traslado en a2 se recomienda realizar el traslado manual: {e}'
+                    f'Recepción registrada, pero ocurrió un error al registrar el traslado en a2 — se recomienda realizarlo manualmente: {e}'
                 )
 
-        notificar_recepcion(pedido)
-        messages.success(request, f'Recepcion del pedido #{pedido.numero_pedido} registrada')
+        messages.success(request, f'Recepción del Despacho #{despacho_id} registrada correctamente')
         return redirect('pedidos-detalle', pk=pk)
 
-    return render(request, 'pedidos-recibir.html', {
+    return render(request, 'pedidos-recibir-despacho.html', {
         'pedido': pedido,
-        'items': items,
-        'ver_despachado': is_pedidos_supervisor(request.user),
+        'despacho': despacho,
+        'despacho_items': despacho_items,
+        'ver_despachado': is_pedidos_supervisor(request.user) or is_pedidos_almacen(request.user),
     })
+
+
+@login_required(login_url='/login/')
+def exportar_despacho_pdf(request, pk, despacho_id):
+    if not (request.user.is_superuser or is_pedidos_almacen(request.user) or is_pedidos_supervisor(request.user)):
+        messages.error(request, 'No tienes permiso para imprimir este despacho')
+        return redirect('pedidos-detalle', pk=pk)
+
+    pedido = get_object_or_404(Pedido, numero_pedido=pk)
+    despacho = get_object_or_404(Despacho, numero_despacho=despacho_id, pedido=pedido)
+    despacho_items = despacho.items.select_related('pedido_item')
+
+    pdf_bytes = generar_despacho_pdf(despacho, despacho_items)
+    nombre_archivo = f"despacho_{despacho_id}_pedido_{pk}.pdf"
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
+    return response
+
+
+@login_required(login_url='/login/')
+def reintentar_traslado_despacho(request, pk, despacho_id):
+    """
+    Reintenta la inserción del traslado en a2 para un despacho cuyo registro falló.
+    Solo accesible para superusuarios. Solo POST.
+
+    Protección anti-duplicado doble:
+    1. Flag traslado_a2_registrado en el modelo.
+    2. Verificación de existencia en SOPERACIONINV antes de insertar.
+    """
+    if not request.user.is_superuser:
+        messages.error(request, 'No tienes permiso para ejecutar esta acción')
+        return redirect('pedidos-detalle', pk=pk)
+
+    if request.method != 'POST':
+        return redirect('pedidos-detalle', pk=pk)
+
+    pedido = get_object_or_404(Pedido, numero_pedido=pk)
+    despacho = get_object_or_404(Despacho, numero_despacho=despacho_id, pedido=pedido)
+
+    # El botón solo debe aparecer cuando el flag es False, pero validamos en servidor también
+    if despacho.traslado_a2_registrado:
+        messages.info(request, f'El traslado del despacho #{despacho_id} ya fue registrado en a2')
+        return redirect('pedidos-detalle', pk=pk)
+
+    if despacho.estado in ('PENDIENTE_APROBACION', 'PREPARANDO'):
+        messages.warning(request, f'El despacho #{despacho_id} aún no ha sido confirmado')
+        return redirect('pedidos-detalle', pk=pk)
+
+    # Verificación de seguridad contra a2 para evitar duplicados (despachos históricos)
+    try:
+        dbisam = PedidosDBISAM()
+        if dbisam.existe_traslado_despacho(despacho.numero_despacho):
+            despacho.traslado_a2_registrado = True
+            despacho.save(update_fields=['traslado_a2_registrado'])
+            messages.warning(
+                request,
+                f'El traslado del despacho #{despacho_id} ya existía en a2 — se marcó como registrado sin duplicar.',
+            )
+            return redirect('pedidos-detalle', pk=pk)
+    except Exception as e:
+        logger.error(f'Error al verificar existencia del traslado #{despacho_id} en a2: {e}')
+        messages.error(request, f'No se pudo verificar el estado del traslado en a2: {e}')
+        return redirect('pedidos-detalle', pk=pk)
+
+    # Reconstruir items idéntico a confirmar_despacho
+    items_dbisam = [
+        {'codigo': di.pedido_item.codigo, 'cantidad': di.cantidad_despachada}
+        for di in despacho.items.select_related('pedido_item')
+        if di.pedido_item and di.cantidad_despachada > 0
+    ]
+
+    if not items_dbisam:
+        messages.error(request, f'El despacho #{despacho_id} no tiene ítems válidos para registrar en a2')
+        return redirect('pedidos-detalle', pk=pk)
+
+    try:
+        dbisam.insertar_traslado_despacho(
+            despacho.numero_despacho,
+            items_dbisam,
+            responsable=request.user.username,
+            proposito=pedido.condicion,
+        )
+        despacho.traslado_a2_registrado = True
+        despacho.save(update_fields=['traslado_a2_registrado'])
+        messages.success(request, f'Traslado del despacho #{despacho_id} registrado correctamente en a2')
+    except Exception as e:
+        logger.error(f'Error al reintentar traslado del despacho #{despacho_id} en a2: {e}')
+        messages.error(request, f'Error al registrar el traslado en a2: {e}')
+
+    return redirect('pedidos-detalle', pk=pk)
 
 
 @login_required(login_url='/login/')
@@ -315,9 +994,47 @@ def buscar_producto(request):
 
     try:
         dbisam = PedidosDBISAM()
-        resultados = dbisam.buscar_en_categoria(categoria, query, tipo)
+        resultados_raw = dbisam.buscar_en_categoria(categoria, query, tipo)
     except Exception:
-        resultados = []
+        resultados_raw = []
+
+    # Enriquecer con ubicaciones internas (Postgres)
+    from ubicaciones.models import ProductoUbicacion
+    codigos = [r[0] for r in resultados_raw]
+    ubicaciones_map: dict = {}
+    if codigos:
+        try:
+            qs = (
+                ProductoUbicacion.objects
+                .filter(
+                    codigo_producto__in=codigos,
+                    ubicacion__activo=True,
+                    ubicacion__nivel__activo=True,
+                    ubicacion__nivel__rack__activo=True,
+                )
+                .select_related('ubicacion__nivel__rack')
+            )
+            for pu in qs:
+                ubicaciones_map.setdefault(pu.codigo_producto, []).append({
+                    'codigo': pu.ubicacion.codigo_completo,
+                    'tipo_nivel': pu.ubicacion.nivel.tipo,
+                    'tipo_nivel_display': pu.ubicacion.nivel.get_tipo_display(),
+                })
+        except Exception:
+            logger.exception("Error al consultar ubicaciones internas en buscar_producto")
+
+    resultados = [
+        {
+            'codigo': r[0],
+            'descripcion': r[1],
+            'referencia': r[2],
+            'puesto': r[3],
+            'existencia': r[4],
+            'ref_proveedor': r[5],
+            'ubicaciones_internas': ubicaciones_map.get(r[0], []),
+        }
+        for r in resultados_raw
+    ]
 
     return render(request, 'pedidos-buscar-producto.html', {'resultados': resultados})
 
@@ -349,25 +1066,22 @@ def reporte_pedidos(request):
         total_recibido=Sum('cantidad_recibida'),
     )
 
-    # Tiempo promedio de despacho efectivo (creacion -> despacho)
     tiempo_horas = None
     tiempo_minutos = None
     pedidos_con_despacho = pedidos.filter(fecha_despacho__isnull=False)
     if pedidos_con_despacho.exists():
-        resultado = pedidos_con_despacho.annotate(
-            duracion=ExpressionWrapper(
-                F('fecha_despacho') - F('fecha_creacion'),
-                output_field=DurationField()
-            )
-        ).aggregate(promedio=Avg('duracion'))
-        if resultado['promedio']:
-            total_seg = int(resultado['promedio'].total_seconds())
-            tiempo_horas = total_seg // 3600
-            tiempo_minutos = (total_seg % 3600) // 60
+        segundos_list = [
+            _segundos_laborales(p.fecha_creacion, p.fecha_despacho)
+            for p in pedidos_con_despacho.only('fecha_creacion', 'fecha_despacho')
+        ]
+        if segundos_list:
+            promedio_seg = sum(segundos_list) / len(segundos_list)
+            tiempo_horas = int(promedio_seg) // 3600
+            tiempo_minutos = (int(promedio_seg) % 3600) // 60
 
     categoria_top = (
         pedidos.exclude(categoria='')
-        .values('categoria')
+        .values('categoria', 'categoria_nombre')
         .annotate(total=Count('numero_pedido'))
         .order_by('-total')
         .first()
@@ -389,7 +1103,7 @@ def reporte_pedidos(request):
 
     por_categoria = (
         pedidos.exclude(categoria='')
-        .values('categoria')
+        .values('categoria', 'categoria_nombre')
         .annotate(total=Count('numero_pedido'))
         .order_by('-total')[:10]
     )
@@ -466,16 +1180,14 @@ def exportar_reporte_pdf(request):
     tiempo_minutos = None
     pedidos_con_despacho = pedidos.filter(fecha_despacho__isnull=False)
     if pedidos_con_despacho.exists():
-        resultado = pedidos_con_despacho.annotate(
-            duracion=ExpressionWrapper(
-                F('fecha_despacho') - F('fecha_creacion'),
-                output_field=DurationField()
-            )
-        ).aggregate(promedio=Avg('duracion'))
-        if resultado['promedio']:
-            total_seg = int(resultado['promedio'].total_seconds())
-            tiempo_horas = total_seg // 3600
-            tiempo_minutos = (total_seg % 3600) // 60
+        segundos_list = [
+            _segundos_laborales(p.fecha_creacion, p.fecha_despacho)
+            for p in pedidos_con_despacho.only('fecha_creacion', 'fecha_despacho')
+        ]
+        if segundos_list:
+            promedio_seg = sum(segundos_list) / len(segundos_list)
+            tiempo_horas = int(promedio_seg) // 3600
+            tiempo_minutos = (int(promedio_seg) % 3600) // 60
 
     items_qs_pdf = PedidoItem.objects.filter(pedido__in=pedidos)
     total_items_incidencia = items_qs_pdf.filter(estado='INCIDENCIA').count()
@@ -494,7 +1206,7 @@ def exportar_reporte_pdf(request):
         'tiempo_minutos': tiempo_minutos,
         'categoria_top': (
             pedidos.exclude(categoria='')
-            .values('categoria').annotate(total=Count('numero_pedido'))
+            .values('categoria', 'categoria_nombre').annotate(total=Count('numero_pedido'))
             .order_by('-total').first()
         ),
         'condicion_top': (
@@ -510,7 +1222,7 @@ def exportar_reporte_pdf(request):
             .annotate(total=Count('numero_pedido')).order_by('-total')
         ),
         'por_categoria': list(
-            pedidos.exclude(categoria='').values('categoria')
+            pedidos.exclude(categoria='').values('categoria', 'categoria_nombre')
             .annotate(total=Count('numero_pedido')).order_by('-total')[:10]
         ),
         'fecha_inicio': fecha_inicio,
@@ -527,11 +1239,95 @@ def exportar_reporte_pdf(request):
 
 
 @login_required(login_url='/login/')
+@user_passes_test(is_pedidos_any, login_url='dashboard')
+def exportar_pedido_pdf(request, pk):
+    pedido = get_object_or_404(Pedido.objects.select_related('solicitante', 'despachador'), numero_pedido=pk)
+
+    if _solo_tienda(request.user) and pedido.solicitante != request.user:
+        messages.error(request, 'No tienes permiso para descargar este pedido')
+        return redirect('pedidos-lista')
+
+    items = pedido.items.all()
+    mostrar_cantidades = is_pedidos_almacen(request.user) or is_pedidos_supervisor(request.user)
+
+    pdf_bytes = generar_pedido_pdf(pedido, items, mostrar_cantidades=mostrar_cantidades)
+    nombre_archivo = f"pedido_{pedido.numero_pedido}.pdf"
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
+    return response
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def reporte_incidencias(request):
+    fecha_inicio = request.GET.get('fecha_inicio', '')
+    fecha_fin = request.GET.get('fecha_fin', '')
+    tipo_filtro = request.GET.get('tipo', '')
+
+    TIPOS_INCIDENCIA = [
+        ('PRODUCTO_ERRONEO', 'Cambio de SKU'),
+        ('SKU_NO_CONTEMPLADO', 'SKU No Contemplado'),
+        ('CANTIDAD_MENOR', 'Cantidad Menor a lo Despachado'),
+        ('CANTIDAD_MAYOR', 'Cantidad Mayor a lo Despachado'),
+    ]
+
+    qs = DespachoItem.objects.filter(
+        tipo_incidencia__in=['PRODUCTO_ERRONEO', 'SKU_NO_CONTEMPLADO', 'CANTIDAD_MENOR', 'CANTIDAD_MAYOR']
+    ).select_related(
+        'despacho__pedido__solicitante',
+        'pedido_item',
+        'autorizado_por',
+    ).order_by('-despacho__fecha_despacho')
+
+    if fecha_inicio:
+        try:
+            qs = qs.filter(despacho__fecha_despacho__date__gte=datetime.strptime(fecha_inicio, '%Y-%m-%d').date())
+        except ValueError:
+            pass
+    if fecha_fin:
+        try:
+            qs = qs.filter(despacho__fecha_despacho__date__lte=datetime.strptime(fecha_fin, '%Y-%m-%d').date())
+        except ValueError:
+            pass
+    if tipo_filtro in [t[0] for t in TIPOS_INCIDENCIA]:
+        qs = qs.filter(tipo_incidencia=tipo_filtro)
+
+    total = qs.count()
+    total_erroneos = qs.filter(tipo_incidencia='PRODUCTO_ERRONEO').count()
+    total_no_contemplados = qs.filter(tipo_incidencia='SKU_NO_CONTEMPLADO').count()
+    total_cantidad_menor = qs.filter(tipo_incidencia='CANTIDAD_MENOR').count()
+    total_cantidad_mayor = qs.filter(tipo_incidencia='CANTIDAD_MAYOR').count()
+
+    return render(request, 'pedidos-reporte-incidencias.html', {
+        'incidencias': qs,
+        'total': total,
+        'total_erroneos': total_erroneos,
+        'total_no_contemplados': total_no_contemplados,
+        'total_cantidad_menor': total_cantidad_menor,
+        'total_cantidad_mayor': total_cantidad_mayor,
+        'fecha_inicio': fecha_inicio,
+        'fecha_fin': fecha_fin,
+        'tipo_filtro': tipo_filtro,
+        'tipos_incidencia': TIPOS_INCIDENCIA,
+    })
+
+
+@login_required(login_url='/login/')
 def contar_pendientes(request):
-    if is_pedidos_almacen(request.user):
+    if is_pedidos_supervisor(request.user):
+        count = (
+            Pedido.objects.filter(estado='PENDIENTE').count()
+            + Despacho.objects.filter(estado='PENDIENTE_APROBACION').count()
+        )
+    elif is_pedidos_almacen(request.user):
         count = Pedido.objects.filter(estado='PENDIENTE').count()
+    elif _solo_picker(request.user):
+        count = Pedido.objects.filter(picker=request.user, estado__in=['ASIGNADO', 'PICKING']).count()
     elif is_pedidos_tienda(request.user):
-        count = Pedido.objects.filter(solicitante=request.user, estado='DESPACHADO').count()
+        count = Despacho.objects.filter(
+            pedido__solicitante=request.user,
+            estado='ENVIADO',
+        ).count()
     else:
         count = 0
     return HttpResponse(f'<span class="badge bg-danger rounded-pill">{count}</span>' if count > 0 else '')

@@ -1,10 +1,13 @@
 from types import SimpleNamespace
+from types import SimpleNamespace as NS
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.db import IntegrityError
 
 from .models import DepositoPermitido
 from .admin import sincronizar_depositos_permitidos
+from . import views
 
 
 class DepositoPermitidoModelTest(TestCase):
@@ -39,3 +42,29 @@ class SincronizarDepositosTest(TestCase):
 
         dep7 = DepositoPermitido.objects.get(codigo=7)
         self.assertFalse(dep7.activo)           # nuevo nace inactivo
+
+
+class DepositosParaSelectorTest(TestCase):
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_usa_activos_y_no_consulta_dbisam(self, mock_db):
+        DepositoPermitido.objects.create(codigo=3, nombre='Beta', activo=True)
+        DepositoPermitido.objects.create(codigo=2, nombre='Alfa', activo=True)
+        DepositoPermitido.objects.create(codigo=9, nombre='Inactivo', activo=False)
+
+        resultado = views._depositos_para_selector()
+
+        self.assertEqual(resultado, [(2, 'Alfa'), (3, 'Beta')])  # ordenado por nombre
+        mock_db.assert_not_called()
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_fallback_sin_activos(self, mock_db):
+        mock_db.return_value.obtener_depositos.return_value = [
+            NS(FDP_CODIGO=4, FDP_DESCRIPCION='Tienda Sur'),
+        ]
+        resultado = views._depositos_para_selector()
+        self.assertEqual(resultado, [(4, 'Tienda Sur')])
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_fallback_con_error_dbisam_devuelve_vacio(self, mock_db):
+        mock_db.return_value.obtener_depositos.side_effect = Exception('odbc down')
+        self.assertEqual(views._depositos_para_selector(), [])
