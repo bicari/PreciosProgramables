@@ -5,8 +5,11 @@ from users.models import User
 class Pedido(models.Model):
     ESTADO_CHOICES = [
         ('PENDIENTE', 'Pendiente'),
+        ('ASIGNADO', 'Asignado'),
         ('PICKING', 'Picking'),
+        ('EN_PREPARACION', 'En Preparación'),
         ('DESPACHADO', 'Despachado'),
+        ('PARCIAL', 'Parcial'),
         ('RECIBIDO', 'Recibido'),
         ('CERRADO', 'Cerrado'),
     ]
@@ -26,7 +29,13 @@ class Pedido(models.Model):
     fecha_despacho = models.DateTimeField(null=True, blank=True)
     fecha_recepcion = models.DateTimeField(null=True, blank=True)
     categoria = models.CharField(max_length=70, blank=True, default='')
+    categoria_nombre = models.CharField(max_length=150, blank=True, default='')
     deposito_codigo = models.IntegerField(null=True, blank=True)
+    picker = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='pedidos_picking',
+    )
+    fecha_asignacion = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"Pedido #{self.numero_pedido} - {self.solicitante.username}"
@@ -36,6 +45,7 @@ class PedidoItem(models.Model):
     ESTADO_ITEM_CHOICES = [
         ('PENDIENTE', 'Pendiente'),
         ('DESPACHADO', 'Despachado'),
+        ('PARCIAL', 'Parcial'),
         ('RECIBIDO', 'Recibido'),
         ('BACK_ORDER', 'Back Order'),
         ('INCIDENCIA', 'Incidencia'),
@@ -47,10 +57,85 @@ class PedidoItem(models.Model):
     puesto = models.CharField(max_length=100, blank=True, default='')
     ref_proveedor = models.CharField(max_length=100, blank=True, default='')
     cantidad_solicitada = models.IntegerField()
+    cantidad_preparada = models.IntegerField(null=True, blank=True)
     cantidad_despachada = models.IntegerField(default=0)
+    cantidad_back_order = models.IntegerField(default=0)
     cantidad_recibida = models.IntegerField(default=0)
     estado = models.CharField(max_length=20, choices=ESTADO_ITEM_CHOICES, default='PENDIENTE')
     observacion = models.CharField(max_length=255, blank=True)
 
     def __str__(self):
         return f"{self.codigo} - {self.descripcion} (x{self.cantidad_solicitada})"
+
+
+class Despacho(models.Model):
+    ESTADO_CHOICES = [
+        ('PENDIENTE_APROBACION', 'Pendiente de Aprobación'),
+        ('PREPARANDO', 'Preparando'),
+        ('ENVIADO', 'Enviado'),
+        ('RECIBIDO', 'Recibido'),
+        ('PARCIAL', 'Parcial'),
+    ]
+    pedido = models.ForeignKey(Pedido, on_delete=models.PROTECT, related_name='despachos')
+    numero_despacho = models.AutoField(primary_key=True)
+    despachador = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='despachos_realizados')
+    picker = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='despachos_pickeados')
+    receptor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='despachos_recibidos')
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='PREPARANDO')
+    observaciones = models.TextField(blank=True)
+    fecha_despacho = models.DateTimeField(null=True, blank=True)
+    fecha_recepcion = models.DateTimeField(null=True, blank=True)
+    traslado_a2_registrado = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"Despacho #{self.numero_despacho} → Pedido #{self.pedido_id}"
+
+
+class DespachoItem(models.Model):
+    TIPO_INCIDENCIA_CHOICES = [
+        ('PRODUCTO_ERRONEO', 'Producto Erróneo'),
+        ('SKU_NO_CONTEMPLADO', 'SKU No Contemplado'),
+        ('CANTIDAD_MENOR', 'Cantidad Menor a lo Despachado'),
+        ('CANTIDAD_MAYOR', 'Cantidad Mayor a lo Despachado'),
+    ]
+    despacho = models.ForeignKey(Despacho, on_delete=models.CASCADE, related_name='items')
+    # Nullable para SKU no contemplados (no tienen PedidoItem de origen)
+    pedido_item = models.ForeignKey(PedidoItem, on_delete=models.PROTECT, related_name='despachos', null=True, blank=True)
+    cantidad_despachada = models.IntegerField()
+    cantidad_recibida = models.IntegerField(default=0)
+    observacion = models.CharField(max_length=255, blank=True)
+    tipo_incidencia = models.CharField(max_length=20, choices=TIPO_INCIDENCIA_CHOICES, blank=True, default='')
+    # Producto realmente recibido (solo para PRODUCTO_ERRONEO)
+    codigo_real = models.CharField(max_length=50, blank=True)
+    descripcion_real = models.CharField(max_length=255, blank=True)
+    autorizado_por = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='despachos_autorizados',
+    )
+    foto_incidencia = models.ImageField(
+        upload_to='incidencias/%Y/%m/%d/',
+        null=True, blank=True,
+    )
+
+    def __str__(self):
+        codigo = self.pedido_item.codigo if self.pedido_item else self.codigo_real
+        return f"{codigo} x{self.cantidad_despachada} (Despacho #{self.despacho_id})"
+
+
+class DepositoPermitido(models.Model):
+    """Depósito de a2 habilitado para selección al crear un pedido.
+
+    Se sincroniza desde SDEPOSITOS y el admin marca cuáles quedan activos.
+    """
+    codigo = models.IntegerField(unique=True)      # FDP_CODIGO de SDEPOSITOS
+    nombre = models.CharField(max_length=150)      # FDP_DESCRIPCION
+    activo = models.BooleanField(default=False)
+    fecha_sync = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['nombre']
+        verbose_name = 'Depósito permitido'
+        verbose_name_plural = 'Depósitos permitidos'
+
+    def __str__(self) -> str:
+        return f"{self.codigo} - {self.nombre}"

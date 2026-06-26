@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Pedido, PedidoItem
+from .models import Pedido, PedidoItem, DepositoPermitido
 
 
 class PedidoItemInline(admin.TabularInline):
@@ -24,3 +24,12 @@ class PedidoItemAdmin(admin.ModelAdmin):
     list_filter = ('estado',)
     search_fields = ('codigo', 'descripcion')
     list_per_page = 30
+
+
+@admin.register(DepositoPermitido)
+class DepositoPermitidoAdmin(admin.ModelAdmin):
+    list_display = ('codigo', 'nombre', 'activo', 'fecha_sync')
+    list_editable = ('activo',)
+    list_filter = ('activo',)
+    search_fields = ('codigo', 'nombre')
+    ordering = ('nombre',)
