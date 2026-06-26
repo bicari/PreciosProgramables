@@ -985,6 +985,7 @@ def buscar_producto(request):
     query = request.GET.get('q', '').strip()
     tipo = request.GET.get('tipo', 'codigo')
     categoria = request.GET.get('categoria', '').strip()
+    solo_existencia = request.GET.get('solo_existencia') == '1'
 
     if not categoria:
         return HttpResponse('<p class="text-warning">Seleccione una categoria antes de buscar</p>')
@@ -994,7 +995,8 @@ def buscar_producto(request):
 
     try:
         dbisam = PedidosDBISAM()
-        resultados_raw = dbisam.buscar_en_categoria(categoria, query, tipo)
+        resultados_raw = dbisam.buscar_en_categoria(
+            categoria, query, tipo, solo_existencia=solo_existencia)
     except Exception:
         resultados_raw = []
 

@@ -5,7 +5,8 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-DEPOSITO_ORIGEN = 1  # Depósito principal / almacén (siempre origen en traslados)
+DEPOSITO_ALMACEN = 1    # Almacén principal (origen en despacho)
+DEPOSITO_TRANSITO = 10  # Almacén tránsito (escala entre despacho y recepción)
 
 
 def _clean(value):
@@ -39,6 +40,48 @@ class PedidosDBISAM:
         except Exception as e:
             raise pyodbc.DatabaseError(str(e))
 
+    def buscar_producto_por_campo(self, codigo: str, campo: str):
+        """Busca un producto por SKU, código de barras o ref. proveedor.
+
+        Args:
+            codigo: Valor a buscar (coincidencia exacta).
+            campo: 'sku' | 'codBarra' | 'refProveedor'.
+
+        Returns:
+            Tuple (FI_CODIGO, FI_DESCRIPCION, FI_REFERENCIA, FI_PUESTO, ZZCAMPO_001) o None.
+
+        Raises:
+            ValueError: campo no válido.
+            pyodbc.DatabaseError: error de BD.
+        """
+        mapeo = {
+            'sku': 'FI_CODIGO',
+            'codBarra': 'FI_REFERENCIA',
+            'refProveedor': 'ZZCAMPO_001',
+        }
+        columna = mapeo.get(campo)
+        if not columna:
+            raise ValueError(f"Campo inválido: {campo}")
+
+        codigo_esc = codigo.replace("'", "''")
+        try:
+            with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    row = cursor.execute(f"""SELECT
+                                            FI_CODIGO,
+                                            FI_DESCRIPCION,
+                                            FI_REFERENCIA,
+                                            FI_PUESTO,
+                                            ZZCAMPO_001
+                                        FROM SINVENTARIO
+                                        WHERE {columna} = '{codigo_esc}'""").fetchone()
+                    if row is None:
+                        return None
+                    return (_clean(row[0]), _clean(row[1]), _clean(row[2]),
+                            _clean(row[3]), _clean(row[4]))
+        except Exception as e:
+            raise pyodbc.DatabaseError(str(e))
+
     def buscar_por_descripcion(self, descripcion):
         try:
             with self.connect() as conn:
@@ -67,11 +110,12 @@ class PedidosDBISAM:
         except Exception as e:
             raise pyodbc.DatabaseError(str(e))
 
-    def consultar_stock_multiple(self, codigos):
+    def consultar_stock_multiple(self, codigos, deposito=None):
         try:
             if not codigos:
                 return {}
             codes_str = ','.join(f"'{c}'" for c in codigos)
+            deposito_filter = f"AND FT_CODIGODEPOSITO = {deposito}" if deposito else ""
             with self.connect() as conn:
                 with conn.cursor() as cursor:
                     rows = cursor.execute(f"""SELECT
@@ -79,6 +123,7 @@ class PedidosDBISAM:
                                             COALESCE(SUM(FT_EXISTENCIA), 0) AS existencia
                                         FROM SINVDEP
                                         WHERE FT_CODIGOPRODUCTO IN ({codes_str})
+                                        {deposito_filter}
                                         GROUP BY FT_CODIGOPRODUCTO""").fetchall()
                     return {row.FT_CODIGOPRODUCTO: row.existencia for row in rows}
         except Exception as e:
@@ -123,25 +168,17 @@ class PedidosDBISAM:
         ).fetchall()
         return {row[0] for row in rows}
 
-    def insertar_traslado(self, numero_pedido: int, deposito_destino: int, items: list[dict]) -> None:
-        """
-        Inserta un traslado en DBISAM al confirmar la recepción de un pedido.
-
-        Genera una operación tipo 1 (Traslado) en SOPERACIONINV y una línea
-        por producto en SDETALLEINV. Ajusta existencias en SINVDEP restando
-        del depósito origen (almacén=1) y sumando en el depósito destino.
-        Si el registro del producto no existe en SINVDEP para el depósito destino,
-        se inserta con la cantidad como existencia inicial.
-
-        Args:
-            numero_pedido: Número de pedido PostgreSQL, usado como FTI_DOCUMENTO.
-            deposito_destino: Código numérico del depósito destino (solicitante).
-            items: Lista de dicts con claves 'codigo' y 'cantidad'.
-
-        Raises:
-            pyodbc.DatabaseError: Si ocurre algún error durante la inserción.
-        """
-        nro_documento = str(numero_pedido).rjust(8, '0')
+    def _insertar_traslado(
+        self,
+        nro_documento: str,
+        deposito_origen: int,
+        deposito_destino: int,
+        items: list[dict],
+        log_ref: str,
+        responsable: str = '',
+        proposito: str = '',
+    ) -> None:
+        """Inserta un traslado genérico en SOPERACIONINV/SDETALLEINV y ajusta SINVDEP."""
         fecha = datetime.now().strftime('%Y-%m-%d')
         hora = datetime.now().strftime('%I:%M:%S %p')
         total_items = len(items)
@@ -149,6 +186,7 @@ class PedidosDBISAM:
         try:
             with self.connect() as conn:
                 codigos = [item['codigo'] for item in items]
+                existentes_origen  = self._codigos_existentes_sinvdep(codigos, deposito_origen, conn)
                 existentes_destino = self._codigos_existentes_sinvdep(codigos, deposito_destino, conn)
 
                 detalle_queries = []
@@ -169,25 +207,54 @@ class PedidosDBISAM:
                             FDI_TIPOOPERACION,
                             FDI_LINEA,
                             FDI_STATUS,
-                            FDI_VISIBLE
+                            FDI_VISIBLE,
+                            FDI_FECHAOPERACION,
+                            FDI_USER,
+                            FDI_UNDDESCARGA,
+                            FDI_UNDCAPACIDAD,
+                            FDI_MONEDA,
+                            FDI_FACTORCAMBIO,
+                            FDI_USADEPOSITOS
                         ) VALUES (
                             '{nro_documento}',
                             LASTAUTOINC('SOPERACIONINV'),
                             '{codigo}',
                             {cantidad},
-                            {DEPOSITO_ORIGEN},
+                            {deposito_origen},
                             {deposito_destino},
                             1,
                             {linea},
-                            4,
+                            1,
+                            1,
+                            '{fecha}',
+                            1,
+                            1,
+                            1,
+                            1,
+                            1,
                             1
                         );
                     """)
 
-                    update_sinvdep.append(
-                        f"UPDATE SINVDEP SET FT_EXISTENCIA = COALESCE(FT_EXISTENCIA, 0) - {cantidad} "
-                        f"WHERE FT_CODIGOPRODUCTO = '{codigo}' AND FT_CODIGODEPOSITO = {DEPOSITO_ORIGEN};"
-                    )
+                    # Descarga del depósito origen:
+                    # Si el producto ya tiene fila en SINVDEP para el origen → restar existencia (UPDATE).
+                    # Si no existe (ej. producto de incidencia nunca estuvo en tránsito) → insertar fila
+                    # con existencia negativa para reflejar la discrepancia y evitar que el movimiento
+                    # quede sin efecto en el inventario.
+                    if codigo in existentes_origen:
+                        update_sinvdep.append(
+                            f"UPDATE SINVDEP SET FT_EXISTENCIA = COALESCE(FT_EXISTENCIA, 0) - {cantidad} "
+                            f"WHERE FT_CODIGOPRODUCTO = '{codigo}' AND FT_CODIGODEPOSITO = {deposito_origen};"
+                        )
+                    else:
+                        logger.info(
+                            f'SINVDEP: registro no existe para producto={codigo} deposito={deposito_origen} (origen), '
+                            f'se insertará con existencia negativa.'
+                        )
+                        update_sinvdep.append(
+                            f"INSERT INTO SINVDEP (FT_TIPO, FT_CODIGOPRODUCTO, FT_CODIGODEPOSITO, FT_EXISTENCIA, FT_VISIBLE, FT_LOTEAUTOINCREMENT) "
+                            f"VALUES (4, '{codigo}', {deposito_origen}, -{cantidad}, 1, 0);"
+                        )
 
                     if codigo in existentes_destino:
                         update_sinvdep.append(
@@ -218,21 +285,25 @@ class PedidosDBISAM:
                         FTI_USER,
                         FTI_UPDATEITEMS,
                         FTI_HORA,
-                        FTI_FECHALIBRO
+                        FTI_FECHALIBRO,
+                        FTI_PROPOSITO,
+                        FTI_RESPONSABLE
                     ) VALUES (
                         '{nro_documento}',
                         1,
-                        4,
+                        1,
                         1,
                         '{fecha}',
-                        {DEPOSITO_ORIGEN},
+                        {deposito_origen},
                         {deposito_destino},
                         {total_items},
                         {total_items},
                         1,
                         1,
                         '{hora}',
-                        '{fecha}'
+                        '{fecha}',
+                        '{proposito}',
+                        '{responsable}'
                     );
                     {''.join(detalle_queries)}
                     {''.join(update_sinvdep)}
@@ -243,19 +314,98 @@ class PedidosDBISAM:
                     cursor.execute('COMMIT;')
 
             logger.info(
-                f'Traslado DBISAM insertado: pedido={numero_pedido} destino={deposito_destino} items={total_items}'
+                f'Traslado DBISAM insertado: {log_ref} origen={deposito_origen} destino={deposito_destino} items={total_items}'
             )
         except Exception as e:
-            logger.error(f'Error insertando traslado DBISAM pedido={numero_pedido}: {e}')
+            logger.error(f'Error insertando traslado DBISAM {log_ref}: {e}')
             raise pyodbc.DatabaseError(str(e))
 
-    def buscar_en_categoria(self, categoria, query, tipo='codigo'):
+    def existe_traslado_despacho(self, numero_despacho: int) -> bool:
+        """
+        Verifica si ya existe el traslado de un despacho en a2 (SOPERACIONINV).
+
+        Args:
+            numero_despacho: Número del despacho a verificar.
+
+        Returns:
+            True si el traslado ya existe en a2, False en caso contrario.
+
+        Raises:
+            pyodbc.DatabaseError: Si falla la conexión o la consulta.
+        """
+        nro_doc = str(numero_despacho).rjust(8, '0')
+        try:
+            with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    row = cursor.execute(
+                        f"SELECT COUNT(*) FROM SOPERACIONINV "
+                        f"WHERE FTI_DOCUMENTO = '{nro_doc}' AND FTI_TIPO = 1 "
+                        f"AND FTI_DEPOSITOSOURCE = {DEPOSITO_ALMACEN} "
+                        f"AND FTI_DEPOSITODESTINO = {DEPOSITO_TRANSITO}"
+                    ).fetchone()
+                    return bool(row and row[0] > 0)
+        except Exception as e:
+            raise pyodbc.DatabaseError(str(e))
+
+    def insertar_traslado_despacho(
+        self,
+        numero_despacho: int,
+        items: list[dict],
+        responsable: str = '',
+        proposito: str = '',
+    ) -> None:
+        """
+        Al despachar: mueve productos del almacén (depósito 1) al tránsito (depósito 10).
+
+        Args:
+            numero_despacho: Número de despacho, usado como FTI_DOCUMENTO.
+            items: Lista de dicts con claves 'codigo' y 'cantidad'.
+            responsable: Username del usuario que confirma el despacho.
+            proposito: Condición del pedido (URGENTE, SURTIDO, CLIENTE_RETIRA).
+        """
+        nro_doc = str(numero_despacho).rjust(8, '0')
+        self._insertar_traslado(
+            nro_doc, DEPOSITO_ALMACEN, DEPOSITO_TRANSITO, items,
+            f'despacho={numero_despacho}', responsable=responsable, proposito=proposito,
+        )
+
+    def insertar_traslado_recepcion(
+        self,
+        numero_pedido: int,
+        deposito_destino: int,
+        items: list[dict],
+        responsable: str = '',
+        proposito: str = '',
+    ) -> None:
+        """
+        Al recibir: mueve productos del tránsito (depósito 10) al depósito destino del solicitante.
+
+        Args:
+            numero_pedido: Número de pedido PostgreSQL, usado como FTI_DOCUMENTO.
+            deposito_destino: Código numérico del depósito destino (solicitante).
+            items: Lista de dicts con claves 'codigo' y 'cantidad'.
+            responsable: Username del usuario que recibe el despacho.
+            proposito: Condición del pedido (URGENTE, SURTIDO, CLIENTE_RETIRA).
+        """
+        nro_doc = str(numero_pedido).rjust(8, '0')
+        self._insertar_traslado(
+            nro_doc, DEPOSITO_TRANSITO, deposito_destino, items,
+            f'pedido={numero_pedido}', responsable=responsable, proposito=proposito,
+        )
+
+    def buscar_en_categoria(self, categoria, query, tipo='codigo', solo_existencia=False):
         try:
             if tipo == 'descripcion':
                 query_upper = query.upper()
                 where = f"FI_CATEGORIA = '{categoria}' AND UPPER(FI_DESCRIPCION) LIKE '%{query_upper}%'"
+            elif tipo == 'referencia':
+                where = f"FI_CATEGORIA = '{categoria}' AND FI_REFERENCIA = '{query}'"
+            elif tipo == 'ref_proveedor':
+                query_upper = query.upper()
+                where = f"FI_CATEGORIA = '{categoria}' AND UPPER(ZZCAMPO_001) LIKE '%{query_upper}%'"
             else:
                 where = f"FI_CATEGORIA = '{categoria}' AND (FI_REFERENCIA = '{query}' OR FI_CODIGO = '{query}')"
+            filtro_existencia = " AND FT_EXISTENCIA > 0" if solo_existencia else ""
             with self.connect() as conn:
                 with conn.cursor() as cursor:
                     rows = cursor.execute(f"""SELECT
@@ -268,7 +418,7 @@ class PedidosDBISAM:
                                           
                                         FROM SINVENTARIO
                                         INNER JOIN SINVDEP ON FT_CODIGOPRODUCTO = FI_CODIGO
-                                        WHERE {where} AND FT_CODIGODEPOSITO = 1
+                                        WHERE {where} AND FT_CODIGODEPOSITO = 1{filtro_existencia}
                                         ORDER BY FI_DESCRIPCION""").fetchmany(100)
                     return [
                         (_clean(r[0]), _clean(r[1]), _clean(r[2]), _clean(r[3]), r[4] or 0, _clean(r[5]))

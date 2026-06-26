@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from types import SimpleNamespace as NS
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from django.test import TestCase
 from django.db import IntegrityError
@@ -8,6 +8,7 @@ from django.db import IntegrityError
 from .models import DepositoPermitido
 from .admin import sincronizar_depositos_permitidos
 from . import views
+from .dbisam import PedidosDBISAM
 
 
 class DepositoPermitidoModelTest(TestCase):
@@ -68,3 +69,45 @@ class DepositosParaSelectorTest(TestCase):
     def test_fallback_con_error_dbisam_devuelve_vacio(self, mock_db):
         mock_db.return_value.obtener_depositos.side_effect = Exception('odbc down')
         self.assertEqual(views._depositos_para_selector(), [])
+
+
+class BuscarEnCategoriaFiltroTest(TestCase):
+    def _capturar_sql(self, **kwargs):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = (mock_connect.return_value.__enter__.return_value
+                      .cursor.return_value.__enter__.return_value)
+            cursor.execute.return_value.fetchmany.return_value = []
+            db.buscar_en_categoria('CAT', 'abc', 'descripcion', **kwargs)
+            return cursor.execute.call_args[0][0]
+
+    def test_con_solo_existencia_agrega_filtro(self):
+        sql = self._capturar_sql(solo_existencia=True)
+        self.assertIn('FT_EXISTENCIA > 0', sql)
+
+    def test_sin_solo_existencia_no_agrega_filtro(self):
+        sql = self._capturar_sql(solo_existencia=False)
+        self.assertNotIn('FT_EXISTENCIA > 0', sql)
+
+
+class BuscarProductoVistaTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        self.user = User.objects.create_superuser(username='admin', password='x')
+        self.client.force_login(self.user)
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_vista_pasa_flag_true(self, mock_db):
+        mock_db.return_value.buscar_en_categoria.return_value = []
+        self.client.get('/pedidos/buscar-producto/',
+                        {'q': 'abc', 'categoria': 'CAT', 'solo_existencia': '1'})
+        _, kwargs = mock_db.return_value.buscar_en_categoria.call_args
+        self.assertTrue(kwargs.get('solo_existencia'))
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_vista_pasa_flag_false_si_ausente(self, mock_db):
+        mock_db.return_value.buscar_en_categoria.return_value = []
+        self.client.get('/pedidos/buscar-producto/',
+                        {'q': 'abc', 'categoria': 'CAT'})
+        _, kwargs = mock_db.return_value.buscar_en_categoria.call_args
+        self.assertFalse(kwargs.get('solo_existencia'))
