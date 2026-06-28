@@ -316,3 +316,43 @@ class DetallePedidoModalTest(TestCase):
         resp = self.client.get(reverse('pedidos-detalle', args=[pedido.numero_pedido]))
         self.assertContains(resp, 'modalImprimirPedido')
         self.assertContains(resp, 'vista=despachado')
+
+
+class AnulacionModeloTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from .models import Pedido, Despacho
+        self.user = User.objects.create_superuser(username='sup_model', password='x')
+        self.pedido = Pedido.objects.create(solicitante=self.user)
+        self.despacho = Despacho.objects.create(pedido=self.pedido)
+
+    def test_pedido_acepta_estado_anulado_y_campos(self):
+        from django.utils import timezone
+        self.pedido.estado_anterior = self.pedido.estado
+        self.pedido.estado = 'ANULADO'
+        self.pedido.motivo_anulacion = 'Pedido duplicado'
+        self.pedido.anulado_por = self.user
+        self.pedido.fecha_anulacion = timezone.now()
+        self.pedido.save()
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'ANULADO')
+        self.assertEqual(self.pedido.motivo_anulacion, 'Pedido duplicado')
+        self.assertEqual(self.pedido.anulado_por, self.user)
+        self.assertIsNotNone(self.pedido.fecha_anulacion)
+        self.assertEqual(self.pedido.estado_anterior, 'PENDIENTE')
+
+    def test_despacho_acepta_estado_anulado_y_campos(self):
+        self.despacho.estado_anterior = self.despacho.estado
+        self.despacho.estado = 'ANULADO'
+        self.despacho.motivo_anulacion = 'Error de carga'
+        self.despacho.anulado_por = self.user
+        self.despacho.save()
+        self.despacho.refresh_from_db()
+        self.assertEqual(self.despacho.estado, 'ANULADO')
+        self.assertEqual(self.despacho.estado_anterior, 'PREPARANDO')
+        self.assertEqual(self.despacho.anulado_por, self.user)
+
+    def test_anulado_en_choices(self):
+        from .models import Pedido, Despacho
+        self.assertIn('ANULADO', dict(Pedido.ESTADO_CHOICES))
+        self.assertIn('ANULADO', dict(Despacho.ESTADO_CHOICES))

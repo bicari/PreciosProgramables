@@ -12,6 +12,7 @@ class Pedido(models.Model):
         ('PARCIAL', 'Parcial'),
         ('RECIBIDO', 'Recibido'),
         ('CERRADO', 'Cerrado'),
+        ('ANULADO', 'Anulado'),
     ]
     CONDICION_CHOICES = [
         ('URGENTE', 'Urgente'),
@@ -36,6 +37,13 @@ class Pedido(models.Model):
         related_name='pedidos_picking',
     )
     fecha_asignacion = models.DateTimeField(null=True, blank=True)
+    motivo_anulacion = models.TextField(blank=True, default='')
+    anulado_por = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='pedidos_anulados',
+    )
+    fecha_anulacion = models.DateTimeField(null=True, blank=True)
+    estado_anterior = models.CharField(max_length=20, blank=True, default='')
 
     def __str__(self):
         return f"Pedido #{self.numero_pedido} - {self.solicitante.username}"
@@ -75,6 +83,7 @@ class Despacho(models.Model):
         ('ENVIADO', 'Enviado'),
         ('RECIBIDO', 'Recibido'),
         ('PARCIAL', 'Parcial'),
+        ('ANULADO', 'Anulado'),
     ]
     pedido = models.ForeignKey(Pedido, on_delete=models.PROTECT, related_name='despachos')
     numero_despacho = models.AutoField(primary_key=True)
@@ -86,6 +95,13 @@ class Despacho(models.Model):
     fecha_despacho = models.DateTimeField(null=True, blank=True)
     fecha_recepcion = models.DateTimeField(null=True, blank=True)
     traslado_a2_registrado = models.BooleanField(default=False)
+    motivo_anulacion = models.TextField(blank=True, default='')
+    anulado_por = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='despachos_anulados',
+    )
+    fecha_anulacion = models.DateTimeField(null=True, blank=True)
+    estado_anterior = models.CharField(max_length=20, blank=True, default='')
 
     def __str__(self):
         return f"Despacho #{self.numero_despacho} → Pedido #{self.pedido_id}"
