@@ -1141,7 +1141,7 @@ def reporte_pedidos(request):
     categoria_filtro = request.GET.get('categoria', '')
     condicion_filtro = request.GET.get('condicion', '')
 
-    pedidos = Pedido.objects.all()
+    pedidos = Pedido.objects.exclude(estado='ANULADO')
 
     if fecha_inicio:
         pedidos = pedidos.filter(fecha_creacion__date__gte=fecha_inicio)
@@ -1153,6 +1153,13 @@ def reporte_pedidos(request):
         pedidos = pedidos.filter(condicion=condicion_filtro)
 
     total_pedidos = pedidos.count()
+
+    anulados_qs = Pedido.objects.filter(estado='ANULADO')
+    if fecha_inicio:
+        anulados_qs = anulados_qs.filter(fecha_creacion__date__gte=fecha_inicio)
+    if fecha_fin:
+        anulados_qs = anulados_qs.filter(fecha_creacion__date__lte=fecha_fin)
+    total_anulados = anulados_qs.count()
 
     totales_items = PedidoItem.objects.filter(pedido__in=pedidos).aggregate(
         total_solicitado=Sum('cantidad_solicitada'),
@@ -1223,6 +1230,7 @@ def reporte_pedidos(request):
 
     return render(request, 'pedidos-reporte.html', {
         'total_pedidos': total_pedidos,
+        'total_anulados': total_anulados,
         'total_solicitado': totales_items['total_solicitado'] or 0,
         'total_despachado': totales_items['total_despachado'] or 0,
         'total_recibido': totales_items['total_recibido'] or 0,
@@ -1253,7 +1261,7 @@ def exportar_reporte_pdf(request):
     categoria_filtro = request.GET.get('categoria', '')
     condicion_filtro = request.GET.get('condicion', '')
 
-    pedidos = Pedido.objects.all()
+    pedidos = Pedido.objects.exclude(estado='ANULADO')
     if fecha_inicio:
         pedidos = pedidos.filter(fecha_creacion__date__gte=fecha_inicio)
     if fecha_fin:
@@ -1383,7 +1391,9 @@ def reporte_incidencias(request):
         'despacho__pedido__solicitante',
         'pedido_item',
         'autorizado_por',
-    ).order_by('-despacho__fecha_despacho')
+    ).order_by('-despacho__fecha_despacho').exclude(
+        despacho__estado='ANULADO'
+    ).exclude(despacho__pedido__estado='ANULADO')
 
     if fecha_inicio:
         try:

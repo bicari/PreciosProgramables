@@ -471,3 +471,36 @@ class AnularDespachoVistaTest(TestCase):
         self.client.post(self._url(), {'motivo': 'Segunda'})
         self.despacho.refresh_from_db()
         self.assertEqual(self.despacho.motivo_anulacion, 'Primera')
+
+
+class ReporteExcluyeAnuladosTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        from django.urls import reverse
+        self.reverse = reverse
+        self.sup = User.objects.create_superuser(username='sup_r', password='x')
+        # Pedido válido
+        self.ok = Pedido.objects.create(solicitante=self.sup, estado='RECIBIDO')
+        PedidoItem.objects.create(pedido=self.ok, codigo='A', descripcion='a',
+                                  cantidad_solicitada=5, cantidad_despachada=5,
+                                  cantidad_recibida=5, estado='RECIBIDO')
+        # Pedido anulado (no debe contar en KPIs)
+        self.anu = Pedido.objects.create(solicitante=self.sup, estado='ANULADO',
+                                         motivo_anulacion='x')
+        PedidoItem.objects.create(pedido=self.anu, codigo='B', descripcion='b',
+                                  cantidad_solicitada=100, cantidad_despachada=100,
+                                  cantidad_recibida=100, estado='RECIBIDO')
+
+    def test_kpis_excluyen_anulados(self):
+        self.client.force_login(self.sup)
+        resp = self.client.get(self.reverse('pedidos-reporte'))
+        self.assertEqual(resp.context['total_pedidos'], 1)
+        self.assertEqual(resp.context['total_solicitado'], 5)
+        estados = [fila['estado'] for fila in resp.context['por_estado']]
+        self.assertNotIn('ANULADO', estados)
+
+    def test_contador_anulados_presente(self):
+        self.client.force_login(self.sup)
+        resp = self.client.get(self.reverse('pedidos-reporte'))
+        self.assertEqual(resp.context['total_anulados'], 1)
