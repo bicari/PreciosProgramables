@@ -504,3 +504,45 @@ class ReporteExcluyeAnuladosTest(TestCase):
         self.client.force_login(self.sup)
         resp = self.client.get(self.reverse('pedidos-reporte'))
         self.assertEqual(resp.context['total_anulados'], 1)
+
+
+class AnularDetalleTemplateTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from .models import Pedido
+        from django.urls import reverse
+        self.reverse = reverse
+        self.sup = User.objects.create_superuser(username='sup_t', password='x')
+        self.tienda = User.objects.create_user(username='tnd_t', password='x')
+        g, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.tienda.groups.add(g)
+        self.pedido = Pedido.objects.create(solicitante=self.tienda, estado='PENDIENTE')
+
+    def _detalle(self):
+        return self.reverse('pedidos-detalle', args=[self.pedido.numero_pedido])
+
+    def test_supervisor_ve_boton_anular(self):
+        self.client.force_login(self.sup)
+        resp = self.client.get(self._detalle())
+        self.assertContains(resp, 'modalAnularPedido')
+        self.assertContains(resp, self.reverse('pedidos-anular', args=[self.pedido.numero_pedido]))
+
+    def test_tienda_no_ve_boton_anular(self):
+        self.client.force_login(self.tienda)
+        resp = self.client.get(self._detalle())
+        self.assertNotContains(resp, 'modalAnularPedido')
+
+    def test_pedido_anulado_muestra_motivo(self):
+        from django.utils import timezone
+        self.pedido.estado = 'ANULADO'
+        self.pedido.estado_anterior = 'PENDIENTE'
+        self.pedido.motivo_anulacion = 'Motivo de prueba visible'
+        self.pedido.anulado_por = self.sup
+        self.pedido.fecha_anulacion = timezone.now()
+        self.pedido.save()
+        self.client.force_login(self.sup)
+        resp = self.client.get(self._detalle())
+        self.assertContains(resp, 'Motivo de prueba visible')
+        # Ya anulado: no debe ofrecer volver a anular
+        self.assertNotContains(resp, 'modalAnularPedido')

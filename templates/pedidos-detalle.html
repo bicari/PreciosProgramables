@@ -8,6 +8,11 @@
             <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#modalImprimirPedido" title="Imprimir PDF">
                 <i class="fas fa-file-pdf"></i> <span class="d-none d-sm-inline">Imprimir PDF</span>
             </button>
+            {% if es_supervisor and pedido.estado != 'ANULADO' %}
+            <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#modalAnularPedido" title="Anular pedido">
+                <i class="fas fa-ban"></i> <span class="d-none d-sm-inline">Anular</span>
+            </button>
+            {% endif %}
             <a href="{% url 'pedidos-lista' %}" class="btn btn-outline-secondary">
                 <i class="fas fa-arrow-left"></i> <span class="d-none d-sm-inline">Volver</span>
             </a>
@@ -53,6 +58,15 @@
         {% endfor %}
     {% endif %}
 
+    {% if pedido.estado == 'ANULADO' %}
+    <div class="alert alert-danger">
+        <strong><i class="fas fa-ban"></i> Pedido anulado</strong>
+        {% if pedido.estado_anterior %}(estado previo: {{ pedido.estado_anterior }}){% endif %}<br>
+        <strong>Motivo:</strong> {{ pedido.motivo_anulacion }}<br>
+        <small>Por {{ pedido.anulado_por.username|default:"-" }} el {{ pedido.fecha_anulacion|date:"d/m/Y H:i" }}</small>
+    </div>
+    {% endif %}
+
     <div class="row mb-4">
         <div class="col-md-6">
             <div class="card">
@@ -96,6 +110,8 @@
                                     <span class="badge bg-success">Recibido</span>
                                 {% elif pedido.estado == 'CERRADO' %}
                                     <span class="badge bg-secondary">Cerrado</span>
+                                {% elif pedido.estado == 'ANULADO' %}
+                                    <span class="badge bg-danger"><i class="fas fa-ban"></i> Anulado</span>
                                 {% endif %}
                             </td>
                         </tr>
@@ -268,6 +284,8 @@
                                 <span class="badge" style="background-color:#fd7e14;">Parcial</span>
                             {% elif despacho.estado == 'PREPARANDO' %}
                                 <span class="badge bg-warning text-dark">Preparando</span>
+                            {% elif despacho.estado == 'ANULADO' %}
+                                <span class="badge bg-danger"><i class="fas fa-ban"></i> Anulado</span>
                             {% endif %}
                         </span>
                         {% if despacho.despachador %}
@@ -303,6 +321,11 @@
                                 <i class="fas fa-rotate-right"></i> Reintentar traslado a2
                             </button>
                         </form>
+                        {% endif %}
+                        {% if es_supervisor and despacho.estado != 'ANULADO' %}
+                        <button type="button" class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#modalAnularDespacho{{ despacho.numero_despacho }}" title="Anular despacho">
+                            <i class="fas fa-ban"></i> Anular
+                        </button>
                         {% endif %}
                     </div>
                 </div>
@@ -355,8 +378,57 @@
             {% if despacho.estado == 'PENDIENTE_APROBACION' and es_supervisor %}
             </form>
             {% endif %}
+            {% if es_supervisor and despacho.estado != 'ANULADO' %}
+            <div class="modal fade" id="modalAnularDespacho{{ despacho.numero_despacho }}" tabindex="-1" aria-hidden="true">
+              <div class="modal-dialog">
+                <form method="post" action="{% url 'despachos-anular' despacho.numero_despacho %}">
+                  {% csrf_token %}
+                  <div class="modal-content">
+                    <div class="modal-header">
+                      <h5 class="modal-title">Anular despacho #{{ despacho.numero_despacho }}</h5>
+                      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                    </div>
+                    <div class="modal-body">
+                      <p class="text-danger"><i class="fas fa-exclamation-triangle"></i> Acción irreversible. No revierte inventario en a2.</p>
+                      <label class="form-label fw-bold">Motivo <span class="text-danger">*</span></label>
+                      <textarea name="motivo" class="form-control" rows="3" required></textarea>
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                      <button type="submit" class="btn btn-danger">Anular despacho</button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
+            {% endif %}
             {% endfor %}
         </div>
+    </div>
+    {% endif %}
+
+    {% if es_supervisor and pedido.estado != 'ANULADO' %}
+    <div class="modal fade" id="modalAnularPedido" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <form method="post" action="{% url 'pedidos-anular' pedido.numero_pedido %}">
+          {% csrf_token %}
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Anular pedido #{{ pedido.numero_pedido }}</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+              <p class="text-danger"><i class="fas fa-exclamation-triangle"></i> Esta acción es irreversible y saca el pedido de los reportes KPI. No revierte inventario en a2.</p>
+              <label class="form-label fw-bold">Motivo de la anulación <span class="text-danger">*</span></label>
+              <textarea name="motivo" class="form-control" rows="3" required></textarea>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+              <button type="submit" class="btn btn-danger">Anular pedido</button>
+            </div>
+          </div>
+        </form>
+      </div>
     </div>
     {% endif %}
 </div>
