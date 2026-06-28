@@ -496,8 +496,8 @@ def desasignar_picker(request, pk):
     if request.method != 'POST':
         return redirect('pedidos-lista')
     pedido = get_object_or_404(Pedido, numero_pedido=pk)
-    if pedido.estado not in ('ASIGNADO', 'PICKING'):
-        messages.warning(request, f'El pedido #{pk} no está en estado Asignado o Picking y no puede liberarse')
+    if pedido.estado not in ('ASIGNADO', 'PICKING', 'PARCIAL'):
+        messages.warning(request, f'El pedido #{pk} no está en estado Asignado, Picking o Parcial y no puede liberarse')
         return redirect('pedidos-lista')
     picker_anterior = pedido.picker.username if pedido.picker else '—'
     pedido.picker = None

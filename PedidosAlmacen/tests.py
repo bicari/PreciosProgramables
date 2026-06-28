@@ -611,3 +611,54 @@ class AnularDetalleTemplateTest(TestCase):
         self.assertContains(resp, 'Motivo de prueba visible')
         # Ya anulado: no debe ofrecer volver a anular
         self.assertNotContains(resp, 'modalAnularPedido')
+
+
+class ReasignarPickerParcialTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from .models import Pedido, PedidoItem
+        from django.urls import reverse
+        self.reverse = reverse
+        self.sup = User.objects.create_superuser(username='sup_rp', password='x')
+        g_picker, _ = Group.objects.get_or_create(name='Pedidos Picker')
+        self.p1 = User.objects.create_user(username='picker1', password='x')
+        self.p2 = User.objects.create_user(username='picker2', password='x')
+        self.p1.groups.add(g_picker)
+        self.p2.groups.add(g_picker)
+        # Pedido PARCIAL con picker p1 y un item en BACK_ORDER
+        self.pedido = Pedido.objects.create(solicitante=self.sup, estado='PARCIAL', picker=self.p1)
+        PedidoItem.objects.create(
+            pedido=self.pedido, codigo='A', descripcion='a',
+            cantidad_solicitada=10, cantidad_despachada=4,
+            cantidad_back_order=6, estado='BACK_ORDER',
+        )
+
+    def test_reasignar_parcial_mueve_a_asignado(self):
+        self.client.force_login(self.sup)
+        url = self.reverse('pedidos-asignar-picker', args=[self.pedido.numero_pedido])
+        resp = self.client.post(url, {'picker_id': self.p2.pk})
+        self.assertEqual(resp.status_code, 302)
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'ASIGNADO')
+        self.assertEqual(self.pedido.picker, self.p2)
+        self.assertIsNotNone(self.pedido.fecha_asignacion)
+
+    def test_liberar_parcial_deja_parcial_sin_picker(self):
+        self.client.force_login(self.sup)
+        url = self.reverse('pedidos-desasignar-picker', args=[self.pedido.numero_pedido])
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 302)
+        self.pedido.refresh_from_db()
+        self.assertIsNone(self.pedido.picker)
+        self.assertEqual(self.pedido.estado, 'PARCIAL')
+
+    def test_liberar_parcial_sin_backorder_pasa_a_pendiente(self):
+        # Caso borde: PARCIAL sin items en BACK_ORDER → vuelve a PENDIENTE
+        self.pedido.items.update(estado='PARCIAL')
+        self.client.force_login(self.sup)
+        url = self.reverse('pedidos-desasignar-picker', args=[self.pedido.numero_pedido])
+        self.client.post(url)
+        self.pedido.refresh_from_db()
+        self.assertIsNone(self.pedido.picker)
+        self.assertEqual(self.pedido.estado, 'PENDIENTE')
