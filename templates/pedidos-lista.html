@@ -99,14 +99,31 @@
                 <td>
                     {% if pedido.picker %}
                         <span class="badge bg-info text-dark">{{ pedido.picker.username|capfirst }}</span>
-                        {% if es_supervisor %}{% if pedido.estado == 'ASIGNADO' or pedido.estado == 'PICKING' %}
-                        <form method="post" action="{% url 'pedidos-desasignar-picker' pedido.numero_pedido %}" class="d-inline ms-1">
-                            {% csrf_token %}
-                            <button type="submit" class="btn btn-sm btn-outline-secondary p-0 px-1" title="Liberar picker" onclick="return confirm('¿Liberar al picker de este pedido?')">
-                                <i class="fas fa-times"></i>
-                            </button>
-                        </form>
-                        {% endif %}{% endif %}
+                        {% if es_supervisor %}
+                            {% if pedido.estado == 'ASIGNADO' or pedido.estado == 'PICKING' %}
+                            <form method="post" action="{% url 'pedidos-desasignar-picker' pedido.numero_pedido %}" class="d-inline ms-1">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-outline-secondary p-0 px-1" title="Liberar picker" onclick="return confirm('¿Liberar al picker de este pedido?')">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </form>
+                            {% elif pedido.estado == 'PARCIAL' and pedido.items_back_order > 0 %}
+                                {% if pickers_disponibles %}
+                                <button type="button" class="btn btn-sm btn-outline-info ms-1" title="Reasignar picker"
+                                    data-bs-toggle="modal" data-bs-target="#modalAsignarPicker"
+                                    data-pedido-id="{{ pedido.numero_pedido }}"
+                                    data-pedido-num="{{ pedido.numero_pedido }}">
+                                    <i class="fas fa-user-pen"></i>
+                                </button>
+                                {% endif %}
+                                <form method="post" action="{% url 'pedidos-desasignar-picker' pedido.numero_pedido %}" class="d-inline ms-1">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary p-0 px-1" title="Liberar picker" onclick="return confirm('¿Liberar al picker de este pedido?')">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </form>
+                            {% endif %}
+                        {% endif %}
                     {% else %}
                         <span class="text-muted">—</span>
                         {% if es_supervisor and pickers_disponibles %}

@@ -662,3 +662,36 @@ class ReasignarPickerParcialTest(TestCase):
         self.pedido.refresh_from_db()
         self.assertIsNone(self.pedido.picker)
         self.assertEqual(self.pedido.estado, 'PENDIENTE')
+
+
+class ReasignarPickerParcialTemplateTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from .models import Pedido, PedidoItem
+        from django.urls import reverse
+        self.reverse = reverse
+        self.sup = User.objects.create_superuser(username='sup_tpl', password='x')
+        g_picker, _ = Group.objects.get_or_create(name='Pedidos Picker')
+        self.p1 = User.objects.create_user(username='pk1', password='x')
+        self.p1.groups.add(g_picker)
+        self.tienda = User.objects.create_user(username='tnd_tpl', password='x')
+        g_tienda, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.tienda.groups.add(g_tienda)
+        self.pedido = Pedido.objects.create(solicitante=self.tienda, estado='PARCIAL', picker=self.p1)
+        PedidoItem.objects.create(
+            pedido=self.pedido, codigo='A', descripcion='a',
+            cantidad_solicitada=10, cantidad_despachada=4,
+            cantidad_back_order=6, estado='BACK_ORDER',
+        )
+
+    def test_supervisor_ve_reasignar_y_liberar_en_parcial(self):
+        self.client.force_login(self.sup)
+        resp = self.client.get(self.reverse('pedidos-lista'))
+        self.assertContains(resp, 'Reasignar picker')
+        self.assertContains(resp, self.reverse('pedidos-desasignar-picker', args=[self.pedido.numero_pedido]))
+
+    def test_no_supervisor_no_ve_controles(self):
+        self.client.force_login(self.tienda)
+        resp = self.client.get(self.reverse('pedidos-lista'))
+        self.assertNotContains(resp, 'Reasignar picker')
