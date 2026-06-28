@@ -356,3 +356,64 @@ class AnulacionModeloTest(TestCase):
         from .models import Pedido, Despacho
         self.assertIn('ANULADO', dict(Pedido.ESTADO_CHOICES))
         self.assertIn('ANULADO', dict(Despacho.ESTADO_CHOICES))
+
+
+class AnularPedidoVistaTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from .models import Pedido
+        from django.urls import reverse
+        self.reverse = reverse
+        self.sup = User.objects.create_superuser(username='sup_p', password='x')
+        self.tienda = User.objects.create_user(username='tnd_p', password='x')
+        g, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.tienda.groups.add(g)
+        self.pedido = Pedido.objects.create(solicitante=self.tienda, estado='PICKING')
+        self.pedido.picker = self.sup
+        self.pedido.save()
+
+    def _url(self):
+        return self.reverse('pedidos-anular', args=[self.pedido.numero_pedido])
+
+    def test_supervisor_anula_con_motivo_y_libera_picker(self):
+        self.client.force_login(self.sup)
+        resp = self.client.post(self._url(), {'motivo': 'Duplicado'})
+        self.assertEqual(resp.status_code, 302)
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'ANULADO')
+        self.assertEqual(self.pedido.estado_anterior, 'PICKING')
+        self.assertEqual(self.pedido.motivo_anulacion, 'Duplicado')
+        self.assertEqual(self.pedido.anulado_por, self.sup)
+        self.assertIsNotNone(self.pedido.fecha_anulacion)
+        self.assertIsNone(self.pedido.picker)
+
+    def test_sin_motivo_no_anula(self):
+        self.client.force_login(self.sup)
+        self.client.post(self._url(), {'motivo': '   '})
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'PICKING')
+
+    def test_tienda_no_puede_anular(self):
+        self.client.force_login(self.tienda)
+        resp = self.client.post(self._url(), {'motivo': 'x'})
+        self.assertEqual(resp.status_code, 302)  # redirect a dashboard
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'PICKING')
+
+    def test_ya_anulado_no_se_reanula(self):
+        from django.utils import timezone
+        self.pedido.estado = 'ANULADO'
+        self.pedido.motivo_anulacion = 'Primera'
+        self.pedido.fecha_anulacion = timezone.now()
+        self.pedido.save()
+        self.client.force_login(self.sup)
+        self.client.post(self._url(), {'motivo': 'Segunda'})
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.motivo_anulacion, 'Primera')
+
+    def test_get_no_anula(self):
+        self.client.force_login(self.sup)
+        self.client.get(self._url())
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'PICKING')

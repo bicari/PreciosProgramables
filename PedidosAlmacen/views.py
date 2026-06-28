@@ -306,6 +306,35 @@ def detalle_pedido(request, pk):
 
 
 @login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def anular_pedido(request, pk):
+    pedido = get_object_or_404(Pedido, numero_pedido=pk)
+    if request.method != 'POST':
+        return redirect('pedidos-detalle', pk=pk)
+    if pedido.estado == 'ANULADO':
+        messages.warning(request, 'Este pedido ya está anulado')
+        return redirect('pedidos-detalle', pk=pk)
+    motivo = request.POST.get('motivo', '').strip()
+    if not motivo:
+        messages.error(request, 'Debes indicar un motivo para anular el pedido')
+        return redirect('pedidos-detalle', pk=pk)
+    pedido.estado_anterior = pedido.estado
+    if pedido.estado in ('ASIGNADO', 'PICKING'):
+        pedido.picker = None
+    pedido.estado = 'ANULADO'
+    pedido.anulado_por = request.user
+    pedido.fecha_anulacion = timezone.now()
+    pedido.motivo_anulacion = motivo
+    pedido.save()
+    logger.info(
+        'Pedido #%s anulado por %s. Motivo: %s',
+        pedido.numero_pedido, request.user.username, motivo,
+    )
+    messages.success(request, f'Pedido #{pedido.numero_pedido} anulado')
+    return redirect('pedidos-detalle', pk=pk)
+
+
+@login_required(login_url='/login/')
 @user_passes_test(is_pedidos_almacen, login_url='dashboard')
 def despachar_pedido(request, pk):
     pedido = get_object_or_404(Pedido, numero_pedido=pk)
