@@ -473,6 +473,71 @@ class AnularDespachoVistaTest(TestCase):
         self.assertEqual(self.despacho.motivo_anulacion, 'Primera')
 
 
+class AnularDespachoReversionTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem
+        from django.urls import reverse
+        self.reverse = reverse
+        self.sup = User.objects.create_superuser(username='sup_rev', password='x')
+        self.pedido = Pedido.objects.create(solicitante=self.sup, estado='DESPACHADO')
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='A', descripcion='a',
+            cantidad_solicitada=10, cantidad_despachada=10,
+            cantidad_back_order=0, estado='DESPACHADO',
+        )
+        self.despacho = Despacho.objects.create(pedido=self.pedido, estado='ENVIADO')
+        DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=self.item, cantidad_despachada=10,
+        )
+
+    def _anular(self):
+        self.client.force_login(self.sup)
+        return self.client.post(
+            self.reverse('despachos-anular', args=[self.despacho.numero_despacho]),
+            {'motivo': 'error'},
+        )
+
+    def test_revierte_despachada_total_item_pendiente(self):
+        self._anular()
+        self.item.refresh_from_db()
+        self.pedido.refresh_from_db()
+        self.despacho.refresh_from_db()
+        self.assertEqual(self.item.cantidad_despachada, 0)
+        self.assertEqual(self.item.cantidad_back_order, 10)
+        self.assertEqual(self.item.estado, 'PENDIENTE')
+        self.assertEqual(self.pedido.estado, 'PENDIENTE')
+        self.assertIsNone(self.pedido.fecha_despacho)
+        self.assertEqual(self.despacho.estado, 'ANULADO')
+
+    def test_revierte_despachada_parcial(self):
+        self.item.cantidad_despachada = 4
+        self.item.cantidad_back_order = 6
+        self.item.estado = 'PARCIAL'
+        self.item.save()
+        self.pedido.estado = 'PARCIAL'
+        self.pedido.save()
+        di = self.despacho.items.first()
+        di.cantidad_despachada = 4
+        di.save()
+        self._anular()
+        self.item.refresh_from_db()
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.item.cantidad_despachada, 0)
+        self.assertEqual(self.item.cantidad_back_order, 10)
+        self.assertEqual(self.item.estado, 'PENDIENTE')
+        self.assertEqual(self.pedido.estado, 'PENDIENTE')
+
+    def test_no_anula_despacho_recibido(self):
+        self.despacho.estado = 'RECIBIDO'
+        self.despacho.save()
+        self._anular()
+        self.despacho.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertEqual(self.despacho.estado, 'RECIBIDO')
+        self.assertEqual(self.item.cantidad_despachada, 10)
+
+
 class ReporteExcluyeAnuladosTest(TestCase):
     def setUp(self):
         from users.models import User

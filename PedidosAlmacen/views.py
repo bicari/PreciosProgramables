@@ -3,6 +3,7 @@ from django.http import JsonResponse, HttpResponse
 from django.contrib.auth import authenticate as django_authenticate
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib import messages
+from django.db import transaction
 from django.db.models import Sum, Count, IntegerField, Q
 from django.db.models import Case, When, Value
 from django.utils import timezone
@@ -722,22 +723,63 @@ def anular_despacho(request, despacho_id):
     if despacho.estado == 'ANULADO':
         messages.warning(request, 'Este despacho ya está anulado')
         return redirect('pedidos-detalle', pk=despacho.pedido_id)
+    if despacho.estado in ('RECIBIDO', 'PARCIAL'):
+        messages.error(request, 'No se puede anular un despacho que ya fue recibido')
+        return redirect('pedidos-detalle', pk=despacho.pedido_id)
     motivo = request.POST.get('motivo', '').strip()
     if not motivo:
         messages.error(request, 'Debes indicar un motivo para anular el despacho')
         return redirect('pedidos-detalle', pk=despacho.pedido_id)
-    despacho.estado_anterior = despacho.estado
-    despacho.estado = 'ANULADO'
-    despacho.anulado_por = request.user
-    despacho.fecha_anulacion = timezone.now()
-    despacho.motivo_anulacion = motivo
-    despacho.save()
+
+    pedido = despacho.pedido
+    with transaction.atomic():
+        # Revertir la contribución de este despacho al pedido original.
+        for di in despacho.items.select_related('pedido_item'):
+            pi = di.pedido_item
+            if not pi:
+                continue
+            pi.cantidad_despachada = max(0, (pi.cantidad_despachada or 0) - di.cantidad_despachada)
+            pi.cantidad_back_order = max(0, pi.cantidad_solicitada - pi.cantidad_despachada)
+            recibida = pi.cantidad_recibida or 0
+            if pi.cantidad_solicitada > 0 and recibida >= pi.cantidad_solicitada:
+                pi.estado = 'RECIBIDO'
+            elif pi.cantidad_despachada == 0 and recibida == 0:
+                pi.estado = 'PENDIENTE'
+            elif pi.cantidad_back_order == 0:
+                pi.estado = 'DESPACHADO'
+            elif pi.cantidad_despachada > 0:
+                pi.estado = 'PARCIAL'
+            else:
+                pi.estado = 'BACK_ORDER'
+            pi.save()
+
+        despacho.estado_anterior = despacho.estado
+        despacho.estado = 'ANULADO'
+        despacho.anulado_por = request.user
+        despacho.fecha_anulacion = timezone.now()
+        despacho.motivo_anulacion = motivo
+        despacho.save()
+
+        # Recalcular el estado del pedido a partir de sus ítems.
+        estados = list(pedido.items.values_list('estado', flat=True))
+        if estados:
+            if all(e == 'PENDIENTE' for e in estados):
+                pedido.estado = 'PENDIENTE'
+                pedido.fecha_despacho = None
+            elif all(e == 'RECIBIDO' for e in estados):
+                pedido.estado = 'RECIBIDO'
+            elif all(e in ('DESPACHADO', 'RECIBIDO') for e in estados):
+                pedido.estado = 'DESPACHADO'
+            else:
+                pedido.estado = 'PARCIAL'
+            pedido.save()
+
     logger.info(
         'Despacho #%s anulado por %s. Motivo: %s',
         despacho.numero_despacho, request.user.username, motivo,
     )
     messages.success(request, f'Despacho #{despacho.numero_despacho} anulado')
-    return redirect('pedidos-detalle', pk=despacho.pedido_id)
+    return redirect('pedidos-detalle', pk=pedido.numero_pedido)
 
 
 @login_required(login_url='/login/')

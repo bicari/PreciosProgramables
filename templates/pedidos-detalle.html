@@ -322,7 +322,7 @@
                             </button>
                         </form>
                         {% endif %}
-                        {% if es_supervisor and despacho.estado != 'ANULADO' %}
+                        {% if es_supervisor and despacho.estado != 'ANULADO' and despacho.estado != 'RECIBIDO' and despacho.estado != 'PARCIAL' %}
                         <button type="button" class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#modalAnularDespacho{{ despacho.numero_despacho }}" title="Anular despacho">
                             <i class="fas fa-ban"></i> Anular
                         </button>
@@ -378,7 +378,7 @@
             {% if despacho.estado == 'PENDIENTE_APROBACION' and es_supervisor %}
             </form>
             {% endif %}
-            {% if es_supervisor and despacho.estado != 'ANULADO' %}
+            {% if es_supervisor and despacho.estado != 'ANULADO' and despacho.estado != 'RECIBIDO' and despacho.estado != 'PARCIAL' %}
             <div class="modal fade" id="modalAnularDespacho{{ despacho.numero_despacho }}" tabindex="-1" aria-hidden="true">
               <div class="modal-dialog">
                 <form method="post" action="{% url 'despachos-anular' despacho.numero_despacho %}">
