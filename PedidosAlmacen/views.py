@@ -714,6 +714,33 @@ def lista_despachos(request):
 
 
 @login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def anular_despacho(request, despacho_id):
+    despacho = get_object_or_404(Despacho, numero_despacho=despacho_id)
+    if request.method != 'POST':
+        return redirect('pedidos-detalle', pk=despacho.pedido_id)
+    if despacho.estado == 'ANULADO':
+        messages.warning(request, 'Este despacho ya está anulado')
+        return redirect('pedidos-detalle', pk=despacho.pedido_id)
+    motivo = request.POST.get('motivo', '').strip()
+    if not motivo:
+        messages.error(request, 'Debes indicar un motivo para anular el despacho')
+        return redirect('pedidos-detalle', pk=despacho.pedido_id)
+    despacho.estado_anterior = despacho.estado
+    despacho.estado = 'ANULADO'
+    despacho.anulado_por = request.user
+    despacho.fecha_anulacion = timezone.now()
+    despacho.motivo_anulacion = motivo
+    despacho.save()
+    logger.info(
+        'Despacho #%s anulado por %s. Motivo: %s',
+        despacho.numero_despacho, request.user.username, motivo,
+    )
+    messages.success(request, f'Despacho #{despacho.numero_despacho} anulado')
+    return redirect('pedidos-detalle', pk=despacho.pedido_id)
+
+
+@login_required(login_url='/login/')
 def verificar_autorizacion_despacho(request):
     """AJAX: valida credenciales de supervisor/admin para autorizar incidencias especiales."""
     if request.method != 'POST':

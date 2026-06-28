@@ -417,3 +417,57 @@ class AnularPedidoVistaTest(TestCase):
         self.client.get(self._url())
         self.pedido.refresh_from_db()
         self.assertEqual(self.pedido.estado, 'PICKING')
+
+
+class AnularDespachoVistaTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from .models import Pedido, Despacho
+        from django.urls import reverse
+        self.reverse = reverse
+        self.sup = User.objects.create_superuser(username='sup_d', password='x')
+        self.tienda = User.objects.create_user(username='tnd_d', password='x')
+        g, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.tienda.groups.add(g)
+        self.pedido = Pedido.objects.create(solicitante=self.tienda, estado='DESPACHADO')
+        self.despacho = Despacho.objects.create(pedido=self.pedido, estado='ENVIADO')
+
+    def _url(self):
+        return self.reverse('despachos-anular', args=[self.despacho.numero_despacho])
+
+    def test_supervisor_anula_despacho(self):
+        self.client.force_login(self.sup)
+        resp = self.client.post(self._url(), {'motivo': 'Carga erronea'})
+        self.assertEqual(resp.status_code, 302)
+        self.despacho.refresh_from_db()
+        self.assertEqual(self.despacho.estado, 'ANULADO')
+        self.assertEqual(self.despacho.estado_anterior, 'ENVIADO')
+        self.assertEqual(self.despacho.anulado_por, self.sup)
+        self.assertIsNotNone(self.despacho.fecha_anulacion)
+        # Independencia: el pedido NO se toca
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'DESPACHADO')
+
+    def test_sin_motivo_no_anula(self):
+        self.client.force_login(self.sup)
+        self.client.post(self._url(), {'motivo': ''})
+        self.despacho.refresh_from_db()
+        self.assertEqual(self.despacho.estado, 'ENVIADO')
+
+    def test_tienda_no_puede_anular(self):
+        self.client.force_login(self.tienda)
+        self.client.post(self._url(), {'motivo': 'x'})
+        self.despacho.refresh_from_db()
+        self.assertEqual(self.despacho.estado, 'ENVIADO')
+
+    def test_ya_anulado_no_se_reanula(self):
+        from django.utils import timezone
+        self.despacho.estado = 'ANULADO'
+        self.despacho.motivo_anulacion = 'Primera'
+        self.despacho.fecha_anulacion = timezone.now()
+        self.despacho.save()
+        self.client.force_login(self.sup)
+        self.client.post(self._url(), {'motivo': 'Segunda'})
+        self.despacho.refresh_from_db()
+        self.assertEqual(self.despacho.motivo_anulacion, 'Primera')

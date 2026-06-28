@@ -22,4 +22,5 @@ urlpatterns = [
     path('pedidos/<int:pk>/despachos/<int:despacho_id>/confirmar/', views.confirmar_despacho, name='pedidos-confirmar-despacho'),
     path('pedidos/<int:pk>/despachos/<int:despacho_id>/reintentar-traslado/', views.reintentar_traslado_despacho, name='pedidos-reintentar-traslado-despacho'),
     path('despachos/', views.lista_despachos, name='despachos-lista'),
+    path('despachos/<int:despacho_id>/anular/', views.anular_despacho, name='despachos-anular'),
 ]
