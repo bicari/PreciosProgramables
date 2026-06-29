@@ -1,337 +1,345 @@
 {% extends "dashboard.html" %}
 {% load permisos_tags %}
 {% block content %}
-<div class="container mt-4">
-    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-        <h2 class="mb-0">Pedido #{{ pedido.numero_pedido }}</h2>
-        <div class="d-flex gap-2 flex-wrap">
-            <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#modalImprimirPedido" title="Imprimir PDF">
-                <i class="fas fa-file-pdf"></i> <span class="d-none d-sm-inline">Imprimir PDF</span>
-            </button>
-            {% if es_supervisor and pedido.estado != 'ANULADO' %}
-            <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#modalAnularPedido" title="Anular pedido">
-                <i class="fas fa-ban"></i> <span class="d-none d-sm-inline">Anular</span>
-            </button>
-            {% endif %}
-            <a href="{% url 'pedidos-lista' %}" class="btn btn-outline-secondary">
-                <i class="fas fa-arrow-left"></i> <span class="d-none d-sm-inline">Volver</span>
-            </a>
-        </div>
-    </div>
 
-    <div class="modal fade" id="modalImprimirPedido" tabindex="-1" aria-labelledby="modalImprimirPedidoLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="modalImprimirPedidoLabel">Imprimir pedido #{{ pedido.numero_pedido }}</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
-                </div>
-                <div class="modal-body">
-                    <p class="text-muted small mb-2">Elige qué items incluir en el PDF:</p>
-                    <div class="list-group">
-                        {% for v in vistas_pdf %}
-                            {% if v.count > 0 %}
-                            <a href="{% url 'pedidos-pdf' pedido.numero_pedido %}?vista={{ v.clave }}"
-                               class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
-                                {{ v.label }}
-                                <span class="badge bg-secondary rounded-pill">{{ v.count }}</span>
-                            </a>
-                            {% else %}
-                            <span class="list-group-item disabled d-flex justify-content-between align-items-center">
-                                {{ v.label }}
-                                <span class="badge bg-light text-muted rounded-pill">0</span>
-                            </span>
-                            {% endif %}
-                        {% endfor %}
-                    </div>
-                </div>
+<!-- Modal: Imprimir PDF del pedido -->
+<div class="modal fade" id="modalImprimirPedido" tabindex="-1" aria-labelledby="modalImprimirPedidoLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalImprimirPedidoLabel">Imprimir pedido #{{ pedido.numero_pedido }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
             </div>
-        </div>
-    </div>
-
-    {% if messages %}
-        {% for message in messages %}
-        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-            {{ message }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-        {% endfor %}
-    {% endif %}
-
-    {% if pedido.estado == 'ANULADO' %}
-    <div class="alert alert-danger">
-        <strong><i class="fas fa-ban"></i> Pedido anulado</strong>
-        {% if pedido.estado_anterior %}(estado previo: {{ pedido.estado_anterior }}){% endif %}<br>
-        <strong>Motivo:</strong> {{ pedido.motivo_anulacion }}<br>
-        <small>Por {{ pedido.anulado_por.username|default:"-" }} el {{ pedido.fecha_anulacion|date:"d/m/Y H:i" }}</small>
-    </div>
-    {% endif %}
-
-    <div class="row mb-4">
-        <div class="col-md-6">
-            <div class="card">
-                <div class="card-body">
-                    <h5 class="card-title">Informacion del Pedido</h5>
-                    <table class="table table-borderless mb-0">
-                        <tr>
-                            <th>Solicitante:</th>
-                            <td>{{ pedido.solicitante.username|capfirst }}</td>
-                        </tr>
-                        <tr>
-                            <th>Despachador:</th>
-                            <td>{{ pedido.despachador.username|capfirst|default:"-" }}</td>
-                        </tr>
-                        <tr>
-                            <th>Picker:</th>
-                            <td>
-                                {% if pedido.picker %}
-                                    <span class="badge bg-info text-dark">{{ pedido.picker.username|capfirst }}</span>
-                                {% else %}
-                                    -
-                                {% endif %}
-                            </td>
-                        </tr>
-                        <tr>
-                            <th>Estado:</th>
-                            <td>
-                                {% if pedido.estado == 'PENDIENTE' %}
-                                    <span class="badge bg-warning text-dark">Pendiente</span>
-                                {% elif pedido.estado == 'ASIGNADO' %}
-                                    <span class="badge bg-secondary"><i class="fas fa-user-check"></i> Asignado</span>
-                                {% elif pedido.estado == 'PICKING' %}
-                                    <span class="badge bg-info">Picking</span>
-                                {% elif pedido.estado == 'EN_PREPARACION' %}
-                                    <span class="badge bg-warning text-dark"><i class="fas fa-boxes"></i> En Preparación</span>
-                                {% elif pedido.estado == 'DESPACHADO' %}
-                                    <span class="badge bg-primary">Despachado</span>
-                                {% elif pedido.estado == 'PARCIAL' %}
-                                    <span class="badge" style="background-color:#fd7e14;">Parcial</span>
-                                {% elif pedido.estado == 'RECIBIDO' %}
-                                    <span class="badge bg-success">Recibido</span>
-                                {% elif pedido.estado == 'CERRADO' %}
-                                    <span class="badge bg-secondary">Cerrado</span>
-                                {% elif pedido.estado == 'ANULADO' %}
-                                    <span class="badge bg-danger"><i class="fas fa-ban"></i> Anulado</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        <tr>
-                            <th>Categoria:</th>
-                            <td>
-                                <span class="badge bg-secondary">{{ pedido.categoria|default:"-" }}</span>
-                                {% if pedido.categoria_nombre %}<small class="text-muted ms-1">{{ pedido.categoria_nombre }}</small>{% endif %}
-                            </td>
-                        </tr>
-                        <tr>
-                            <th>Condicion:</th>
-                            <td>
-                                {% if pedido.condicion == 'URGENTE' %}
-                                    <span class="badge bg-danger">Urgente</span>
-                                {% elif pedido.condicion == 'SURTIDO' %}
-                                    <span class="badge bg-success">Surtido</span>
-                                {% elif pedido.condicion == 'CLIENTE_RETIRA' %}
-                                    <span class="badge bg-info">Cliente Retira</span>
-                                {% else %}
-                                    -
-                                {% endif %}
-                            </td>
-                        </tr>
-                        <tr>
-                            <th>Deposito origen:</th>
-                            <td>{{ pedido.deposito|default:"-" }}</td>
-                        </tr>
-                        {% if pedido.observaciones %}
-                        <tr>
-                            <th>Observaciones:</th>
-                            <td>{{ pedido.observaciones }}</td>
-                        </tr>
-                        {% endif %}
-                    </table>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6">
-            <div class="card">
-                <div class="card-body">
-                    <h5 class="card-title">Fechas</h5>
-                    <table class="table table-borderless mb-0">
-                        <tr>
-                            <th>Creacion:</th>
-                            <td>{{ pedido.fecha_creacion|date:"d/m/Y H:i" }}</td>
-                        </tr>
-                        <tr>
-                            <th>Despacho:</th>
-                            <td>{{ pedido.fecha_despacho|date:"d/m/Y H:i"|default:"-" }}</td>
-                        </tr>
-                        <tr>
-                            <th>Recepcion:</th>
-                            <td>{{ pedido.fecha_recepcion|date:"d/m/Y H:i"|default:"-" }}</td>
-                        </tr>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="mb-0">Items del Pedido</h5>
-            <div class="d-flex gap-2">
-                {% if pedido.estado == 'ASIGNADO' or pedido.estado == 'PICKING' or pedido.estado == 'EN_PREPARACION' %}
-                    {% if es_picker_asignado %}
-                    <a href="{% url 'pedidos-preparar' pedido.numero_pedido %}" class="btn btn-sm btn-warning">
-                        <i class="fas fa-boxes"></i>
-                        {% if pedido.estado == 'EN_PREPARACION' %}Continuar Preparación{% else %}Preparar{% endif %}
-                    </a>
-                    {% endif %}
-                {% endif %}
-                {% if pedido.estado == 'PENDIENTE' or pedido.estado == 'ASIGNADO' or pedido.estado == 'PICKING' or pedido.estado == 'EN_PREPARACION' or pedido.estado == 'PARCIAL' %}
-                    {% if es_despachador %}
-                    <a href="{% url 'pedidos-despachar' pedido.numero_pedido %}" class="btn btn-sm btn-success">
-                        <i class="fas fa-truck"></i>
-                        {% if pedido.estado == 'EN_PREPARACION' %}Continuar Preparación
-                        {% elif pedido.estado == 'PARCIAL' %}Despachar Back Orders
-                        {% else %}Despachar{% endif %}
-                    </a>
-                    {% endif %}
-                {% endif %}
-            </div>
-        </div>
-        <div class="card-body p-0 p-md-3">
-            <div class="table-responsive">
-            <table class="table table-striped table-mobile-card mb-0">
-                <thead>
-                    <tr>
-                        <th>Codigo</th>
-                        <th>Descripcion</th>
-                        <th>Referencia</th>
-                        <th>Puesto</th>
-                        <th>Ref. Proveedor</th>
-                        <th>Solicitado</th>
-                        {% if ver_despachado %}<th>Despachado</th>{% endif %}
-                        <th>Back Order</th>
-                        <th>Recibido</th>
-                        <th>Estado</th>
-                        <th>Observacion</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in items %}
-                    <tr>
-                        <td data-label="Código">{{ item.codigo }}</td>
-                        <td data-label="Descripción">{{ item.descripcion }}</td>
-                        <td data-label="Referencia"><small class="text-muted">{{ item.referencia|default:"-" }}</small></td>
-                        <td data-label="Puesto"><small class="text-muted">{{ item.puesto|default:"-" }}</small></td>
-                        <td data-label="Ref. Prov."><small class="text-muted">{{ item.ref_proveedor|default:"-" }}</small></td>
-                        <td data-label="Solicitado">{{ item.cantidad_solicitada }}</td>
-                        {% if ver_despachado %}<td data-label="Despachado">{{ item.cantidad_despachada }}</td>{% endif %}
-                        <td data-label="Back Order">
-                            {% if item.cantidad_back_order > 0 %}
-                                <span class="badge" style="background-color:#fd7e14;">{{ item.cantidad_back_order }}</span>
-                            {% else %}
-                                <span class="text-muted">—</span>
-                            {% endif %}
-                        </td>
-                        <td data-label="Recibido">{{ item.cantidad_recibida }}</td>
-                        <td data-label="Estado">
-                            {% if item.estado == 'PENDIENTE' %}
-                                <span class="badge bg-warning text-dark">Pendiente</span>
-                            {% elif item.estado == 'DESPACHADO' %}
-                                <span class="badge bg-primary">Despachado</span>
-                            {% elif item.estado == 'PARCIAL' %}
-                                <span class="badge" style="background-color:#fd7e14;">Parcial</span>
-                            {% elif item.estado == 'RECIBIDO' %}
-                                <span class="badge bg-success">Recibido</span>
-                            {% elif item.estado == 'BACK_ORDER' %}
-                                <span class="badge bg-danger">Back Order</span>
-                            {% elif item.estado == 'INCIDENCIA' %}
-                                <span class="badge bg-dark">Incidencia</span>
-                            {% endif %}
-                        </td>
-                        <td data-label="Observación">{{ item.observacion|default:"-" }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            </div>
-        </div>
-    </div>
-
-    {% if despachos %}
-    <div class="card mt-4">
-        <div class="card-header">
-            <h5 class="mb-0"><i class="fas fa-truck"></i> Despachos</h5>
-        </div>
-        <div class="card-body p-0">
-            {% for despacho in despachos %}
-            {% if despacho.estado == 'PENDIENTE_APROBACION' and es_supervisor %}
-            <form method="post" action="{% url 'pedidos-confirmar-despacho' pedido.numero_pedido despacho.numero_despacho %}" class="form-confirmar-despacho">
-            {% csrf_token %}
-            {% endif %}
-            <div class="border-bottom p-3">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <div>
-                        <strong>Despacho #{{ despacho.numero_despacho }}</strong>
-                        <span class="ms-2 text-muted small">{{ despacho.fecha_despacho|date:"d/m/Y H:i" }}</span>
-                        <span class="ms-2">
-                            {% if despacho.estado == 'PENDIENTE_APROBACION' %}
-                                <span class="badge bg-warning text-dark"><i class="fas fa-clock"></i> Pendiente de Aprobación</span>
-                            {% elif despacho.estado == 'ENVIADO' %}
-                                <span class="badge bg-primary">Enviado</span>
-                            {% elif despacho.estado == 'RECIBIDO' %}
-                                <span class="badge bg-success">Recibido</span>
-                            {% elif despacho.estado == 'PARCIAL' %}
-                                <span class="badge" style="background-color:#fd7e14;">Parcial</span>
-                            {% elif despacho.estado == 'PREPARANDO' %}
-                                <span class="badge bg-warning text-dark">Preparando</span>
-                            {% elif despacho.estado == 'ANULADO' %}
-                                <span class="badge bg-danger"><i class="fas fa-ban"></i> Anulado</span>
-                            {% endif %}
+            <div class="modal-body">
+                <p class="text-muted small mb-2">Elige qué items incluir en el PDF:</p>
+                <div class="list-group">
+                    {% for v in vistas_pdf %}
+                        {% if v.count > 0 %}
+                        <a href="{% url 'pedidos-pdf' pedido.numero_pedido %}?vista={{ v.clave }}"
+                           class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                            {{ v.label }}
+                            <span class="badge bg-secondary rounded-pill">{{ v.count }}</span>
+                        </a>
+                        {% else %}
+                        <span class="list-group-item disabled d-flex justify-content-between align-items-center">
+                            {{ v.label }}
+                            <span class="badge bg-light text-muted rounded-pill">0</span>
                         </span>
-                        {% if despacho.despachador %}
-                        <span class="ms-2 text-muted small">Despachado por: {{ despacho.despachador.username|capfirst }}</span>
                         {% endif %}
-                        {% if despacho.picker %}
-                        <span class="ms-2 text-muted small">| Pickeado por: {{ despacho.picker.username|capfirst }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- HEADER OSCURO DEL PEDIDO -->
+<div class="pd-header">
+    <div class="pd-header-left">
+        <a href="{% url 'pedidos-lista' %}" class="pd-back" title="Volver a pedidos">
+            <i class="fas fa-arrow-left"></i>
+        </a>
+        <div>
+            <span class="pd-header-eyebrow">Pedido</span>
+            <div class="pd-header-title-row">
+                <h1 class="pd-header-num">#{{ pedido.numero_pedido }}</h1>
+                <span class="ms-2">
+                    {% if pedido.estado == 'PENDIENTE' %}
+                        <span class="badge bg-warning text-dark pd-estado-badge">Pendiente</span>
+                    {% elif pedido.estado == 'ASIGNADO' %}
+                        <span class="badge bg-secondary pd-estado-badge"><i class="fas fa-user-check me-1"></i>Asignado</span>
+                    {% elif pedido.estado == 'PICKING' %}
+                        <span class="badge bg-info pd-estado-badge">Picking</span>
+                    {% elif pedido.estado == 'EN_PREPARACION' %}
+                        <span class="badge bg-warning text-dark pd-estado-badge"><i class="fas fa-boxes me-1"></i>En Preparación</span>
+                    {% elif pedido.estado == 'DESPACHADO' %}
+                        <span class="badge bg-primary pd-estado-badge">Despachado</span>
+                    {% elif pedido.estado == 'PARCIAL' %}
+                        <span class="badge pd-estado-badge" style="background-color:#fd7e14;">Parcial</span>
+                    {% elif pedido.estado == 'RECIBIDO' %}
+                        <span class="badge bg-success pd-estado-badge">Recibido</span>
+                    {% elif pedido.estado == 'CERRADO' %}
+                        <span class="badge bg-secondary pd-estado-badge">Cerrado</span>
+                    {% elif pedido.estado == 'ANULADO' %}
+                        <span class="badge bg-danger pd-estado-badge"><i class="fas fa-ban me-1"></i>Anulado</span>
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+    <div class="pd-header-actions">
+        <button type="button" class="btn btn-sm btn-outline-light" data-bs-toggle="modal" data-bs-target="#modalImprimirPedido" title="Imprimir PDF">
+            <i class="fas fa-file-pdf"></i> <span class="d-none d-sm-inline">PDF</span>
+        </button>
+        {% if es_supervisor and pedido.estado != 'ANULADO' %}
+        <button type="button" class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#modalAnularPedido" title="Anular pedido">
+            <i class="fas fa-ban"></i> <span class="d-none d-sm-inline">Anular</span>
+        </button>
+        {% endif %}
+    </div>
+</div>
+
+{% if messages %}
+    {% for message in messages %}
+    <div class="alert alert-{{ message.tags }} alert-dismissible fade show mb-3" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+{% endif %}
+
+{% if pedido.estado == 'ANULADO' %}
+<div class="alert alert-danger mb-3">
+    <strong><i class="fas fa-ban"></i> Pedido anulado</strong>
+    {% if pedido.estado_anterior %}(estado previo: {{ pedido.estado_anterior }}){% endif %}<br>
+    <strong>Motivo:</strong> {{ pedido.motivo_anulacion }}<br>
+    <small>Por {{ pedido.anulado_por.username|default:"-" }} el {{ pedido.fecha_anulacion|date:"d/m/Y H:i" }}</small>
+</div>
+{% endif %}
+
+<!-- GRID DE INFORMACIÓN -->
+<div class="pd-info-grid">
+    <div class="pd-info-card">
+        <div class="pd-card-section-label">Información del Pedido</div>
+        <dl class="pd-meta-list">
+            <div class="pd-meta-row">
+                <dt class="pd-meta-label">Solicitante</dt>
+                <dd class="pd-meta-value">{{ pedido.solicitante.username|capfirst }}</dd>
+            </div>
+            <div class="pd-meta-row">
+                <dt class="pd-meta-label">Despachador</dt>
+                <dd class="pd-meta-value">{{ pedido.despachador.username|capfirst|default:"-" }}</dd>
+            </div>
+            <div class="pd-meta-row">
+                <dt class="pd-meta-label">Picker</dt>
+                <dd class="pd-meta-value">
+                    {% if pedido.picker %}
+                        <span class="badge bg-info text-dark">{{ pedido.picker.username|capfirst }}</span>
+                    {% else %}-{% endif %}
+                </dd>
+            </div>
+            <div class="pd-meta-row">
+                <dt class="pd-meta-label">Categoría</dt>
+                <dd class="pd-meta-value">
+                    <span class="badge bg-secondary">{{ pedido.categoria|default:"-" }}</span>
+                    {% if pedido.categoria_nombre %}<small class="text-muted ms-1">{{ pedido.categoria_nombre }}</small>{% endif %}
+                </dd>
+            </div>
+            <div class="pd-meta-row">
+                <dt class="pd-meta-label">Condición</dt>
+                <dd class="pd-meta-value">
+                    {% if pedido.condicion == 'URGENTE' %}<span class="badge bg-danger">Urgente</span>
+                    {% elif pedido.condicion == 'SURTIDO' %}<span class="badge bg-success">Surtido</span>
+                    {% elif pedido.condicion == 'CLIENTE_RETIRA' %}<span class="badge bg-info">Cliente Retira</span>
+                    {% else %}-{% endif %}
+                </dd>
+            </div>
+            <div class="pd-meta-row">
+                <dt class="pd-meta-label">Depósito</dt>
+                <dd class="pd-meta-value">{{ pedido.deposito|default:"-" }}</dd>
+            </div>
+            {% if pedido.observaciones %}
+            <div class="pd-meta-row">
+                <dt class="pd-meta-label">Observaciones</dt>
+                <dd class="pd-meta-value">{{ pedido.observaciones }}</dd>
+            </div>
+            {% endif %}
+        </dl>
+    </div>
+
+    <div class="pd-info-card">
+        <div class="pd-card-section-label">Fechas</div>
+        <dl class="pd-meta-list">
+            <div class="pd-meta-row">
+                <dt class="pd-meta-label">Creación</dt>
+                <dd class="pd-meta-value">{{ pedido.fecha_creacion|date:"d/m/Y H:i" }}</dd>
+            </div>
+            <div class="pd-meta-row">
+                <dt class="pd-meta-label">Despacho</dt>
+                <dd class="pd-meta-value">{{ pedido.fecha_despacho|date:"d/m/Y H:i"|default:"-" }}</dd>
+            </div>
+            <div class="pd-meta-row">
+                <dt class="pd-meta-label">Recepción</dt>
+                <dd class="pd-meta-value">{{ pedido.fecha_recepcion|date:"d/m/Y H:i"|default:"-" }}</dd>
+            </div>
+        </dl>
+    </div>
+</div>
+
+<!-- ITEMS DEL PEDIDO -->
+<div class="pd-section-card">
+    <div class="pd-section-header">
+        <span class="pd-section-title">Items del Pedido</span>
+        <div class="d-flex gap-2 flex-wrap">
+            {% if pedido.estado == 'ASIGNADO' or pedido.estado == 'PICKING' or pedido.estado == 'EN_PREPARACION' %}
+                {% if es_picker_asignado %}
+                <a href="{% url 'pedidos-preparar' pedido.numero_pedido %}" class="btn btn-sm btn-warning">
+                    <i class="fas fa-boxes"></i>
+                    {% if pedido.estado == 'EN_PREPARACION' %}Continuar Preparación{% else %}Preparar{% endif %}
+                </a>
+                {% endif %}
+            {% endif %}
+            {% if pedido.estado == 'PENDIENTE' or pedido.estado == 'ASIGNADO' or pedido.estado == 'PICKING' or pedido.estado == 'EN_PREPARACION' or pedido.estado == 'PARCIAL' %}
+                {% if es_despachador %}
+                <a href="{% url 'pedidos-despachar' pedido.numero_pedido %}" class="btn btn-sm btn-success">
+                    <i class="fas fa-truck"></i>
+                    {% if pedido.estado == 'EN_PREPARACION' %}Continuar Preparación
+                    {% elif pedido.estado == 'PARCIAL' %}Despachar Back Orders
+                    {% else %}Despachar{% endif %}
+                </a>
+                {% endif %}
+            {% endif %}
+        </div>
+    </div>
+    <div class="pd-section-body">
+        <div class="table-responsive">
+        <table class="table table-hover table-mobile-card mb-0 pd-items-table">
+            <thead>
+                <tr>
+                    <th>Código</th>
+                    <th>Descripción</th>
+                    <th>Referencia</th>
+                    <th>Puesto</th>
+                    <th>Ref. Proveedor</th>
+                    <th>Solicitado</th>
+                    {% if ver_despachado %}<th>Despachado</th>{% endif %}
+                    <th>Back Order</th>
+                    <th>Recibido</th>
+                    <th>Estado</th>
+                    <th>Observación</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td data-label="Código"><code class="pd-code">{{ item.codigo }}</code></td>
+                    <td data-label="Descripción">{{ item.descripcion }}</td>
+                    <td data-label="Referencia"><small class="text-muted">{{ item.referencia|default:"-" }}</small></td>
+                    <td data-label="Puesto"><small class="text-muted">{{ item.puesto|default:"-" }}</small></td>
+                    <td data-label="Ref. Prov."><small class="text-muted">{{ item.ref_proveedor|default:"-" }}</small></td>
+                    <td data-label="Solicitado"><strong>{{ item.cantidad_solicitada }}</strong></td>
+                    {% if ver_despachado %}<td data-label="Despachado">{{ item.cantidad_despachada }}</td>{% endif %}
+                    <td data-label="Back Order">
+                        {% if item.cantidad_back_order > 0 %}
+                            <span class="badge" style="background-color:#fd7e14;">{{ item.cantidad_back_order }}</span>
+                        {% else %}
+                            <span class="text-muted">—</span>
                         {% endif %}
-                        {% if despacho.receptor %}
-                        <span class="ms-2 text-muted small">| Recibido por: {{ despacho.receptor.username|capfirst }} el {{ despacho.fecha_recepcion|date:"d/m/Y H:i" }}</span>
+                    </td>
+                    <td data-label="Recibido">{{ item.cantidad_recibida }}</td>
+                    <td data-label="Estado">
+                        {% if item.estado == 'PENDIENTE' %}<span class="badge bg-warning text-dark">Pendiente</span>
+                        {% elif item.estado == 'DESPACHADO' %}<span class="badge bg-primary">Despachado</span>
+                        {% elif item.estado == 'PARCIAL' %}<span class="badge" style="background-color:#fd7e14;">Parcial</span>
+                        {% elif item.estado == 'RECIBIDO' %}<span class="badge bg-success">Recibido</span>
+                        {% elif item.estado == 'BACK_ORDER' %}<span class="badge bg-danger">Back Order</span>
+                        {% elif item.estado == 'INCIDENCIA' %}<span class="badge bg-dark">Incidencia</span>
                         {% endif %}
-                    </div>
-                    <div class="d-flex gap-2">
-                        {% if puede_imprimir_despacho %}
-                        <a href="{% url 'pedidos-despacho-pdf' pedido.numero_pedido despacho.numero_despacho %}" class="btn btn-sm btn-outline-danger" title="Descargar PDF del despacho">
-                            <i class="fas fa-file-pdf"></i>
-                        </a>
+                    </td>
+                    <td data-label="Observación"><small class="text-muted">{{ item.observacion|default:"-" }}</small></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    </div>
+</div>
+
+{% if despachos %}
+<div class="pd-despachos-section">
+    <div class="pd-despachos-label"><i class="fas fa-truck me-2"></i>Despachos</div>
+
+    {% for despacho in despachos %}
+    {% if despacho.estado == 'PENDIENTE_APROBACION' and es_supervisor %}
+    <form method="post" action="{% url 'pedidos-confirmar-despacho' pedido.numero_pedido despacho.numero_despacho %}" class="form-confirmar-despacho">
+    {% csrf_token %}
+    {% endif %}
+
+    <div class="pd-despacho-card">
+        <div class="pd-despacho-header">
+            <div class="pd-despacho-header-left">
+                <button class="pd-collapse-btn btn-despacho-toggle"
+                        type="button"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#despacho-body-{{ despacho.numero_despacho }}"
+                        aria-expanded="true"
+                        aria-controls="despacho-body-{{ despacho.numero_despacho }}">
+                    <i class="fas fa-chevron-down despacho-chevron"></i>
+                </button>
+                <div class="pd-despacho-meta">
+                    <span class="pd-despacho-num">Despacho #{{ despacho.numero_despacho }}</span>
+                    <span class="pd-despacho-date">{{ despacho.fecha_despacho|date:"d/m/Y H:i" }}</span>
+                    <span>
+                        {% if despacho.estado == 'PENDIENTE_APROBACION' %}
+                            <span class="badge bg-warning text-dark"><i class="fas fa-clock me-1"></i>Pendiente de Aprobación</span>
+                        {% elif despacho.estado == 'ENVIADO' %}
+                            <span class="badge bg-primary">Enviado</span>
+                        {% elif despacho.estado == 'RECIBIDO' %}
+                            <span class="badge bg-success">Recibido</span>
+                        {% elif despacho.estado == 'PARCIAL' %}
+                            <span class="badge" style="background-color:#fd7e14;">Parcial</span>
+                        {% elif despacho.estado == 'PREPARANDO' %}
+                            <span class="badge bg-warning text-dark">Preparando</span>
+                        {% elif despacho.estado == 'ANULADO' %}
+                            <span class="badge bg-danger"><i class="fas fa-ban me-1"></i>Anulado</span>
                         {% endif %}
-                        {% if despacho.estado == 'PENDIENTE_APROBACION' and es_supervisor %}
-                        <button type="button" class="btn btn-sm btn-success btn-confirmar-despacho" data-numero="{{ despacho.numero_despacho }}">
-                            <i class="fas fa-check-circle"></i> Confirmar Despacho
+                    </span>
+                    <span class="pd-despacho-people">
+                        {% if despacho.despachador %}Por: {{ despacho.despachador.username|capfirst }}{% endif %}
+                        {% if despacho.picker %} · Picker: {{ despacho.picker.username|capfirst }}{% endif %}
+                        {% if despacho.receptor %} · Recibido: {{ despacho.receptor.username|capfirst }} el {{ despacho.fecha_recepcion|date:"d/m/Y H:i" }}{% endif %}
+                    </span>
+                </div>
+            </div>
+            <div class="pd-despacho-header-actions">
+                {% if puede_imprimir_despacho %}
+                <a href="{% url 'pedidos-despacho-pdf' pedido.numero_pedido despacho.numero_despacho %}" class="btn btn-sm btn-outline-light" title="PDF del despacho">
+                    <i class="fas fa-file-pdf"></i>
+                </a>
+                {% endif %}
+                {% if despacho.estado == 'PENDIENTE_APROBACION' and es_supervisor %}
+                <button type="button" class="btn btn-sm btn-success btn-confirmar-despacho" data-numero="{{ despacho.numero_despacho }}">
+                    <i class="fas fa-check-circle"></i> Confirmar
+                </button>
+                {% endif %}
+                {% if despacho.estado == 'ENVIADO' and puede_recibir %}
+                <a href="{% url 'pedidos-recibir-despacho' pedido.numero_pedido despacho.numero_despacho %}" class="btn btn-sm btn-info">
+                    <i class="fas fa-box-open"></i> Recibir
+                </a>
+                {% endif %}
+                {% if es_superuser and not despacho.traslado_a2_registrado and despacho.estado != 'PENDIENTE_APROBACION' and despacho.estado != 'PREPARANDO' %}
+                <form method="post" action="{% url 'pedidos-reintentar-traslado-despacho' pedido.numero_pedido despacho.numero_despacho %}" class="form-reintentar-traslado d-inline" id="form-reintentar-{{ despacho.numero_despacho }}">
+                    {% csrf_token %}
+                    <button type="button" class="btn btn-sm btn-outline-warning btn-reintentar-traslado" data-despacho="{{ despacho.numero_despacho }}" title="El traslado en a2 no fue registrado — haga clic para reintentar">
+                        <i class="fas fa-rotate-right"></i> <span class="d-none d-md-inline">Reintentar a2</span>
+                    </button>
+                </form>
+                {% endif %}
+                {% if es_supervisor and despacho.estado != 'ANULADO' and despacho.estado != 'RECIBIDO' and despacho.estado != 'PARCIAL' %}
+                <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#modalAnularDespacho{{ despacho.numero_despacho }}" title="Anular despacho">
+                    <i class="fas fa-ban"></i>
+                </button>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="collapse show" id="despacho-body-{{ despacho.numero_despacho }}">
+            <div class="pd-despacho-body">
+                <div class="pd-despacho-filter">
+                    <div class="input-group input-group-sm" style="max-width:300px;">
+                        <span class="input-group-text text-muted bg-white"><i class="fas fa-search"></i></span>
+                        <input type="text" class="form-control border-start-0"
+                               placeholder="Filtrar por código o descripción…"
+                               oninput="filtrarDespacho(this, 'tabla-despacho-{{ despacho.numero_despacho }}')">
+                        <button class="btn btn-outline-secondary" type="button"
+                                onclick="var i=this.previousElementSibling;i.value='';filtrarDespacho(i,'tabla-despacho-{{ despacho.numero_despacho }}')">
+                            <i class="fas fa-times"></i>
                         </button>
-                        {% endif %}
-                        {% if despacho.estado == 'ENVIADO' and puede_recibir %}
-                        <a href="{% url 'pedidos-recibir-despacho' pedido.numero_pedido despacho.numero_despacho %}" class="btn btn-sm btn-info">
-                            <i class="fas fa-box-open"></i> Recibir
-                        </a>
-                        {% endif %}
-                        {% if es_superuser and not despacho.traslado_a2_registrado and despacho.estado != 'PENDIENTE_APROBACION' and despacho.estado != 'PREPARANDO' %}
-                        <form method="post" action="{% url 'pedidos-reintentar-traslado-despacho' pedido.numero_pedido despacho.numero_despacho %}" class="form-reintentar-traslado d-inline" id="form-reintentar-{{ despacho.numero_despacho }}">
-                            {% csrf_token %}
-                            <button type="button" class="btn btn-sm btn-outline-warning btn-reintentar-traslado" data-despacho="{{ despacho.numero_despacho }}" title="El traslado en a2 no fue registrado — haga clic para reintentar">
-                                <i class="fas fa-rotate-right"></i> Reintentar traslado a2
-                            </button>
-                        </form>
-                        {% endif %}
-                        {% if es_supervisor and despacho.estado != 'ANULADO' and despacho.estado != 'RECIBIDO' and despacho.estado != 'PARCIAL' %}
-                        <button type="button" class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#modalAnularDespacho{{ despacho.numero_despacho }}" title="Anular despacho">
-                            <i class="fas fa-ban"></i> Anular
-                        </button>
-                        {% endif %}
                     </div>
                 </div>
                 <div class="table-responsive">
-                <table class="table table-sm mb-0 table-mobile-card">
-                    <thead class="table-light">
+                <table class="table table-sm mb-0 table-mobile-card pd-despacho-table" id="tabla-despacho-{{ despacho.numero_despacho }}">
+                    <thead>
                         <tr>
                             <th>Código</th>
                             <th>Descripción</th>
@@ -346,8 +354,11 @@
                     </thead>
                     <tbody>
                         {% for di in despacho.items.all %}
-                        <tr>
-                            <td data-label="Código">{{ di.pedido_item.codigo }}</td>
+                        <tr data-di-id="{{ di.id }}"
+                            data-codigo="{{ di.pedido_item.codigo|lower }}"
+                            data-referencia="{{ di.pedido_item.referencia|lower }}"
+                            data-ref-proveedor="{{ di.pedido_item.ref_proveedor|lower }}">
+                            <td data-label="Código"><code class="pd-code">{{ di.pedido_item.codigo }}</code></td>
                             <td data-label="Descripción">{{ di.pedido_item.descripcion }}</td>
                             {% if despacho.estado == 'PENDIENTE_APROBACION' and es_supervisor %}
                             <td data-label="Solicitado">{{ di.pedido_item.cantidad_solicitada }}</td>
@@ -375,65 +386,441 @@
                 </table>
                 </div>
             </div>
-            {% if despacho.estado == 'PENDIENTE_APROBACION' and es_supervisor %}
-            </form>
-            {% endif %}
-            {% if es_supervisor and despacho.estado != 'ANULADO' and despacho.estado != 'RECIBIDO' and despacho.estado != 'PARCIAL' %}
-            <div class="modal fade" id="modalAnularDespacho{{ despacho.numero_despacho }}" tabindex="-1" aria-hidden="true">
-              <div class="modal-dialog">
-                <form method="post" action="{% url 'despachos-anular' despacho.numero_despacho %}">
-                  {% csrf_token %}
-                  <div class="modal-content">
-                    <div class="modal-header">
-                      <h5 class="modal-title">Anular despacho #{{ despacho.numero_despacho }}</h5>
-                      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
-                    </div>
-                    <div class="modal-body">
-                      <p class="text-danger"><i class="fas fa-exclamation-triangle"></i> Acción irreversible. No revierte inventario en a2.</p>
-                      <label class="form-label fw-bold">Motivo <span class="text-danger">*</span></label>
-                      <textarea name="motivo" class="form-control" rows="3" required></textarea>
-                    </div>
-                    <div class="modal-footer">
-                      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                      <button type="submit" class="btn btn-danger">Anular despacho</button>
-                    </div>
-                  </div>
-                </form>
-              </div>
-            </div>
-            {% endif %}
-            {% endfor %}
         </div>
     </div>
+
+    {% if despacho.estado == 'PENDIENTE_APROBACION' and es_supervisor %}
+    </form>
     {% endif %}
 
-    {% if es_supervisor and pedido.estado != 'ANULADO' %}
-    <div class="modal fade" id="modalAnularPedido" tabindex="-1" aria-hidden="true">
+    {% if es_supervisor and despacho.estado != 'ANULADO' and despacho.estado != 'RECIBIDO' and despacho.estado != 'PARCIAL' %}
+    <div class="modal fade" id="modalAnularDespacho{{ despacho.numero_despacho }}" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog">
-        <form method="post" action="{% url 'pedidos-anular' pedido.numero_pedido %}">
+        <form method="post" action="{% url 'despachos-anular' despacho.numero_despacho %}">
           {% csrf_token %}
           <div class="modal-content">
             <div class="modal-header">
-              <h5 class="modal-title">Anular pedido #{{ pedido.numero_pedido }}</h5>
+              <h5 class="modal-title">Anular despacho #{{ despacho.numero_despacho }}</h5>
               <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
-              <p class="text-danger"><i class="fas fa-exclamation-triangle"></i> Esta acción es irreversible y saca el pedido de los reportes KPI. No revierte inventario en a2.</p>
-              <label class="form-label fw-bold">Motivo de la anulación <span class="text-danger">*</span></label>
+              <p class="text-danger"><i class="fas fa-exclamation-triangle"></i> Acción irreversible. No revierte inventario en a2.</p>
+              <label class="form-label fw-bold">Motivo <span class="text-danger">*</span></label>
               <textarea name="motivo" class="form-control" rows="3" required></textarea>
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-              <button type="submit" class="btn btn-danger">Anular pedido</button>
+              <button type="submit" class="btn btn-danger">Anular despacho</button>
             </div>
           </div>
         </form>
       </div>
     </div>
     {% endif %}
+    {% endfor %}
 </div>
+{% endif %}
+
+{% if es_supervisor and pedido.estado != 'ANULADO' %}
+<div class="modal fade" id="modalAnularPedido" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <form method="post" action="{% url 'pedidos-anular' pedido.numero_pedido %}">
+      {% csrf_token %}
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Anular pedido #{{ pedido.numero_pedido }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-danger"><i class="fas fa-exclamation-triangle"></i> Esta acción es irreversible y saca el pedido de los reportes KPI. No revierte inventario en a2.</p>
+          <label class="form-label fw-bold">Motivo de la anulación <span class="text-danger">*</span></label>
+          <textarea name="motivo" class="form-control" rows="3" required></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-danger">Anular pedido</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<style>
+/* ── Sistema de diseño: Pedido Detalle (pd-) ─────────────── */
+
+/* Header oscuro — firma visual de la página */
+.pd-header {
+    background: #2e353d;
+    color: #fff;
+    border-radius: 12px;
+    padding: 1.1rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.25rem;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+}
+
+.pd-header-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.pd-back {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.75);
+    text-decoration: none;
+    flex-shrink: 0;
+    transition: background 0.15s;
+}
+.pd-back:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+
+.pd-header-eyebrow {
+    display: block;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+    margin-bottom: 0.1rem;
+}
+
+.pd-header-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.pd-header-num {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: -0.01em;
+    line-height: 1;
+}
+
+.pd-estado-badge {
+    font-size: 0.8rem;
+    padding: 0.35em 0.7em;
+}
+
+.pd-header-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Grid de tarjetas de información */
+.pd-info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.pd-info-card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+    padding: 1.25rem 1.5rem;
+}
+
+.pd-card-section-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: #adb5bd;
+    border-bottom: 1px solid #e9ecef;
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.85rem;
+}
+
+/* Lista de metadatos con dl/dt/dd */
+.pd-meta-list {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.pd-meta-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid #f4f6f8;
+}
+
+.pd-meta-row:last-child {
+    border-bottom: none;
+}
+
+.pd-meta-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6c757d;
+    flex: 0 0 100px;
+    min-width: 100px;
+    margin: 0;
+}
+
+.pd-meta-value {
+    font-size: 0.875rem;
+    color: #1a202c;
+    margin: 0;
+    flex: 1;
+}
+
+/* Card de sección (Items del Pedido) */
+.pd-section-card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+    overflow: hidden;
+    margin-bottom: 1.25rem;
+}
+
+.pd-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.8rem 1.25rem;
+    border-bottom: 1px solid #e9ecef;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.pd-section-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: #495057;
+}
+
+.pd-section-body {
+    padding: 0;
+}
+
+/* Tabla de items */
+.pd-items-table thead th {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6c757d;
+    background: #f8f9fa;
+    border-bottom: 2px solid #e9ecef;
+    padding: 0.6rem 0.75rem;
+    white-space: nowrap;
+}
+
+.pd-items-table tbody td {
+    font-size: 0.875rem;
+    vertical-align: middle;
+    padding: 0.6rem 0.75rem;
+}
+
+.pd-items-table tbody tr:hover {
+    background: #f8f9fc;
+}
+
+/* Código de producto en monospace */
+.pd-code {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 0.78rem;
+    color: #495057;
+    background: #f1f3f5;
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+/* Sección de despachos */
+.pd-despachos-section {
+    margin-bottom: 1.25rem;
+}
+
+.pd-despachos-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: #adb5bd;
+    margin-bottom: 0.75rem;
+}
+
+/* Card individual de despacho */
+.pd-despacho-card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+    overflow: hidden;
+    margin-bottom: 0.85rem;
+}
+
+/* Sub-header del despacho — ligeramente más claro que el header principal */
+.pd-despacho-header {
+    background: #3a4450;
+    color: #fff;
+    padding: 0.75rem 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.pd-despacho-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex: 1;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.pd-collapse-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.75);
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.15s;
+    cursor: pointer;
+}
+
+.pd-collapse-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+
+.pd-despacho-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.pd-despacho-num {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #fff;
+    white-space: nowrap;
+}
+
+.pd-despacho-date {
+    font-size: 0.76rem;
+    color: rgba(255, 255, 255, 0.5);
+    white-space: nowrap;
+}
+
+.pd-despacho-people {
+    font-size: 0.73rem;
+    color: rgba(255, 255, 255, 0.45);
+    width: 100%;
+}
+
+.pd-despacho-header-actions {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+}
+
+/* Cuerpo del despacho */
+.pd-despacho-body {
+    padding: 1rem 1.25rem 1.25rem;
+}
+
+.pd-despacho-filter {
+    margin-bottom: 0.75rem;
+}
+
+/* Tabla interna del despacho */
+.pd-despacho-table thead th {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6c757d;
+    background: #f8f9fa;
+    border-bottom: 2px solid #e9ecef;
+    padding: 0.5rem 0.75rem;
+}
+
+/* Chevron de colapso */
+.despacho-chevron {
+    transition: transform 0.2s ease;
+    display: inline-block;
+    font-size: 0.8rem;
+}
+
+.btn-despacho-toggle.collapsed .despacho-chevron {
+    transform: rotate(-90deg);
+}
+
+/* Responsive */
+@media (max-width: 767px) {
+    .pd-info-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .pd-header-num {
+        font-size: 1.25rem;
+    }
+
+    .pd-header {
+        padding: 0.9rem 1rem;
+    }
+
+    .pd-info-card {
+        padding: 1rem 1.1rem;
+    }
+
+    .pd-despacho-people {
+        width: 100%;
+        margin-top: 0.2rem;
+    }
+}
+</style>
 
 <script>
+function filtrarDespacho(inputEl, tableId) {
+    var q = inputEl.value.toLowerCase().trim();
+    var tabla = document.getElementById(tableId);
+    if (!tabla) return;
+    tabla.querySelectorAll('tbody tr').forEach(function(row) {
+        var codigo = (row.cells[0] ? row.cells[0].textContent : '').toLowerCase();
+        var desc   = (row.cells[1] ? row.cells[1].textContent : '').toLowerCase();
+        row.style.display = (!q || codigo.includes(q) || desc.includes(q)) ? '' : 'none';
+    });
+}
+
 document.querySelectorAll('.btn-confirmar-despacho').forEach(function(btn) {
     btn.addEventListener('click', function() {
         const numero = this.dataset.numero;
