@@ -919,6 +919,69 @@
 </style>
 
 <script>
+function iniciarPistoleo(inputId, tableId, alertZoneId, counterId) {
+    var input = document.getElementById(inputId);
+    if (!input) return;
+
+    input.addEventListener('keydown', function(e) {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+
+        var query = this.value.trim().toLowerCase();
+        if (!query) {
+            this.value = '';
+            return;
+        }
+
+        var tabla = document.getElementById(tableId);
+        if (!tabla) return;
+
+        var filas = tabla.querySelectorAll('tbody tr');
+        var encontrado = false;
+
+        filas.forEach(function(fila) {
+            var codigo     = (fila.dataset.codigo       || '').trim();
+            var referencia = (fila.dataset.referencia   || '').trim();
+            var refProv    = (fila.dataset.refProveedor || '').trim();
+
+            if (codigo === query || referencia === query || refProv === query) {
+                encontrado = true;
+                if (fila.classList.contains('pd-fila-verificada')) return;
+
+                fila.classList.add('pd-fila-verificada');
+
+                var checkIcon = fila.querySelector('.pd-check-icon');
+                if (checkIcon) checkIcon.classList.remove('d-none');
+
+                var counterEl = document.getElementById(counterId);
+                if (counterEl) {
+                    var current = parseInt(counterEl.dataset.count || '0', 10) + 1;
+                    var total   = parseInt(counterEl.dataset.total || '0', 10);
+                    counterEl.dataset.count = current;
+                    counterEl.textContent   = current + ' / ' + total + ' verificados';
+                    if (current >= total && total > 0) {
+                        counterEl.classList.add('pd-counter-completo');
+                    }
+                }
+            }
+        });
+
+        if (!encontrado) {
+            var alertZone = document.getElementById(alertZoneId);
+            if (alertZone) {
+                alertZone.textContent = '"' + this.value.trim() + '" no pertenece a este despacho';
+                alertZone.classList.remove('d-none');
+                setTimeout(function() {
+                    alertZone.classList.add('d-none');
+                    alertZone.textContent = '';
+                }, 3000);
+            }
+        }
+
+        this.value = '';
+    });
+}
+
 function filtrarDespacho(inputEl, tableId) {
     var q = inputEl.value.toLowerCase().trim();
     var tabla = document.getElementById(tableId);
@@ -949,5 +1012,14 @@ document.querySelectorAll('.btn-reintentar-traslado').forEach(function(btn) {
         document.getElementById('form-reintentar-' + numero).submit();
     });
 });
+
+{% for despacho in despachos %}{% if despacho.estado == 'PENDIENTE_APROBACION' and es_supervisor %}
+iniciarPistoleo(
+    'pd-pistoleo-{{ despacho.numero_despacho }}',
+    'tabla-despacho-{{ despacho.numero_despacho }}',
+    'pd-alert-{{ despacho.numero_despacho }}',
+    'pd-counter-{{ despacho.numero_despacho }}'
+);
+{% endif %}{% endfor %}
 </script>
 {% endblock content %}
