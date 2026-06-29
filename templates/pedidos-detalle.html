@@ -325,6 +325,40 @@
 
         <div class="collapse show" id="despacho-body-{{ despacho.numero_despacho }}">
             <div class="pd-despacho-body">
+                {% if despacho.estado == 'PENDIENTE_APROBACION' and es_supervisor %}
+                <div class="pd-pistoleo-wrap mb-3">
+                    <div class="pd-pistoleo-header">
+                        <span class="pd-pistoleo-label">
+                            <i class="fas fa-barcode me-1"></i>Verificación de artículos
+                        </span>
+                        <span class="pd-pistoleo-counter"
+                              id="pd-counter-{{ despacho.numero_despacho }}"
+                              data-count="0"
+                              data-total="{{ despacho.items.all|length }}">
+                            0 / {{ despacho.items.all|length }} verificados
+                        </span>
+                    </div>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-white text-muted">
+                            <i class="fas fa-barcode"></i>
+                        </span>
+                        <input type="text"
+                               id="pd-pistoleo-{{ despacho.numero_despacho }}"
+                               class="form-control pd-pistoleo-field"
+                               placeholder="Pistolée o escriba el código…"
+                               autocomplete="off"
+                               autocorrect="off"
+                               spellcheck="false">
+                        <button class="btn btn-outline-secondary" type="button"
+                                onclick="document.getElementById('pd-pistoleo-{{ despacho.numero_despacho }}').value='';document.getElementById('pd-pistoleo-{{ despacho.numero_despacho }}').focus();">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div id="pd-alert-{{ despacho.numero_despacho }}"
+                         class="pd-pistoleo-alert d-none mt-2">
+                    </div>
+                </div>
+                {% endif %}
                 <div class="pd-despacho-filter">
                     <div class="input-group input-group-sm" style="max-width:300px;">
                         <span class="input-group-text text-muted bg-white"><i class="fas fa-search"></i></span>
@@ -363,8 +397,13 @@
                             {% if despacho.estado == 'PENDIENTE_APROBACION' and es_supervisor %}
                             <td data-label="Solicitado">{{ di.pedido_item.cantidad_solicitada }}</td>
                             <td data-label="A Despachar">
-                                <input type="number" name="cantidad_{{ di.id }}" value="{{ di.cantidad_despachada }}"
-                                       min="0" class="form-control form-control-sm" style="max-width:90px;">
+                                <div class="d-flex align-items-center gap-2">
+                                    <input type="number" name="cantidad_{{ di.id }}" value="{{ di.cantidad_despachada }}"
+                                           min="0" class="form-control form-control-sm" style="max-width:90px;">
+                                    <span class="pd-check-icon d-none">
+                                        <i class="fas fa-check-circle text-success"></i>
+                                    </span>
+                                </div>
                             </td>
                             {% elif ver_cantidad_despacho %}
                             <td data-label="Despachado">{{ di.cantidad_despachada }}</td>
@@ -806,6 +845,76 @@
         width: 100%;
         margin-top: 0.2rem;
     }
+}
+
+/* ── Widget de pistoleo ──────────────────────────── */
+.pd-pistoleo-wrap {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+}
+
+.pd-pistoleo-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.6rem;
+}
+
+.pd-pistoleo-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #495057;
+}
+
+.pd-pistoleo-counter {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #6c757d;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 20px;
+    padding: 0.2em 0.75em;
+    transition: color 0.3s, background 0.3s, border-color 0.3s;
+}
+
+.pd-counter-completo {
+    color: #146c43 !important;
+    border-color: #a3cfbb !important;
+    background: #d1e7dd !important;
+}
+
+.pd-pistoleo-field {
+    border-left: 0 !important;
+    border-radius: 0 !important;
+}
+
+.pd-pistoleo-alert {
+    font-size: 0.82rem;
+    color: #842029;
+    background: #f8d7da;
+    border: 1px solid #f5c2c7;
+    border-radius: 6px;
+    padding: 0.35rem 0.75rem;
+}
+
+/* ── Fila verificada ─────────────────────────────── */
+.pd-fila-verificada {
+    background-color: #d1e7dd !important;
+    transition: background-color 0.25s ease;
+}
+
+.pd-fila-verificada:hover {
+    background-color: #b8dfc8 !important;
+}
+
+.pd-check-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+    line-height: 1;
 }
 </style>
 
