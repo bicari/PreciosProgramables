@@ -4,7 +4,7 @@ from django.contrib.auth import authenticate as django_authenticate
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib import messages
 from django.db import transaction
-from django.db.models import Sum, Count, IntegerField, Q
+from django.db.models import Sum, Count, IntegerField, Q, Max
 from django.db.models import Case, When, Value
 from django.utils import timezone
 from datetime import datetime, timedelta, time as dtime
@@ -221,6 +221,41 @@ def crear_pedido(request):
         if not items_data:
             messages.error(request, 'Debe agregar al menos un producto al pedido', extra_tags='danger')
             return render(request, 'pedidos-crear.html', ctx)
+
+        # Revalidar existencia en depósito 1 (Almacén) en el servidor.
+        # El frontend bloquea el botón "Agregar" para existencia=0, pero la validación
+        # aquí cubre manipulaciones del form o cambios de stock entre búsqueda y envío.
+        codigos_pedido = [item['codigo'] for item in items_data]
+        stock_pedido = {}
+        dbisam_consulta_ok = False
+        try:
+            stock_pedido = PedidosDBISAM().consultar_stock_multiple(codigos_pedido, deposito=DEPOSITO_ALMACEN)
+            dbisam_consulta_ok = True
+        except Exception as e:
+            messages.warning(request, f'No se pudo verificar el stock en almacén: {e}')
+
+        if dbisam_consulta_ok:
+            excesos_stock = [
+                item['codigo']
+                for item in items_data
+                if int(item['cantidad']) > stock_pedido.get(item['codigo'], 0)
+            ]
+            if excesos_stock:
+                messages.warning(
+                    request,
+                    'Hay ítems con cantidad que supera el stock disponible en almacén. '
+                    'Corrija las cantidades marcadas en rojo antes de enviar el pedido.',
+                )
+                ctx.update({
+                    'items_json_inicial': items_json,
+                    'stock_info_json': json.dumps(stock_pedido),
+                    'categoria_inicial': categoria_codigo,
+                    'categoria_nombre_inicial': categoria_nombre,
+                    'condicion_inicial': condicion,
+                    'deposito_inicial': deposito_codigo,
+                    'deposito_nombre_inicial': deposito_nombre or deposito_codigo,
+                })
+                return render(request, 'pedidos-crear.html', ctx)
 
         deposito_codigo_int = None
         try:
@@ -1265,8 +1300,8 @@ def reporte_pedidos(request):
 
     categorias_disponibles = (
         Pedido.objects.exclude(categoria='')
-        .values_list('categoria', flat=True)
-        .distinct()
+        .values('categoria')
+        .annotate(nombre=Max('categoria_nombre'))
         .order_by('categoria')
     )
 

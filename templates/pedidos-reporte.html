@@ -44,7 +44,9 @@
                 <select name="categoria" class="form-select form-select-sm">
                     <option value="">Todas</option>
                     {% for cat in categorias_disponibles %}
-                    <option value="{{ cat }}" {% if categoria_filtro == cat %}selected{% endif %}>{{ cat }}</option>
+                    <option value="{{ cat.categoria }}" {% if categoria_filtro == cat.categoria %}selected{% endif %}>
+                        {% if cat.nombre %}{{ cat.nombre }}{% else %}{{ cat.categoria }}{% endif %}
+                    </option>
                     {% endfor %}
                 </select>
             </div>
