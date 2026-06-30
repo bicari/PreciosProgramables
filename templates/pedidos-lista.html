@@ -208,7 +208,7 @@
                             {% endif %}
                         {% endif %}
                         {% if pedido.estado == 'DESPACHADO' or pedido.estado == 'PARCIAL' %}
-                            {% if request.user|has_group:"Pedidos Tienda" %}
+                            {% if puede_recibir %}
                             <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-info" title="Ver despachos para recibir">
                                 <i class="fas fa-box-open"></i>
                             </a>

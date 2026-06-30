@@ -104,6 +104,13 @@ def _solo_picker(user):
     return is_pedidos_picker(user) and not is_pedidos_almacen(user) and not is_pedidos_supervisor(user)
 
 
+def is_pedidos_receptor(user):
+    """Puede recibir despachos: Tienda pura (sin Almacen), Supervisor, superuser."""
+    if user.is_superuser or is_pedidos_supervisor(user):
+        return True
+    return is_pedidos_tienda(user) and not is_pedidos_almacen(user)
+
+
 # Variantes de impresión de un pedido. 'estado' None = sin filtro (todos los items).
 # 'tienda' indica si un usuario solo-Tienda puede generarla.
 VISTAS_PEDIDO = {
@@ -171,6 +178,7 @@ def lista_pedidos(request):
         'es_picker': _solo_picker(request.user),
         'es_supervisor': is_pedidos_supervisor(request.user),
         'pickers_disponibles': lista_pickers_disponibles,
+        'puede_recibir': is_pedidos_receptor(request.user),
     })
 
 
@@ -332,7 +340,7 @@ def detalle_pedido(request, pk):
         'ver_despachado': es_supervisor,
         'es_supervisor': es_supervisor,
         'es_despachador': es_despachador,
-        'puede_recibir': is_pedidos_tienda(request.user),
+        'puede_recibir': is_pedidos_receptor(request.user),
         'ver_cantidad_despacho': es_despachador or request.user.is_superuser,
         'puede_imprimir_despacho': request.user.is_superuser or is_pedidos_almacen(request.user) or is_pedidos_supervisor(request.user),
         'es_superuser': request.user.is_superuser,
@@ -833,7 +841,7 @@ def verificar_autorizacion_despacho(request):
 
 
 @login_required(login_url='/login/')
-@user_passes_test(is_pedidos_tienda, login_url='dashboard')
+@user_passes_test(is_pedidos_receptor, login_url='dashboard')
 def recibir_despacho(request, pk, despacho_id):
     pedido = get_object_or_404(Pedido, numero_pedido=pk)
 
