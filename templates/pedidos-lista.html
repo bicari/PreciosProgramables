@@ -190,34 +190,34 @@
                 </td>
                 {% endif %}
                 <td>
-                    <div class="pl-acciones">
+                    <div class="btn-group btn-group-sm" role="group">
                         {% if pedido.estado == 'ASIGNADO' or pedido.estado == 'PICKING' or pedido.estado == 'EN_PREPARACION' %}
                             {% if es_picker and pedido.picker == request.user %}
-                            <a href="{% url 'pedidos-preparar' pedido.numero_pedido %}" class="btn btn-sm btn-warning" title="Preparar pedido">
-                                <i class="fas fa-boxes"></i> <span class="d-none d-xl-inline">Preparar</span>
+                            <a href="{% url 'pedidos-preparar' pedido.numero_pedido %}" class="btn btn-warning" title="Preparar pedido">
+                                <i class="fas fa-boxes"></i>
                             </a>
                             {% endif %}
                         {% endif %}
                         {% if pedido.estado == 'PENDIENTE' or pedido.estado == 'ASIGNADO' or pedido.estado == 'PICKING' or pedido.estado == 'EN_PREPARACION' or pedido.estado == 'PARCIAL' %}
                             {% if request.user|has_group:"Pedidos Almacen" %}
                             <a href="{% url 'pedidos-despachar' pedido.numero_pedido %}"
-                               class="btn btn-sm btn-success"
+                               class="btn btn-success"
                                title="{% if pedido.estado == 'PARCIAL' %}Despachar Back Orders{% else %}Despachar{% endif %}">
-                                <i class="fas fa-truck"></i> <span class="d-none d-xl-inline">{% if pedido.estado == 'PARCIAL' %}BO{% else %}Despachar{% endif %}</span>
+                                <i class="fas fa-truck"></i>
                             </a>
                             {% endif %}
                         {% endif %}
                         {% if pedido.estado == 'DESPACHADO' or pedido.estado == 'PARCIAL' %}
                             {% if request.user|has_group:"Pedidos Tienda" %}
-                            <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-sm btn-info" title="Ver despachos para recibir">
-                                <i class="fas fa-box-open"></i> <span class="d-none d-xl-inline">Recibir</span>
+                            <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-info" title="Ver despachos para recibir">
+                                <i class="fas fa-box-open"></i>
                             </a>
                             {% endif %}
                         {% endif %}
-                        <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-sm btn-outline-primary" title="Ver detalle">
+                        <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-outline-primary" title="Ver detalle">
                             <i class="fas fa-eye"></i>
                         </a>
-                        <a href="{% url 'pedidos-pdf' pedido.numero_pedido %}" class="btn btn-sm btn-outline-secondary" title="PDF">
+                        <a href="{% url 'pedidos-pdf' pedido.numero_pedido %}" class="btn btn-outline-secondary" title="PDF">
                             <i class="fas fa-file-pdf"></i>
                         </a>
                     </div>
@@ -485,13 +485,7 @@ document.getElementById('modalAsignarPicker').addEventListener('show.bs.modal', 
     text-decoration: none;
 }
 
-/* Columna de acciones */
-.pl-acciones {
-    display: flex;
-    gap: 0.25rem;
-    align-items: center;
-    flex-wrap: nowrap;
-}
+/* Columna de acciones — Bootstrap btn-group, sin CSS adicional necesario */
 
 /* ── Responsive ── */
 @media (max-width: 767px) {
