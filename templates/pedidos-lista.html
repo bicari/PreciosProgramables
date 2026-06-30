@@ -1,98 +1,128 @@
 {% extends "dashboard.html" %}
 {% load permisos_tags %}
 {% block content %}
-{%load static%}
+{% load static %}
 <link rel="stylesheet" href="{% static 'vendor/datatables/css/dataTables.bootstrap5.min.css' %}">
 <script src="{% static 'vendor/jquery/jquery-3.6.0.min.js' %}"></script>
 <script src="{% static 'vendor/datatables/js/jquery.dataTables.min.js' %}"></script>
 <script src="{% static 'vendor/datatables/js/dataTables.bootstrap5.min.js' %}"></script>
 
-<div class="container mt-4">
-    <div class="d-flex justify-content-between align-items-center mb-3 page-header-mobile">
-        <h2>Pedidos de Almacen</h2>
-        <div class="d-flex gap-2 flex-wrap btn-group-header">
-            {% if request.user|has_group:"Pedidos Supervisor" %}
-            <a href="{% url 'pedidos-reporte' %}" class="btn btn-outline-info">
-                <i class="fas fa-chart-bar"></i> Reporte
-            </a>
-            {% endif %}
-            {% if request.user|has_group:"Pedidos Tienda" %}
-            <a href="{% url 'pedidos-crear' %}" class="btn btn-primary">
-                <i class="fas fa-plus"></i> Nuevo Pedido
-            </a>
-            {% endif %}
-        </div>
-    </div>
-
-    {% if messages %}
-        {% for message in messages %}
-        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-            {{ message }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-        {% endfor %}
-    {% endif %}
-
-    <div class="mb-3">
-        <label class="form-label fw-bold">Filtrar por estado:</label>
-        <div class="filtros-estado">
-            <div class="btn-group" role="group">
-                <a href="{% url 'pedidos-lista' %}" class="btn btn-outline-secondary btn-sm {% if not estado_filter %}active{% endif %}">Todos</a>
-                {% for value, label in estados %}
-                <a href="{% url 'pedidos-lista' %}?estado={{ value }}" class="btn btn-outline-secondary btn-sm {% if estado_filter == value %}active{% endif %}">{{ label }}</a>
-                {% endfor %}
+<!-- HEADER OSCURO -->
+<div class="pd-header">
+    <div class="pd-header-left">
+        <div>
+            <span class="pd-header-eyebrow">Almacén</span>
+            <div class="pd-header-title-row">
+                <h1 class="pd-header-num">Pedidos</h1>
             </div>
         </div>
     </div>
+    <div class="pd-header-actions">
+        {% if request.user|has_group:"Pedidos Supervisor" %}
+        <a href="{% url 'pedidos-reporte' %}" class="btn btn-sm btn-outline-light">
+            <i class="fas fa-chart-bar"></i> <span class="d-none d-sm-inline">Reporte</span>
+        </a>
+        {% endif %}
+        {% if request.user|has_group:"Pedidos Tienda" %}
+        <a href="{% url 'pedidos-crear' %}" class="btn btn-sm btn-success">
+            <i class="fas fa-plus"></i> <span class="d-none d-sm-inline">Nuevo Pedido</span>
+        </a>
+        {% endif %}
+    </div>
+</div>
 
-    <div class="table-responsive">
-    <table id="tablaPedidos" class="table table-striped table-hover" style="width:100%">
+{% if messages %}
+    {% for message in messages %}
+    <div class="alert alert-{{ message.tags }} alert-dismissible fade show mb-3" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+{% endif %}
+
+<!-- FILTRO POR ESTADO — chips semánticos de color -->
+<div class="pl-chips-wrap mb-3">
+    <span class="pl-chips-label">Estado</span>
+    <div class="pl-chips">
+        <a href="{% url 'pedidos-lista' %}" class="pl-chip pl-chip-todos {% if not estado_filter %}pl-chip-active{% endif %}">
+            Todos
+        </a>
+        {% for value, label in estados %}
+        <a href="{% url 'pedidos-lista' %}?estado={{ value }}"
+           class="pl-chip pl-chip-{{ value|lower }} {% if estado_filter == value %}pl-chip-active{% endif %}">
+            {{ label }}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- TABLA DE PEDIDOS -->
+<div class="pl-table-card">
+    <table id="tablaPedidos" class="table table-hover pl-tabla" style="width:100%">
         <thead>
             <tr>
                 <th>#</th>
                 {% if not es_tienda and not es_picker %}<th>Solicitante</th>{% endif %}
-                <th>Categoria</th>
-                <th>Condicion</th>
-                {% if not es_tienda and not es_picker %}<th>Deposito</th>{% endif %}
+                <th>Categoría</th>
+                <th>Condición</th>
+                {% if not es_tienda and not es_picker %}<th>Depósito</th>{% endif %}
                 <th>Estado</th>
                 {% if not es_tienda %}<th>Picker</th>{% endif %}
-                <th>Items</th>
-                <th>BO</th>
-                <th>Fecha Creacion</th>
-                {% if not es_tienda and not es_picker %}<th>Fecha Despacho</th>{% endif %}
+                <th class="text-center">Items</th>
+                <th class="text-center">BO</th>
+                <th>Creación</th>
+                {% if not es_tienda and not es_picker %}<th>Despacho</th>{% endif %}
                 <th>Acciones</th>
             </tr>
         </thead>
         <tbody>
             {% for pedido in pedidos %}
             <tr>
-                <td>{{ pedido.numero_pedido }}</td>
-                {% if not es_tienda and not es_picker %}<td>{{ pedido.solicitante.username|capfirst }}</td>{% endif %}
-                <td>
-                    {{ pedido.categoria|default:"-" }}
-                    {% if pedido.categoria_nombre %}<br><small class="text-muted">{{ pedido.categoria_nombre }}</small>{% endif %}
+                <td data-order="{{ pedido.numero_pedido }}" data-search="{{ pedido.numero_pedido }}">
+                    <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="pl-num-link">#{{ pedido.numero_pedido }}</a>
                 </td>
-                <td>{{ pedido.get_condicion_display|default:"-" }}</td>
-                {% if not es_tienda and not es_picker %}<td>{{ pedido.deposito|default:"-" }}</td>{% endif %}
+                {% if not es_tienda and not es_picker %}
+                <td>{{ pedido.solicitante.username|capfirst }}</td>
+                {% endif %}
+                <td>
+                    {% if pedido.categoria %}
+                        <span class="fw-semibold">{{ pedido.categoria }}</span>
+                        {% if pedido.categoria_nombre %}<br><small class="text-muted">{{ pedido.categoria_nombre }}</small>{% endif %}
+                    {% else %}<span class="text-muted">—</span>{% endif %}
+                </td>
+                <td>
+                    {% if pedido.condicion == 'URGENTE' %}
+                        <span class="badge bg-danger"><i class="fas fa-bolt me-1"></i>Urgente</span>
+                    {% elif pedido.condicion == 'SURTIDO' %}
+                        <span class="badge bg-success">Surtido</span>
+                    {% elif pedido.condicion == 'CLIENTE_RETIRA' %}
+                        <span class="badge bg-info text-dark">Cliente Retira</span>
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                {% if not es_tienda and not es_picker %}
+                <td><small class="text-muted">{{ pedido.deposito|default:"—" }}</small></td>
+                {% endif %}
                 <td>
                     {% if pedido.estado == 'PENDIENTE' %}
                         <span class="badge bg-warning text-dark">Pendiente</span>
                     {% elif pedido.estado == 'ASIGNADO' %}
-                        <span class="badge bg-secondary"><i class="fas fa-user-check"></i> Asignado</span>
+                        <span class="badge bg-secondary"><i class="fas fa-user-check me-1"></i>Asignado</span>
                     {% elif pedido.estado == 'PICKING' %}
-                        <span class="badge bg-info">Picking</span>
+                        <span class="badge bg-info text-dark">Picking</span>
                     {% elif pedido.estado == 'EN_PREPARACION' %}
-                        <span class="badge bg-warning text-dark"><i class="fas fa-boxes"></i> En Preparación</span>
+                        <span class="badge bg-warning text-dark"><i class="fas fa-boxes me-1"></i>En Preparación</span>
                     {% elif pedido.estado == 'DESPACHADO' %}
                         <span class="badge bg-primary">Despachado</span>
                     {% elif pedido.estado == 'PARCIAL' %}
-                        <span class="badge bg-orange text-dark" style="background-color:#fd7e14;">Parcial</span>
+                        <span class="badge" style="background-color:#fd7e14;">Parcial</span>
                     {% elif pedido.estado == 'RECIBIDO' %}
                         <span class="badge bg-success">Recibido</span>
                     {% elif pedido.estado == 'CERRADO' %}
                         <span class="badge bg-secondary">Cerrado</span>
                     {% elif pedido.estado == 'ANULADO' %}
-                        <span class="badge bg-danger"><i class="fas fa-ban"></i> Anulado</span>
+                        <span class="badge bg-danger"><i class="fas fa-ban me-1"></i>Anulado</span>
                     {% endif %}
                 </td>
                 {% if not es_tienda %}
@@ -139,50 +169,63 @@
                     {% endif %}
                 </td>
                 {% endif %}
-                <td>{{ pedido.items.count }}</td>
-                <td>
+                <td class="text-center">{{ pedido.items.count }}</td>
+                <td class="text-center">
                     {% if pedido.items_back_order > 0 %}
                         <span class="badge" style="background-color:#fd7e14;">{{ pedido.items_back_order }}</span>
                     {% else %}
                         <span class="text-muted">—</span>
                     {% endif %}
                 </td>
-                <td>{{ pedido.fecha_creacion|date:"d/m/Y H:i" }}</td>
-                {% if not es_tienda and not es_picker %}<td>{{ pedido.fecha_despacho|date:"d/m/Y H:i"|default:"-" }}</td>{% endif %}
+                <td data-order="{{ pedido.fecha_creacion|date:'U' }}">
+                    {{ pedido.fecha_creacion|date:"d/m/Y" }}<br>
+                    <small class="text-muted">{{ pedido.fecha_creacion|date:"H:i" }}</small>
+                </td>
+                {% if not es_tienda and not es_picker %}
+                <td data-order="{{ pedido.fecha_despacho|date:'U'|default:'0' }}">
+                    {% if pedido.fecha_despacho %}
+                    {{ pedido.fecha_despacho|date:"d/m/Y" }}<br>
+                    <small class="text-muted">{{ pedido.fecha_despacho|date:"H:i" }}</small>
+                    {% else %}<span class="text-muted">—</span>{% endif %}
+                </td>
+                {% endif %}
                 <td>
-                    <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-sm btn-outline-primary" title="Ver detalle">
-                        <i class="fas fa-eye"></i>
-                    </a>
-                    {% if pedido.estado == 'ASIGNADO' or pedido.estado == 'PICKING' or pedido.estado == 'EN_PREPARACION' %}
-                        {% if es_picker and pedido.picker == request.user %}
-                        <a href="{% url 'pedidos-preparar' pedido.numero_pedido %}" class="btn btn-sm btn-outline-warning" title="Preparar pedido">
-                            <i class="fas fa-boxes"></i>
-                        </a>
+                    <div class="pl-acciones">
+                        {% if pedido.estado == 'ASIGNADO' or pedido.estado == 'PICKING' or pedido.estado == 'EN_PREPARACION' %}
+                            {% if es_picker and pedido.picker == request.user %}
+                            <a href="{% url 'pedidos-preparar' pedido.numero_pedido %}" class="btn btn-sm btn-warning" title="Preparar pedido">
+                                <i class="fas fa-boxes"></i> <span class="d-none d-xl-inline">Preparar</span>
+                            </a>
+                            {% endif %}
                         {% endif %}
-                    {% endif %}
-                    {% if pedido.estado == 'PENDIENTE' or pedido.estado == 'ASIGNADO' or pedido.estado == 'PICKING' or pedido.estado == 'EN_PREPARACION' or pedido.estado == 'PARCIAL' %}
-                        {% if request.user|has_group:"Pedidos Almacen" %}
-                        <a href="{% url 'pedidos-despachar' pedido.numero_pedido %}" class="btn btn-sm btn-outline-success" title="{% if pedido.estado == 'PARCIAL' %}Despachar Back Orders{% else %}Despachar{% endif %}">
-                            <i class="fas fa-truck"></i>
-                        </a>
+                        {% if pedido.estado == 'PENDIENTE' or pedido.estado == 'ASIGNADO' or pedido.estado == 'PICKING' or pedido.estado == 'EN_PREPARACION' or pedido.estado == 'PARCIAL' %}
+                            {% if request.user|has_group:"Pedidos Almacen" %}
+                            <a href="{% url 'pedidos-despachar' pedido.numero_pedido %}"
+                               class="btn btn-sm btn-success"
+                               title="{% if pedido.estado == 'PARCIAL' %}Despachar Back Orders{% else %}Despachar{% endif %}">
+                                <i class="fas fa-truck"></i> <span class="d-none d-xl-inline">{% if pedido.estado == 'PARCIAL' %}BO{% else %}Despachar{% endif %}</span>
+                            </a>
+                            {% endif %}
                         {% endif %}
-                    {% endif %}
-                    {% if pedido.estado == 'DESPACHADO' or pedido.estado == 'PARCIAL' %}
-                        {% if request.user|has_group:"Pedidos Tienda" %}
-                        <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-sm btn-outline-info" title="Ver despachos para recibir">
-                            <i class="fas fa-box-open"></i>
-                        </a>
+                        {% if pedido.estado == 'DESPACHADO' or pedido.estado == 'PARCIAL' %}
+                            {% if request.user|has_group:"Pedidos Tienda" %}
+                            <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-sm btn-info" title="Ver despachos para recibir">
+                                <i class="fas fa-box-open"></i> <span class="d-none d-xl-inline">Recibir</span>
+                            </a>
+                            {% endif %}
                         {% endif %}
-                    {% endif %}
-                    <a href="{% url 'pedidos-pdf' pedido.numero_pedido %}" class="btn btn-sm btn-outline-danger" title="Descargar PDF">
-                        <i class="fas fa-file-pdf"></i>
-                    </a>
+                        <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-sm btn-outline-primary" title="Ver detalle">
+                            <i class="fas fa-eye"></i>
+                        </a>
+                        <a href="{% url 'pedidos-pdf' pedido.numero_pedido %}" class="btn btn-sm btn-outline-secondary" title="PDF">
+                            <i class="fas fa-file-pdf"></i>
+                        </a>
+                    </div>
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
-    </div>
 </div>
 
 {% if es_supervisor and pickers_disponibles %}
@@ -229,19 +272,252 @@ document.getElementById('modalAsignarPicker').addEventListener('show.bs.modal', 
 </script>
 {% endif %}
 
+<style>
+/* ── Sistema pd- — header (compartido con pedidos-detalle) ── */
+.pd-header {
+    background: #2e353d;
+    color: #fff;
+    border-radius: 12px;
+    padding: 1.1rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.25rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+}
+.pd-header-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+.pd-header-eyebrow {
+    display: block;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.45);
+    margin-bottom: 0.1rem;
+}
+.pd-header-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.pd-header-num {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: -0.01em;
+    line-height: 1;
+}
+.pd-header-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* ── Chips de estado — elemento firma ── */
+.pl-chips-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+.pl-chips-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: #adb5bd;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.pl-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+.pl-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.28em 0.85em;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-decoration: none;
+    border: 1.5px solid transparent;
+    transition: all 0.15s;
+    white-space: nowrap;
+    line-height: 1.5;
+}
+.pl-chip:hover { opacity: 0.82; text-decoration: none; }
+
+.pl-chip-todos          { background:#f1f3f5; color:#495057;  border-color:#dee2e6; }
+.pl-chip-todos.pl-chip-active          { background:#2e353d; color:#fff;    border-color:#2e353d; }
+.pl-chip-pendiente      { background:#fff8e7; color:#7a5c00;  border-color:#ffe88a; }
+.pl-chip-pendiente.pl-chip-active      { background:#ffc107; color:#000;    border-color:#ffc107; }
+.pl-chip-asignado       { background:#f4f5f6; color:#495057;  border-color:#dee2e6; }
+.pl-chip-asignado.pl-chip-active       { background:#6c757d; color:#fff;    border-color:#6c757d; }
+.pl-chip-picking        { background:#e5f8ff; color:#0277a8;  border-color:#b6e7ff; }
+.pl-chip-picking.pl-chip-active        { background:#0dcaf0; color:#000;    border-color:#0dcaf0; }
+.pl-chip-en_preparacion { background:#fff8e7; color:#7a5c00;  border-color:#ffe88a; }
+.pl-chip-en_preparacion.pl-chip-active { background:#ffc107; color:#000;    border-color:#ffc107; }
+.pl-chip-despachado     { background:#e8f0ff; color:#0a3d91;  border-color:#c1d4ff; }
+.pl-chip-despachado.pl-chip-active     { background:#0d6efd; color:#fff;    border-color:#0d6efd; }
+.pl-chip-parcial        { background:#fff3e5; color:#7a3d00;  border-color:#ffd6a5; }
+.pl-chip-parcial.pl-chip-active        { background:#fd7e14; color:#fff;    border-color:#fd7e14; }
+.pl-chip-recibido       { background:#e8f7ef; color:#0a5c2d;  border-color:#a8ddc2; }
+.pl-chip-recibido.pl-chip-active       { background:#198754; color:#fff;    border-color:#198754; }
+.pl-chip-cerrado        { background:#f4f5f6; color:#6c757d;  border-color:#dee2e6; }
+.pl-chip-cerrado.pl-chip-active        { background:#6c757d; color:#fff;    border-color:#6c757d; }
+.pl-chip-anulado        { background:#ffe8e8; color:#6d0000;  border-color:#ffb3b3; }
+.pl-chip-anulado.pl-chip-active        { background:#dc3545; color:#fff;    border-color:#dc3545; }
+
+/* ── Tarjeta de tabla ── */
+.pl-table-card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    overflow: hidden;
+    margin-bottom: 1.25rem;
+}
+
+/* ── DataTables: barra de búsqueda ── */
+.pl-dt-top {
+    padding: 0.75rem 1.25rem;
+    border-bottom: 1px solid #e9ecef;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+.pl-dt-top .dataTables_filter {
+    display: flex;
+    align-items: center;
+}
+.pl-dt-top .dataTables_filter label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6c757d;
+    margin: 0;
+    white-space: nowrap;
+}
+.pl-dt-top .dataTables_filter input {
+    border: 1.5px solid #e9ecef;
+    border-radius: 8px;
+    padding: 0.38rem 0.75rem;
+    font-size: 0.84rem;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    min-width: 200px;
+    color: #212529;
+    background: #fff;
+}
+.pl-dt-top .dataTables_filter input:focus {
+    border-color: #2e353d;
+    box-shadow: 0 0 0 3px rgba(46,53,61,0.1);
+}
+
+/* ── DataTables: pie (info + paginación) ── */
+.pl-dt-bot {
+    padding: 0.65rem 1.25rem;
+    border-top: 1px solid #e9ecef;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.pl-dt-bot .dataTables_info {
+    font-size: 0.78rem;
+    color: #6c757d;
+    padding: 0;
+}
+.pl-dt-bot .pagination { margin: 0; }
+.pl-dt-bot .page-link  { font-size: 0.8rem; padding: 0.3rem 0.6rem; }
+
+/* ── Tabla interna ── */
+.pl-tabla thead th {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6c757d;
+    background: #f8f9fa !important;
+    border-bottom: 2px solid #e9ecef !important;
+    padding: 0.6rem 0.75rem;
+    white-space: nowrap;
+}
+.pl-tabla tbody td {
+    font-size: 0.875rem;
+    vertical-align: middle;
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid #f4f6f8;
+}
+.pl-tabla tbody tr:last-child td { border-bottom: none; }
+.pl-tabla tbody tr:hover td { background: #f8f9fc; }
+
+/* Número de pedido — enlace visual prominente */
+.pl-num-link {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #1a56db;
+    text-decoration: none;
+    background: #e8f0ff;
+    padding: 0.15em 0.45em;
+    border-radius: 4px;
+    transition: background 0.15s;
+    white-space: nowrap;
+}
+.pl-num-link:hover {
+    background: #c1d4ff;
+    color: #0a3d91;
+    text-decoration: none;
+}
+
+/* Columna de acciones */
+.pl-acciones {
+    display: flex;
+    gap: 0.25rem;
+    align-items: center;
+    flex-wrap: nowrap;
+}
+
+/* ── Responsive ── */
+@media (max-width: 767px) {
+    .pd-header-num  { font-size: 1.25rem; }
+    .pd-header      { padding: 0.9rem 1rem; }
+    .pl-chips-wrap  { gap: 0.4rem; }
+    .pl-dt-top .dataTables_filter input { min-width: 140px; }
+    .pl-dt-top      { justify-content: stretch; }
+    .pl-dt-top .dataTables_filter,
+    .pl-dt-top .dataTables_filter input { width: 100%; }
+    .pl-dt-bot      { flex-direction: column; align-items: flex-start; }
+}
+</style>
+
 <script>
 $(document).ready(function() {
     $('#tablaPedidos').DataTable({
-        "language": {
-            "url": "/static/vendor/datatables/i18n/es-ES.json"
-        },
+        language: { url: "/static/vendor/datatables/i18n/es-ES.json" },
         paging: true,
         searching: true,
         ordering: true,
         info: true,
         lengthChange: false,
         order: [[0, 'desc']],
-        scrollX: true,
+        pageLength: 25,
+        dom: "<'pl-dt-top'f><'table-responsive'tr><'pl-dt-bot'ip>",
     });
 });
 </script>
