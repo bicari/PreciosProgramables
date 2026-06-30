@@ -2,314 +2,327 @@
 {% load permisos_tags %}
 {% block content %}
 {% load static %}
-<div class="container mt-4">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2><i class="fas fa-chart-bar me-2"></i>Reporte de Pedidos Almacen</h2>
-        <div class="d-flex gap-2">
-            <a href="{% url 'pedidos-reporte-pdf' %}?fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&categoria={{ categoria_filtro }}&condicion={{ condicion_filtro }}"
-               class="btn btn-danger">
-                <i class="fas fa-file-pdf"></i> Exportar PDF
+
+<!-- HEADER OSCURO -->
+<div class="pd-header">
+    <div class="pd-header-left">
+        <div>
+            <span class="pd-header-eyebrow">Almacén</span>
+            <div class="pd-header-title-row">
+                <h1 class="pd-header-num">Reporte de Pedidos</h1>
+            </div>
+        </div>
+    </div>
+    <div class="pd-header-actions">
+        <a href="{% url 'pedidos-reporte-pdf' %}?fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&categoria={{ categoria_filtro }}&condicion={{ condicion_filtro }}"
+           class="btn btn-sm btn-danger">
+            <i class="fas fa-file-pdf"></i> <span class="d-none d-sm-inline">Exportar PDF</span>
+        </a>
+        <a href="{% url 'pedidos-lista' %}" class="btn btn-sm btn-outline-light">
+            <i class="fas fa-arrow-left"></i> <span class="d-none d-sm-inline">Volver</span>
+        </a>
+    </div>
+</div>
+
+<!-- FILTROS -->
+<div class="pr-filter-card mb-4">
+    <div class="pr-filter-header">
+        <span class="pr-filter-label"><i class="fas fa-filter me-1"></i>Filtros</span>
+    </div>
+    <form method="get" class="pr-filter-body">
+        <div class="pr-filter-fields">
+            <div class="pr-filter-field">
+                <label class="pr-field-label">Fecha inicio</label>
+                <input type="date" name="fecha_inicio" class="form-control form-control-sm" value="{{ fecha_inicio }}">
+            </div>
+            <div class="pr-filter-field">
+                <label class="pr-field-label">Fecha fin</label>
+                <input type="date" name="fecha_fin" class="form-control form-control-sm" value="{{ fecha_fin }}">
+            </div>
+            <div class="pr-filter-field">
+                <label class="pr-field-label">Categoría</label>
+                <select name="categoria" class="form-select form-select-sm">
+                    <option value="">Todas</option>
+                    {% for cat in categorias_disponibles %}
+                    <option value="{{ cat }}" {% if categoria_filtro == cat %}selected{% endif %}>{{ cat }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="pr-filter-field">
+                <label class="pr-field-label">Condición</label>
+                <select name="condicion" class="form-select form-select-sm">
+                    <option value="">Todas</option>
+                    {% for value, label in condiciones %}
+                    <option value="{{ value }}" {% if condicion_filtro == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="pr-filter-actions">
+            <button type="submit" class="btn btn-sm btn-primary">
+                <i class="fas fa-search"></i> Aplicar
+            </button>
+            <a href="{% url 'pedidos-reporte' %}" class="btn btn-sm btn-outline-secondary" title="Limpiar filtros">
+                <i class="fas fa-times"></i>
             </a>
-            <a href="{% url 'pedidos-lista' %}" class="btn btn-outline-secondary">
-                <i class="fas fa-arrow-left"></i> Volver
+        </div>
+    </form>
+</div>
+
+<!-- KPIs — banda de cifras (firma visual del reporte) -->
+<div class="pr-kpi-strip mb-4">
+    <div class="pr-kpi">
+        <div class="pr-kpi-num">{{ total_pedidos }}</div>
+        <div class="pr-kpi-label">Total Pedidos</div>
+    </div>
+    <div class="pr-kpi-divider"></div>
+    <div class="pr-kpi">
+        <div class="pr-kpi-num">{{ total_solicitado }}</div>
+        <div class="pr-kpi-label">Uds. Solicitadas</div>
+    </div>
+    <div class="pr-kpi-divider"></div>
+    <div class="pr-kpi">
+        <div class="pr-kpi-num pr-kpi-num--green">{{ total_despachado }}</div>
+        <div class="pr-kpi-label">Uds. Despachadas</div>
+    </div>
+    <div class="pr-kpi-divider"></div>
+    <div class="pr-kpi">
+        <div class="pr-kpi-num pr-kpi-num--blue">{{ total_recibido }}</div>
+        <div class="pr-kpi-label">Uds. Recibidas</div>
+    </div>
+    <div class="pr-kpi-divider"></div>
+    <div class="pr-kpi">
+        <div class="pr-kpi-num {% if pct_incidencias > 20 %}pr-kpi-num--red{% elif pct_incidencias > 10 %}pr-kpi-num--amber{% else %}pr-kpi-num--green{% endif %}">{{ pct_incidencias }}%</div>
+        <div class="pr-kpi-label">Incidencias</div>
+        <div class="pr-kpi-sub">{{ pedidos_con_incidencia }} pedido{{ pedidos_con_incidencia|pluralize }}</div>
+    </div>
+</div>
+
+<!-- MÉTRICAS DESTACADAS -->
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="pr-metric-card">
+            <i class="fas fa-clock pr-metric-icon text-warning"></i>
+            <div class="pr-metric-title">Tiempo promedio de despacho</div>
+            {% if tiempo_horas is not None %}
+                <div class="pr-metric-value text-warning">{{ tiempo_horas }}h {{ tiempo_minutos }}m</div>
+                <div class="pr-metric-sub">desde creación hasta despacho</div>
+            {% else %}
+                <div class="pr-metric-empty">Sin datos suficientes</div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="pr-metric-card">
+            <i class="fas fa-tag pr-metric-icon text-primary"></i>
+            <div class="pr-metric-title">Categoría más despachada</div>
+            {% if categoria_top %}
+                <div class="pr-metric-value text-primary">{{ categoria_top.categoria_nombre|default:categoria_top.categoria }}</div>
+                <div class="pr-metric-sub">{{ categoria_top.total }} pedido{{ categoria_top.total|pluralize }}</div>
+            {% else %}
+                <div class="pr-metric-empty">Sin datos</div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="pr-metric-card">
+            <i class="fas fa-star pr-metric-icon text-danger"></i>
+            <div class="pr-metric-title">Condición más usada</div>
+            {% if condicion_top %}
+                {% if condicion_top.condicion == 'URGENTE' %}
+                    <div class="pr-metric-value text-danger">Urgente</div>
+                {% elif condicion_top.condicion == 'SURTIDO' %}
+                    <div class="pr-metric-value text-success">Surtido</div>
+                {% elif condicion_top.condicion == 'CLIENTE_RETIRA' %}
+                    <div class="pr-metric-value text-info">Cliente Retira</div>
+                {% else %}
+                    <div class="pr-metric-value">{{ condicion_top.condicion }}</div>
+                {% endif %}
+                <div class="pr-metric-sub">{{ condicion_top.total }} pedido{{ condicion_top.total|pluralize }}</div>
+            {% else %}
+                <div class="pr-metric-empty">Sin datos</div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="pr-metric-card {% if pct_incidencias > 20 %}pr-metric-card--danger{% elif pct_incidencias > 10 %}pr-metric-card--warning{% else %}pr-metric-card--ok{% endif %}">
+            <i class="fas fa-triangle-exclamation pr-metric-icon {% if pct_incidencias > 20 %}text-danger{% elif pct_incidencias > 10 %}text-warning{% else %}text-success{% endif %}"></i>
+            <div class="pr-metric-title">Incidencias</div>
+            <div class="pr-metric-value {% if pct_incidencias > 20 %}text-danger{% elif pct_incidencias > 10 %}text-warning{% else %}text-success{% endif %}">{{ pct_incidencias }}%</div>
+            <div class="pr-metric-sub">{{ pedidos_con_incidencia }} pedido{{ pedidos_con_incidencia|pluralize }} · {{ total_items_incidencia }} item{{ total_items_incidencia|pluralize }}</div>
+            <a href="{% url 'pedidos-reporte-incidencias' %}?fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}"
+               class="btn btn-sm btn-outline-warning mt-2 w-100">
+                <i class="fas fa-list me-1"></i>Ver detalle
             </a>
-        </div>
-    </div>
-
-    <!-- Filtros -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h6 class="mb-0"><i class="fas fa-filter me-1"></i>Filtros</h6>
-        </div>
-        <div class="card-body">
-            <form method="get" class="row g-3 align-items-end">
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">Fecha inicio</label>
-                    <input type="date" name="fecha_inicio" class="form-control" value="{{ fecha_inicio }}">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">Fecha fin</label>
-                    <input type="date" name="fecha_fin" class="form-control" value="{{ fecha_fin }}">
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label fw-semibold">Categoria</label>
-                    <select name="categoria" class="form-select">
-                        <option value="">Todas</option>
-                        {% for cat in categorias_disponibles %}
-                        <option value="{{ cat }}" {% if categoria_filtro == cat %}selected{% endif %}>{{ cat }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label fw-semibold">Condicion</label>
-                    <select name="condicion" class="form-select">
-                        <option value="">Todas</option>
-                        {% for value, label in condiciones %}
-                        <option value="{{ value }}" {% if condicion_filtro == value %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-2 d-flex gap-2">
-                    <button type="submit" class="btn btn-primary w-100">
-                        <i class="fas fa-search"></i> Aplicar
-                    </button>
-                    <a href="{% url 'pedidos-reporte' %}" class="btn btn-outline-secondary">
-                        <i class="fas fa-times"></i>
-                    </a>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- KPIs principales -->
-    <div class="row g-3 mb-4 align-items-stretch">
-        <div class="col">
-            <div class="card text-center border-primary h-100">
-                <div class="card-body d-flex flex-column justify-content-center">
-                    <div class="fs-1 fw-bold text-primary">{{ total_pedidos }}</div>
-                    <div class="text-muted small">Total Pedidos</div>
-                    <div class="mt-1 invisible"><span class="badge fs-6">&nbsp;</span></div>
-                </div>
-            </div>
-        </div>
-        <div class="col">
-            <div class="card text-center border-secondary h-100">
-                <div class="card-body d-flex flex-column justify-content-center">
-                    <div class="fs-1 fw-bold text-secondary">{{ total_solicitado }}</div>
-                    <div class="text-muted small">Unidades Solicitadas</div>
-                    <div class="mt-1 invisible"><span class="badge fs-6">&nbsp;</span></div>
-                </div>
-            </div>
-        </div>
-        <div class="col">
-            <div class="card text-center border-success h-100">
-                <div class="card-body d-flex flex-column justify-content-center">
-                    <div class="fs-1 fw-bold text-success">{{ total_despachado }}</div>
-                    <div class="text-muted small">Unidades Despachadas</div>
-                    <div class="mt-1 invisible"><span class="badge fs-6">&nbsp;</span></div>
-                </div>
-            </div>
-        </div>
-        <div class="col">
-            <div class="card text-center border-info h-100">
-                <div class="card-body d-flex flex-column justify-content-center">
-                    <div class="fs-1 fw-bold text-info">{{ total_recibido }}</div>
-                    <div class="text-muted small">Unidades Recibidas</div>
-                    <div class="mt-1 invisible"><span class="badge fs-6">&nbsp;</span></div>
-                </div>
-            </div>
-        </div>
-        <div class="col">
-            <div class="card text-center h-100 {% if pct_incidencias > 20 %}border-danger bg-danger bg-opacity-10{% elif pct_incidencias > 10 %}border-warning{% else %}border-success{% endif %}">
-                <div class="card-body d-flex flex-column justify-content-center">
-                    <div class="fs-1 fw-bold {% if pct_incidencias > 20 %}text-danger{% elif pct_incidencias > 10 %}text-warning{% else %}text-success{% endif %}">{{ pct_incidencias }}%</div>
-                    <div class="text-muted small">Pedidos con Incidencia</div>
-                    <div class="mt-1">
-                        <span class="badge {% if pct_incidencias > 20 %}bg-danger{% elif pct_incidencias > 10 %}bg-warning text-dark{% else %}bg-success{% endif %} fs-6">
-                            {{ pedidos_con_incidencia }} pedido{{ pedidos_con_incidencia|pluralize }}
-                        </span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Tiempo promedio + destacados -->
-    <div class="row g-3 mb-4">
-        <div class="col-md-3">
-            <div class="card h-100">
-                <div class="card-body text-center">
-                    <i class="fas fa-clock fa-2x text-warning mb-2"></i>
-                    <h6 class="card-title">Tiempo Promedio de Despacho</h6>
-                    {% if tiempo_horas is not None %}
-                        <div class="fs-3 fw-bold text-warning">{{ tiempo_horas }}h {{ tiempo_minutos }}m</div>
-                        <div class="text-muted small">desde creacion hasta despacho</div>
-                    {% else %}
-                        <div class="text-muted">Sin datos suficientes</div>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card h-100">
-                <div class="card-body text-center">
-                    <i class="fas fa-tag fa-2x text-primary mb-2"></i>
-                    <h6 class="card-title">Categoria Mas Despachada</h6>
-                    {% if categoria_top %}
-                        <div class="fs-5 fw-bold text-primary">{{ categoria_top.categoria }}</div>
-                        <div class="badge bg-primary mt-1">{{ categoria_top.total }} pedido{{ categoria_top.total|pluralize }}</div>
-                    {% else %}
-                        <div class="text-muted">Sin datos</div>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card h-100">
-                <div class="card-body text-center">
-                    <i class="fas fa-star fa-2x text-danger mb-2"></i>
-                    <h6 class="card-title">Condicion Mas Usada</h6>
-                    {% if condicion_top %}
-                        {% if condicion_top.condicion == 'URGENTE' %}
-                            <div class="fs-5 fw-bold text-danger">Urgente</div>
-                            <div class="badge bg-danger mt-1">{{ condicion_top.total }} pedido{{ condicion_top.total|pluralize }}</div>
-                        {% elif condicion_top.condicion == 'SURTIDO' %}
-                            <div class="fs-5 fw-bold text-success">Surtido</div>
-                            <div class="badge bg-success mt-1">{{ condicion_top.total }} pedido{{ condicion_top.total|pluralize }}</div>
-                        {% elif condicion_top.condicion == 'CLIENTE_RETIRA' %}
-                            <div class="fs-5 fw-bold text-info">Cliente Retira</div>
-                            <div class="badge bg-info mt-1">{{ condicion_top.total }} pedido{{ condicion_top.total|pluralize }}</div>
-                        {% else %}
-                            <div class="fs-5 fw-bold">{{ condicion_top.condicion }}</div>
-                            <div class="badge bg-secondary mt-1">{{ condicion_top.total }} pedido{{ condicion_top.total|pluralize }}</div>
-                        {% endif %}
-                    {% else %}
-                        <div class="text-muted">Sin datos</div>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card h-100 {% if pct_incidencias > 20 %}border-danger{% elif pct_incidencias > 10 %}border-warning{% else %}border-success{% endif %}">
-                <div class="card-body text-center">
-                    <i class="fas fa-triangle-exclamation fa-2x {% if pct_incidencias > 20 %}text-danger{% elif pct_incidencias > 10 %}text-warning{% else %}text-success{% endif %} mb-2"></i>
-                    <h6 class="card-title">Incidencias</h6>
-                    <div class="fs-3 fw-bold {% if pct_incidencias > 20 %}text-danger{% elif pct_incidencias > 10 %}text-warning{% else %}text-success{% endif %}">
-                        {{ pct_incidencias }}%
-                    </div>
-                    <div class="text-muted small">{{ pedidos_con_incidencia }} pedido{{ pedidos_con_incidencia|pluralize }} con incidencia</div>
-                    <div class="text-muted small">{{ total_items_incidencia }} item{{ total_items_incidencia|pluralize }} afectado{{ total_items_incidencia|pluralize }}</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Tablas de distribucion -->
-    <div class="row g-3">
-        <!-- Por estado -->
-        <div class="col-md-4">
-            <div class="card h-100">
-                <div class="card-header">
-                    <h6 class="mb-0"><i class="fas fa-list me-1"></i>Pedidos por Estado</h6>
-                </div>
-                <div class="card-body p-0">
-                    <table class="table table-sm mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Estado</th>
-                                <th class="text-end">Cantidad</th>
-                                <th class="text-end">%</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in por_estado %}
-                            <tr>
-                                <td>
-                                    {% if item.estado == 'PENDIENTE' %}
-                                        <span class="badge bg-warning text-dark">Pendiente</span>
-                                    {% elif item.estado == 'PICKING' %}
-                                        <span class="badge bg-info">Picking</span>
-                                    {% elif item.estado == 'DESPACHADO' %}
-                                        <span class="badge bg-primary">Despachado</span>
-                                    {% elif item.estado == 'RECIBIDO' %}
-                                        <span class="badge bg-success">Recibido</span>
-                                    {% elif item.estado == 'CERRADO' %}
-                                        <span class="badge bg-secondary">Cerrado</span>
-                                    {% else %}
-                                        <span class="badge bg-dark">{{ item.estado }}</span>
-                                    {% endif %}
-                                </td>
-                                <td class="text-end fw-bold">{{ item.total }}</td>
-                                <td class="text-end text-muted">
-                                    {% if total_pedidos %}
-                                        {% widthratio item.total total_pedidos 100 %}%
-                                    {% else %}0%{% endif %}
-                                </td>
-                            </tr>
-                            {% empty %}
-                            <tr><td colspan="3" class="text-center text-muted py-3">Sin datos</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- Por condicion -->
-        <div class="col-md-4">
-            <div class="card h-100">
-                <div class="card-header">
-                    <h6 class="mb-0"><i class="fas fa-exclamation-circle me-1"></i>Pedidos por Condicion</h6>
-                </div>
-                <div class="card-body p-0">
-                    <table class="table table-sm mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Condicion</th>
-                                <th class="text-end">Cantidad</th>
-                                <th class="text-end">%</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in por_condicion %}
-                            <tr>
-                                <td>
-                                    {% if item.condicion == 'URGENTE' %}
-                                        <span class="badge bg-danger">Urgente</span>
-                                    {% elif item.condicion == 'SURTIDO' %}
-                                        <span class="badge bg-success">Surtido</span>
-                                    {% elif item.condicion == 'CLIENTE_RETIRA' %}
-                                        <span class="badge bg-info">Cliente Retira</span>
-                                    {% else %}
-                                        <span class="badge bg-secondary">{{ item.condicion|default:"-" }}</span>
-                                    {% endif %}
-                                </td>
-                                <td class="text-end fw-bold">{{ item.total }}</td>
-                                <td class="text-end text-muted">
-                                    {% if total_pedidos %}
-                                        {% widthratio item.total total_pedidos 100 %}%
-                                    {% else %}0%{% endif %}
-                                </td>
-                            </tr>
-                            {% empty %}
-                            <tr><td colspan="3" class="text-center text-muted py-3">Sin datos</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- Top categorias -->
-        <div class="col-md-4">
-            <div class="card h-100">
-                <div class="card-header">
-                    <h6 class="mb-0"><i class="fas fa-tags me-1"></i>Top Categorias</h6>
-                </div>
-                <div class="card-body p-0">
-                    <table class="table table-sm mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Categoria</th>
-                                <th class="text-end">Pedidos</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in por_categoria %}
-                            <tr>
-                                <td>{{ item.categoria }}</td>
-                                <td class="text-end">
-                                    <span class="badge bg-primary rounded-pill">{{ item.total }}</span>
-                                </td>
-                            </tr>
-                            {% empty %}
-                            <tr><td colspan="2" class="text-center text-muted py-3">Sin datos</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
         </div>
     </div>
 </div>
+
+<!-- TABLAS DE DISTRIBUCIÓN -->
+<div class="row g-3">
+    <div class="col-md-4">
+        <div class="pl-table-card">
+            <div class="pr-dist-header">
+                <span class="pr-dist-title"><i class="fas fa-list me-1"></i>Pedidos por Estado</span>
+            </div>
+            <table class="table table-sm pl-tabla mb-0">
+                <thead>
+                    <tr>
+                        <th>Estado</th>
+                        <th class="text-end">Cant.</th>
+                        <th class="text-end">%</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in por_estado %}
+                    <tr>
+                        <td>
+                            {% if item.estado == 'PENDIENTE' %}<span class="badge bg-warning text-dark">Pendiente</span>
+                            {% elif item.estado == 'ASIGNADO' %}<span class="badge bg-secondary">Asignado</span>
+                            {% elif item.estado == 'PICKING' %}<span class="badge bg-info text-dark">Picking</span>
+                            {% elif item.estado == 'EN_PREPARACION' %}<span class="badge bg-warning text-dark">En Preparación</span>
+                            {% elif item.estado == 'DESPACHADO' %}<span class="badge bg-primary">Despachado</span>
+                            {% elif item.estado == 'PARCIAL' %}<span class="badge" style="background-color:#fd7e14;">Parcial</span>
+                            {% elif item.estado == 'RECIBIDO' %}<span class="badge bg-success">Recibido</span>
+                            {% elif item.estado == 'CERRADO' %}<span class="badge bg-secondary">Cerrado</span>
+                            {% elif item.estado == 'ANULADO' %}<span class="badge bg-danger">Anulado</span>
+                            {% else %}<span class="badge bg-dark">{{ item.estado }}</span>{% endif %}
+                        </td>
+                        <td class="text-end fw-bold">{{ item.total }}</td>
+                        <td class="text-end text-muted">
+                            {% if total_pedidos %}{% widthratio item.total total_pedidos 100 %}%{% else %}0%{% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="3" class="text-center text-muted py-3">Sin datos</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="pl-table-card">
+            <div class="pr-dist-header">
+                <span class="pr-dist-title"><i class="fas fa-exclamation-circle me-1"></i>Pedidos por Condición</span>
+            </div>
+            <table class="table table-sm pl-tabla mb-0">
+                <thead>
+                    <tr>
+                        <th>Condición</th>
+                        <th class="text-end">Cant.</th>
+                        <th class="text-end">%</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in por_condicion %}
+                    <tr>
+                        <td>
+                            {% if item.condicion == 'URGENTE' %}<span class="badge bg-danger">Urgente</span>
+                            {% elif item.condicion == 'SURTIDO' %}<span class="badge bg-success">Surtido</span>
+                            {% elif item.condicion == 'CLIENTE_RETIRA' %}<span class="badge bg-info text-dark">Cliente Retira</span>
+                            {% else %}<span class="badge bg-secondary">{{ item.condicion|default:"—" }}</span>{% endif %}
+                        </td>
+                        <td class="text-end fw-bold">{{ item.total }}</td>
+                        <td class="text-end text-muted">
+                            {% if total_pedidos %}{% widthratio item.total total_pedidos 100 %}%{% else %}0%{% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="3" class="text-center text-muted py-3">Sin datos</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="pl-table-card">
+            <div class="pr-dist-header">
+                <span class="pr-dist-title"><i class="fas fa-tags me-1"></i>Top Categorías</span>
+            </div>
+            <table class="table table-sm pl-tabla mb-0">
+                <thead>
+                    <tr>
+                        <th>Categoría</th>
+                        <th class="text-end">Pedidos</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in por_categoria %}
+                    <tr>
+                        <td>{{ item.categoria_nombre|default:item.categoria }}</td>
+                        <td class="text-end">
+                            <span class="badge bg-primary rounded-pill">{{ item.total }}</span>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="2" class="text-center text-muted py-3">Sin datos</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+/* ── pd-header (compartido) ── */
+.pd-header          { background:#2e353d; color:#fff; border-radius:12px; padding:1.1rem 1.5rem; display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1.25rem; box-shadow:0 2px 12px rgba(0,0,0,0.12); }
+.pd-header-left     { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
+.pd-header-eyebrow  { display:block; font-size:0.62rem; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:rgba(255,255,255,0.45); margin-bottom:0.1rem; }
+.pd-header-title-row{ display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; }
+.pd-header-num      { font-size:1.5rem; font-weight:700; margin:0; letter-spacing:-0.01em; line-height:1; }
+.pd-header-actions  { display:flex; gap:0.5rem; flex-wrap:wrap; }
+
+/* ── Filtros ── */
+.pr-filter-card     { background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,0.06); overflow:hidden; }
+.pr-filter-header   { padding:0.6rem 1.25rem; border-bottom:1px solid #e9ecef; background:#f8f9fa; }
+.pr-filter-label    { font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#6c757d; }
+.pr-filter-body     { padding:1rem 1.25rem; display:flex; align-items:flex-end; gap:1rem; flex-wrap:wrap; }
+.pr-filter-fields   { display:flex; gap:0.75rem; flex-wrap:wrap; flex:1; }
+.pr-filter-field    { display:flex; flex-direction:column; gap:0.25rem; min-width:130px; flex:1; }
+.pr-field-label     { font-size:0.72rem; font-weight:600; color:#495057; margin:0; }
+.pr-filter-actions  { display:flex; gap:0.5rem; align-items:flex-end; flex-shrink:0; }
+
+/* ── KPI strip — firma visual ── */
+.pr-kpi-strip       { background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,0.06); display:flex; align-items:stretch; flex-wrap:wrap; overflow:hidden; }
+.pr-kpi             { flex:1; padding:1.25rem 1.5rem; text-align:center; min-width:130px; }
+.pr-kpi-divider     { width:1px; background:#e9ecef; flex-shrink:0; margin:0.75rem 0; }
+.pr-kpi-num         { font-family:'Consolas','Courier New',monospace; font-size:2.1rem; font-weight:700; line-height:1; color:#2e353d; margin-bottom:0.3rem; }
+.pr-kpi-num--green  { color:#198754; }
+.pr-kpi-num--blue   { color:#0d6efd; }
+.pr-kpi-num--amber  { color:#d39e00; }
+.pr-kpi-num--red    { color:#dc3545; }
+.pr-kpi-label       { font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#adb5bd; }
+.pr-kpi-sub         { font-size:0.73rem; color:#6c757d; margin-top:0.2rem; }
+
+/* ── Métricas ── */
+.pr-metric-card             { background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,0.06); padding:1.25rem; text-align:center; height:100%; border-left:3px solid transparent; }
+.pr-metric-card--ok         { border-left-color:#198754; }
+.pr-metric-card--warning    { border-left-color:#ffc107; }
+.pr-metric-card--danger     { border-left-color:#dc3545; }
+.pr-metric-icon             { font-size:1.4rem; margin-bottom:0.45rem; display:block; }
+.pr-metric-title            { font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#adb5bd; margin-bottom:0.4rem; }
+.pr-metric-value            { font-family:'Consolas','Courier New',monospace; font-size:1.35rem; font-weight:700; line-height:1.2; margin-bottom:0.2rem; }
+.pr-metric-sub              { font-size:0.72rem; color:#6c757d; }
+.pr-metric-empty            { font-size:0.85rem; color:#adb5bd; font-style:italic; }
+
+/* ── Tablas de distribución ── */
+.pl-table-card      { background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,0.06); overflow:hidden; margin-bottom:0; }
+.pr-dist-header     { padding:0.6rem 1rem; border-bottom:1px solid #e9ecef; background:#f8f9fa; }
+.pr-dist-title      { font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#495057; }
+.pl-tabla thead th  { font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#6c757d; background:#f8f9fa !important; border-bottom:2px solid #e9ecef !important; padding:0.5rem 0.75rem; white-space:nowrap; }
+.pl-tabla tbody td  { font-size:0.875rem; vertical-align:middle; padding:0.5rem 0.75rem; border-bottom:1px solid #f4f6f8; }
+.pl-tabla tbody tr:last-child td { border-bottom:none; }
+.pl-tabla tbody tr:hover td { background:#f8f9fc; }
+
+/* ── Responsive ── */
+@media (max-width:767px) {
+    .pd-header-num  { font-size:1.25rem; }
+    .pd-header      { padding:0.9rem 1rem; }
+    .pr-kpi-num     { font-size:1.5rem; }
+    .pr-kpi         { padding:0.9rem 1rem; min-width:100px; }
+    .pr-kpi-divider { display:none; }
+}
+</style>
 {% endblock content %}
