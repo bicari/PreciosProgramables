@@ -347,6 +347,44 @@ class PedidosDBISAM:
         except Exception as e:
             raise pyodbc.DatabaseError(str(e))
 
+    def traslados_recepcion_existentes(self, numeros_pedido: list[int]) -> set[int]:
+        """
+        Verifica cuáles de los pedidos dados tienen registrado el traslado de
+        recepción (tránsito → destino) en a2 (SOPERACIONINV).
+
+        Args:
+            numeros_pedido: Números de pedido (PK de Pedido en Postgres) a
+                verificar.
+
+        Returns:
+            Conjunto de números de pedido que SÍ tienen el traslado
+            registrado en a2. Los ausentes del conjunto de entrada son los
+            problemáticos (recibidos en la app sin traslado en a2).
+
+        Raises:
+            pyodbc.DatabaseError: Si falla la conexión o la consulta.
+        """
+        if not numeros_pedido:
+            return set()
+
+        TAMANO_LOTE = 200
+        encontrados: set[int] = set()
+        try:
+            with self.connect() as conn:
+                for i in range(0, len(numeros_pedido), TAMANO_LOTE):
+                    lote = numeros_pedido[i:i + TAMANO_LOTE]
+                    docs_str = ','.join(f"'{str(n).rjust(8, '0')}'" for n in lote)
+                    with conn.cursor() as cursor:
+                        rows = cursor.execute(f"""SELECT DISTINCT FTI_DOCUMENTO
+                                                FROM SOPERACIONINV
+                                                WHERE FTI_TIPO = 1
+                                                  AND FTI_DEPOSITOSOURCE = {DEPOSITO_TRANSITO}
+                                                  AND FTI_DOCUMENTO IN ({docs_str})""").fetchall()
+                        encontrados.update(int(row.FTI_DOCUMENTO) for row in rows)
+            return encontrados
+        except Exception as e:
+            raise pyodbc.DatabaseError(str(e))
+
     def insertar_traslado_despacho(
         self,
         numero_despacho: int,

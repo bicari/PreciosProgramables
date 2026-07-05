@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from types import SimpleNamespace as NS
 from unittest.mock import patch, MagicMock
@@ -695,3 +696,186 @@ class ReasignarPickerParcialTemplateTest(TestCase):
         self.client.force_login(self.tienda)
         resp = self.client.get(self.reverse('pedidos-lista'))
         self.assertNotContains(resp, 'Reasignar picker')
+
+
+class CrearPedidoStockTest(TestCase):
+    """La vista crear_pedido revalida stock en depósito 1 antes de persistir el pedido."""
+
+    def setUp(self):
+        from users.models import User
+        from django.urls import reverse
+        self.reverse = reverse
+        self.user = User.objects.create_superuser(username='stock_u', password='x')
+        self.client.force_login(self.user)
+        self.url = self.reverse('pedidos-crear')
+        self.items = [
+            {'codigo': 'SKU1', 'descripcion': 'Producto Uno', 'cantidad': '5',
+             'referencia': '', 'puesto': '', 'ref_proveedor': ''},
+        ]
+        self.form_data = {
+            'categoria': 'CAT1',
+            'categoria_nombre': 'Categoría 1',
+            'condicion': 'URGENTE',
+            'deposito': '2',
+            'deposito_nombre': 'Tienda Norte',
+            'items_json': json.dumps(self.items),
+        }
+
+    def _post(self, mock_stock):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.obtener_categorias.return_value = []
+            mock_db.return_value.consultar_stock_multiple.return_value = mock_stock
+            resp = self.client.post(self.url, self.form_data)
+        return resp
+
+    def test_stock_insuficiente_rechaza_pedido(self):
+        """Cantidad solicitada > stock → no se crea el Pedido y se rehydrata el carrito."""
+        from .models import Pedido
+        resp = self._post({'SKU1': 3})  # stock=3, solicitado=5
+        self.assertEqual(Pedido.objects.count(), 0)
+        self.assertEqual(resp.status_code, 200)
+        # El contexto incluye los datos para rehydratar el carrito en el frontend
+        self.assertIn('items_json_inicial', resp.context)
+        self.assertIn('stock_info_json', resp.context)
+
+    def test_stock_suficiente_crea_pedido(self):
+        """Cantidad solicitada ≤ stock disponible → el Pedido se crea."""
+        from .models import Pedido
+        resp = self._post({'SKU1': 10})  # stock=10, solicitado=5
+        self.assertEqual(Pedido.objects.count(), 1)
+        self.assertEqual(resp.status_code, 302)
+
+    def test_fallo_dbisam_no_bloquea_creacion(self):
+        """Si DBISAM no responde, se emite warning pero el pedido se crea igual."""
+        from .models import Pedido
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.obtener_categorias.return_value = []
+            mock_db.return_value.consultar_stock_multiple.side_effect = Exception('odbc down')
+            resp = self.client.post(self.url, self.form_data)
+        self.assertEqual(Pedido.objects.count(), 1)
+        self.assertEqual(resp.status_code, 302)
+
+    def test_sin_existencia_rechaza_pedido(self):
+        """Producto con stock=0 y cantidad>0 → pedido rechazado con contexto de rehydratación."""
+        from .models import Pedido
+        resp = self._post({'SKU1': 0})  # stock=0, solicitado=5
+        self.assertEqual(Pedido.objects.count(), 0)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('items_json_inicial', resp.context)
+
+
+class ApiCrearDespachoStockTest(TestCase):
+    """api_crear_despacho valida stock en depósito 1 igual que la vista clásica."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        self.user = User.objects.create_superuser(username='api_stock_u', password='x')
+        # La API usa TokenAuthentication; force_authenticate omite la capa de auth
+        self.api_client = APIClient()
+        self.api_client.force_authenticate(user=self.user)
+        self.pedido = Pedido.objects.create(solicitante=self.user, estado='PENDIENTE')
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido,
+            codigo='SKU1',
+            descripcion='Producto Uno',
+            cantidad_solicitada=10,
+            estado='PENDIENTE',
+        )
+        self.url = '/api/despachos/crear/'
+
+    def _post(self, cantidad_despachada, mock_stock=None, dbisam_error=None):
+        payload = {
+            'pedido_id': self.pedido.numero_pedido,
+            'items': [{'pedido_item_id': self.item.id, 'cantidad_despachada': cantidad_despachada}],
+        }
+        with patch('PedidosAlmacen.api_views.PedidosDBISAM') as mock_db:
+            if dbisam_error:
+                mock_db.return_value.consultar_stock_multiple.side_effect = dbisam_error
+            else:
+                mock_db.return_value.consultar_stock_multiple.return_value = mock_stock
+            resp = self.api_client.post(self.url, data=payload, format='json')
+        return resp
+
+    def test_cantidad_excede_stock_retorna_400(self):
+        """cantidad_despachada > stock disponible → 400 y no se crea el Despacho."""
+        from .models import Despacho
+        resp = self._post(cantidad_despachada=5, mock_stock={'SKU1': 3})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('error', resp.json())
+        self.assertEqual(Despacho.objects.count(), 0)
+
+    def test_cantidad_igual_a_stock_retorna_201(self):
+        """cantidad_despachada ≤ stock disponible → 201 y Despacho creado."""
+        from .models import Despacho
+        resp = self._post(cantidad_despachada=5, mock_stock={'SKU1': 10})
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(Despacho.objects.count(), 1)
+
+    def test_fallo_dbisam_retorna_502(self):
+        """Si DBISAM no responde, la API retorna 502 (a diferencia de la vista clásica)."""
+        from .models import Despacho
+        resp = self._post(cantidad_despachada=5, dbisam_error=Exception('odbc down'))
+        self.assertEqual(resp.status_code, 502)
+        self.assertIn('error', resp.json())
+        self.assertEqual(Despacho.objects.count(), 0)
+
+    def test_sin_existencia_retorna_400(self):
+        """Producto con stock=0 en SINVDEP → 400."""
+        from .models import Despacho
+        resp = self._post(cantidad_despachada=1, mock_stock={'SKU1': 0})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(Despacho.objects.count(), 0)
+
+
+class TrasladosRecepcionExistentesTest(TestCase):
+    def _mock_cursor(self, mock_connect):
+        conn = mock_connect.return_value.__enter__.return_value
+        return conn.cursor.return_value.__enter__.return_value
+
+    def test_devuelve_documentos_encontrados_como_enteros(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = self._mock_cursor(mock_connect)
+            cursor.execute.return_value.fetchall.return_value = [
+                NS(FTI_DOCUMENTO='00001234'),
+                NS(FTI_DOCUMENTO='00005678'),
+            ]
+            resultado = db.traslados_recepcion_existentes([1234, 5678, 9999])
+        self.assertEqual(resultado, {1234, 5678})
+
+    def test_lista_vacia_no_consulta_bd(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            resultado = db.traslados_recepcion_existentes([])
+        self.assertEqual(resultado, set())
+        mock_connect.assert_not_called()
+
+    def test_sql_filtra_tipo_y_deposito_transito(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = self._mock_cursor(mock_connect)
+            cursor.execute.return_value.fetchall.return_value = []
+            db.traslados_recepcion_existentes([1234])
+            sql = cursor.execute.call_args[0][0]
+        self.assertIn('FTI_TIPO = 1', sql)
+        self.assertIn('FTI_DEPOSITOSOURCE = 10', sql)
+        self.assertIn("'00001234'", sql)
+
+    def test_pagina_en_lotes_de_200(self):
+        db = PedidosDBISAM()
+        numeros = list(range(1, 251))  # 250 números > 1 lote de 200
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = self._mock_cursor(mock_connect)
+            cursor.execute.return_value.fetchall.return_value = []
+            db.traslados_recepcion_existentes(numeros)
+        self.assertEqual(cursor.execute.call_count, 2)
+
+    def test_error_dbisam_propaga_databaseerror(self):
+        import pyodbc
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            mock_connect.side_effect = Exception('odbc down')
+            with self.assertRaises(pyodbc.DatabaseError):
+                db.traslados_recepcion_existentes([1234])
