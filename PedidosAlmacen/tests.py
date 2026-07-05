@@ -879,3 +879,110 @@ class TrasladosRecepcionExistentesTest(TestCase):
             mock_connect.side_effect = Exception('odbc down')
             with self.assertRaises(pyodbc.DatabaseError):
                 db.traslados_recepcion_existentes([1234])
+
+
+from io import StringIO
+from django.core.management import call_command
+
+
+class ValidarTrasladosRecepcionCommandTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        self.user = User.objects.create_superuser(username='cmd_valtras', password='x')
+
+    def _crear_pedido_recibido(self, deposito_codigo=2, estado_despacho='RECIBIDO'):
+        from .models import Pedido, Despacho
+        pedido = Pedido.objects.create(
+            solicitante=self.user, estado='RECIBIDO', deposito_codigo=deposito_codigo,
+        )
+        Despacho.objects.create(pedido=pedido, estado=estado_despacho)
+        return pedido
+
+    @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
+    def test_detecta_pedido_sin_traslado(self, mock_db):
+        pedido = self._crear_pedido_recibido()
+        mock_db.return_value.traslados_recepcion_existentes.return_value = set()
+
+        out = StringIO()
+        call_command('validar_traslados_recepcion', stdout=out)
+
+        salida = out.getvalue()
+        self.assertIn(f'#{pedido.numero_pedido}', salida)
+        self.assertIn('1 de 1 pedidos sin traslado', salida)
+
+    @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
+    def test_no_reporta_pedido_con_traslado_ok(self, mock_db):
+        pedido = self._crear_pedido_recibido()
+        mock_db.return_value.traslados_recepcion_existentes.return_value = {pedido.numero_pedido}
+
+        out = StringIO()
+        call_command('validar_traslados_recepcion', stdout=out)
+
+        salida = out.getvalue()
+        self.assertNotIn(f'#{pedido.numero_pedido}', salida)
+        self.assertIn('0 de 1 pedidos sin traslado', salida)
+
+    @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
+    def test_sin_candidatos_no_consulta_dbisam(self, mock_db):
+        out = StringIO()
+        call_command('validar_traslados_recepcion', stdout=out)
+
+        self.assertIn('No hay pedidos candidatos', out.getvalue())
+        mock_db.assert_not_called()
+
+    @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
+    def test_filtro_pedido_ignora_otros(self, mock_db):
+        p1 = self._crear_pedido_recibido()
+        p2 = self._crear_pedido_recibido()
+        mock_db.return_value.traslados_recepcion_existentes.return_value = set()
+
+        out = StringIO()
+        call_command('validar_traslados_recepcion', '--pedido', str(p1.numero_pedido), stdout=out)
+
+        salida = out.getvalue()
+        self.assertIn(f'#{p1.numero_pedido}', salida)
+        self.assertNotIn(f'#{p2.numero_pedido}', salida)
+        mock_db.return_value.traslados_recepcion_existentes.assert_called_once_with([p1.numero_pedido])
+
+    @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
+    def test_filtro_dias_excluye_antiguos(self, mock_db):
+        from django.utils import timezone
+        from datetime import timedelta
+
+        reciente = self._crear_pedido_recibido()
+        reciente.fecha_recepcion = timezone.now()
+        reciente.save()
+
+        antiguo = self._crear_pedido_recibido()
+        antiguo.fecha_recepcion = timezone.now() - timedelta(days=100)
+        antiguo.save()
+
+        mock_db.return_value.traslados_recepcion_existentes.return_value = set()
+
+        out = StringIO()
+        call_command('validar_traslados_recepcion', '--dias', '30', stdout=out)
+
+        salida = out.getvalue()
+        self.assertIn(f'#{reciente.numero_pedido}', salida)
+        self.assertNotIn(f'#{antiguo.numero_pedido}', salida)
+
+    @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
+    def test_pedido_sin_deposito_codigo_se_excluye(self, mock_db):
+        self._crear_pedido_recibido(deposito_codigo=None)
+
+        out = StringIO()
+        call_command('validar_traslados_recepcion', stdout=out)
+
+        self.assertIn('No hay pedidos candidatos', out.getvalue())
+        mock_db.assert_not_called()
+
+    @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
+    def test_error_dbisam_no_rompe_comando(self, mock_db):
+        self._crear_pedido_recibido()
+        mock_db.return_value.traslados_recepcion_existentes.side_effect = Exception('odbc down')
+
+        out = StringIO()
+        err = StringIO()
+        call_command('validar_traslados_recepcion', stdout=out, stderr=err)
+
+        self.assertIn('Error al consultar a2', err.getvalue())
