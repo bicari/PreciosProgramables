@@ -161,3 +161,81 @@ class SemillasTest(TestCase):
         from .models import obtener_plantilla
         with self.assertRaises(ValueError):
             obtener_plantilla('factura')
+
+
+class GeneracionTest(TestCase):
+    def setUp(self):
+        from .semillas import SEMILLAS
+        self.definicion_ok = SEMILLAS['despacho']
+        # plantilla rota: referencia un parámetro inexistente
+        self.definicion_rota = {
+            **self.definicion_ok,
+            'docElements': [dict(self.definicion_ok['docElements'][0],
+                                 content='${parametro_inexistente}')],
+        }
+
+    def test_sin_plantilla_activa_devuelve_none(self):
+        from .contratos import datos_ejemplo
+        from .generacion import generar_pdf
+        self.assertIsNone(generar_pdf('despacho', datos_ejemplo('despacho')))
+
+    def test_plantilla_activa_genera_pdf(self):
+        from .contratos import datos_ejemplo
+        from .generacion import generar_pdf
+        PlantillaImpresion.objects.create(
+            tipo='despacho', definicion=self.definicion_ok, activa=True)
+        pdf = generar_pdf('despacho', datos_ejemplo('despacho'))
+        self.assertTrue(bytes(pdf).startswith(b'%PDF'))
+
+    def test_plantilla_rota_devuelve_none_sin_lanzar(self):
+        from .contratos import datos_ejemplo
+        from .generacion import generar_pdf
+        PlantillaImpresion.objects.create(
+            tipo='despacho', definicion=self.definicion_rota, activa=True)
+        self.assertIsNone(generar_pdf('despacho', datos_ejemplo('despacho')))
+
+    def test_validar_plantilla(self):
+        from .contratos import datos_ejemplo
+        from .generacion import validar_plantilla
+        self.assertEqual(
+            validar_plantilla(self.definicion_ok, datos_ejemplo('despacho')), '')
+        self.assertNotEqual(
+            validar_plantilla(self.definicion_rota, datos_ejemplo('despacho')), '')
+
+
+class ExportarConFallbackTest(TestCase):
+    """La vista de exportación usa ReportBro si hay plantilla activa; si no, reportlab."""
+
+    def setUp(self):
+        from PedidosAlmacen.models import Pedido, PedidoItem, Despacho, DespachoItem
+        self.user = User.objects.create_superuser(username='fmt_export', password='x')
+        self.client.force_login(self.user)
+        self.pedido = Pedido.objects.create(solicitante=self.user)
+        item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='A1', descripcion='Taza',
+            cantidad_solicitada=5, cantidad_despachada=5)
+        self.despacho = Despacho.objects.create(pedido=self.pedido, estado='ENVIADO')
+        DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=item, cantidad_despachada=5)
+        from django.urls import reverse
+        self.url = reverse('pedidos-despacho-pdf',
+                           args=[self.pedido.numero_pedido, self.despacho.numero_despacho])
+
+    def test_sin_plantilla_usa_reportlab(self):
+        from unittest.mock import patch
+        with patch('PedidosAlmacen.views.generar_despacho_pdf',
+                   return_value=b'%PDF-fallback') as mock_rl:
+            resp = self.client.get(self.url)
+        mock_rl.assert_called_once()
+        self.assertEqual(resp['Content-Type'], 'application/pdf')
+
+    def test_con_plantilla_activa_usa_reportbro(self):
+        from unittest.mock import patch
+        from .semillas import SEMILLAS
+        PlantillaImpresion.objects.create(
+            tipo='despacho', definicion=SEMILLAS['despacho'], activa=True)
+        with patch('PedidosAlmacen.views.generar_despacho_pdf') as mock_rl:
+            resp = self.client.get(self.url)
+        mock_rl.assert_not_called()
+        self.assertEqual(resp['Content-Type'], 'application/pdf')
+        self.assertTrue(resp.content.startswith(b'%PDF'))

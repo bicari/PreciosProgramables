@@ -1108,7 +1108,11 @@ def exportar_despacho_pdf(request, pk, despacho_id):
     despacho = get_object_or_404(Despacho, numero_despacho=despacho_id, pedido=pedido)
     despacho_items = despacho.items.select_related('pedido_item')
 
-    pdf_bytes = generar_despacho_pdf(despacho, despacho_items)
+    from formatos.contratos import datos_despacho
+    from formatos.generacion import generar_pdf as generar_pdf_formato
+    pdf_bytes = generar_pdf_formato('despacho', datos_despacho(despacho, despacho_items))
+    if pdf_bytes is None:
+        pdf_bytes = generar_despacho_pdf(despacho, despacho_items)
     nombre_archivo = f"despacho_{despacho_id}_pedido_{pk}.pdf"
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
@@ -1487,7 +1491,13 @@ def exportar_pedido_pdf(request, pk):
         items = items.filter(estado=estado_filtro)
 
     mostrar_cantidades = is_pedidos_almacen(request.user) or is_pedidos_supervisor(request.user)
-    pdf_bytes = generar_pedido_pdf(pedido, items, vista=vista, mostrar_cantidades=mostrar_cantidades)
+    pdf_bytes = None
+    if vista == 'todos':
+        from formatos.contratos import datos_pedido
+        from formatos.generacion import generar_pdf as generar_pdf_formato
+        pdf_bytes = generar_pdf_formato('pedido', datos_pedido(pedido, items))
+    if pdf_bytes is None:
+        pdf_bytes = generar_pedido_pdf(pedido, items, vista=vista, mostrar_cantidades=mostrar_cantidades)
 
     sufijo = '' if vista == 'todos' else f'_{vista}'
     nombre_archivo = f"pedido_{pedido.numero_pedido}{sufijo}.pdf"
