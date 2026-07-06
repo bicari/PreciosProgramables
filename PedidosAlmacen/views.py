@@ -933,127 +933,140 @@ def recibir_despacho(request, pk, despacho_id):
         hay_incidencia = False
 
         # ── Procesar items normales y con producto erróneo ───────────────────
-        for di in despacho_items:
-            try:
-                cantidad_recibida = int(request.POST.get(f'recibido_{di.id}', '0'))
-            except ValueError:
-                cantidad_recibida = 0
-            observacion = request.POST.get(f'observacion_{di.id}', '')
-            tipo_inc = request.POST.get(f'tipo_incidencia_{di.id}', '')
+        try:
+            with transaction.atomic():
+                for di in despacho_items:
+                    try:
+                        cantidad_recibida = int(request.POST.get(f'recibido_{di.id}', '0'))
+                    except ValueError:
+                        cantidad_recibida = 0
+                    observacion = request.POST.get(f'observacion_{di.id}', '')
+                    tipo_inc = request.POST.get(f'tipo_incidencia_{di.id}', '')
 
-            di.cantidad_recibida = cantidad_recibida
-            di.observacion = observacion
+                    di.cantidad_recibida = cantidad_recibida
+                    di.observacion = observacion
 
-            if tipo_inc == 'PRODUCTO_ERRONEO':
-                di.tipo_incidencia = 'PRODUCTO_ERRONEO'
-                di.codigo_real = request.POST.get(f'codigo_real_{di.id}', '').strip()
-                di.descripcion_real = request.POST.get(f'descripcion_real_{di.id}', '').strip()
-                di.autorizado_por = auth_user
-                di.foto_incidencia = request.FILES.get(f'foto_{di.id}')
-                hay_incidencia = True
-            elif cantidad_recibida < di.cantidad_despachada:
-                di.tipo_incidencia = 'CANTIDAD_MENOR'
-                hay_incidencia = True
-            elif cantidad_recibida > di.cantidad_despachada:
-                di.tipo_incidencia = 'CANTIDAD_MAYOR'
-                hay_incidencia = True
-            di.save()
+                    if tipo_inc == 'PRODUCTO_ERRONEO':
+                        di.tipo_incidencia = 'PRODUCTO_ERRONEO'
+                        di.codigo_real = request.POST.get(f'codigo_real_{di.id}', '').strip()
+                        di.descripcion_real = request.POST.get(f'descripcion_real_{di.id}', '').strip()
+                        di.autorizado_por = auth_user
+                        di.foto_incidencia = request.FILES.get(f'foto_{di.id}')
+                        hay_incidencia = True
+                    elif cantidad_recibida < di.cantidad_despachada:
+                        di.tipo_incidencia = 'CANTIDAD_MENOR'
+                        hay_incidencia = True
+                    elif cantidad_recibida > di.cantidad_despachada:
+                        di.tipo_incidencia = 'CANTIDAD_MAYOR'
+                        hay_incidencia = True
+                    di.save()
 
-            item = di.pedido_item
-            item.cantidad_recibida = (item.cantidad_recibida or 0) + cantidad_recibida
-            item.observacion = observacion
+                    item = di.pedido_item
+                    item.cantidad_recibida = (item.cantidad_recibida or 0) + cantidad_recibida
+                    item.observacion = observacion
 
-            if tipo_inc == 'PRODUCTO_ERRONEO':
-                item.estado = 'INCIDENCIA'
-            elif item.cantidad_recibida >= item.cantidad_solicitada:
-                item.estado = 'RECIBIDO'
-            elif item.cantidad_back_order > 0:
-                item.estado = 'BACK_ORDER'
-            else:
-                tiene_otros_enviados = DespachoItem.objects.filter(
-                    pedido_item=item, despacho__estado='ENVIADO',
-                ).exclude(despacho=despacho).exists()
-                if tiene_otros_enviados:
-                    item.estado = 'DESPACHADO'
-                elif item.cantidad_recibida < item.cantidad_despachada:
-                    item.estado = 'INCIDENCIA'
-                else:
-                    item.estado = 'RECIBIDO'
-            item.save()
+                    if tipo_inc == 'PRODUCTO_ERRONEO':
+                        item.estado = 'INCIDENCIA'
+                    elif item.cantidad_recibida >= item.cantidad_solicitada:
+                        item.estado = 'RECIBIDO'
+                    elif item.cantidad_back_order > 0:
+                        item.estado = 'BACK_ORDER'
+                    else:
+                        tiene_otros_enviados = DespachoItem.objects.filter(
+                            pedido_item=item, despacho__estado='ENVIADO',
+                        ).exclude(despacho=despacho).exists()
+                        if tiene_otros_enviados:
+                            item.estado = 'DESPACHADO'
+                        elif item.cantidad_recibida < item.cantidad_despachada:
+                            item.estado = 'INCIDENCIA'
+                        else:
+                            item.estado = 'RECIBIDO'
+                    item.save()
 
-            if cantidad_recibida > 0:
-                codigo_traslado = di.codigo_real if tipo_inc == 'PRODUCTO_ERRONEO' and di.codigo_real else item.codigo
-                items_traslado.append({'codigo': codigo_traslado, 'cantidad': cantidad_recibida})
+                    if cantidad_recibida > 0:
+                        codigo_traslado = di.codigo_real if tipo_inc == 'PRODUCTO_ERRONEO' and di.codigo_real else item.codigo
+                        items_traslado.append({'codigo': codigo_traslado, 'cantidad': cantidad_recibida})
 
-        # ── Procesar SKUs no contemplados ────────────────────────────────────
-        if tiene_sku_extra:
-            extras = productos_extra_parsed
+                # ── Procesar SKUs no contemplados ────────────────────────────────────
+                if tiene_sku_extra:
+                    extras = productos_extra_parsed
 
-            for extra in extras:
-                codigo = str(extra.get('codigo', '')).strip()
-                descripcion = str(extra.get('descripcion', '')).strip()
-                try:
-                    cantidad = int(extra.get('cantidad', 0))
-                except (ValueError, TypeError):
-                    cantidad = 0
+                    for extra in extras:
+                        codigo = str(extra.get('codigo', '')).strip()
+                        descripcion = str(extra.get('descripcion', '')).strip()
+                        try:
+                            cantidad = int(extra.get('cantidad', 0))
+                        except (ValueError, TypeError):
+                            cantidad = 0
 
-                if not codigo or cantidad <= 0:
-                    continue
+                        if not codigo or cantidad <= 0:
+                            continue
 
-                # Crear PedidoItem ficticio para trazabilidad
-                nuevo_item = PedidoItem.objects.create(
-                    pedido=pedido,
-                    codigo=codigo,
-                    descripcion=descripcion,
-                    cantidad_solicitada=0,
-                    cantidad_despachada=cantidad,
-                    cantidad_recibida=cantidad,
-                    estado='INCIDENCIA',
-                    observacion='SKU no contemplado en el pedido original',
-                )
-                di_extra = DespachoItem(
-                    despacho=despacho,
-                    pedido_item=nuevo_item,
-                    cantidad_despachada=cantidad,
-                    cantidad_recibida=cantidad,
-                    tipo_incidencia='SKU_NO_CONTEMPLADO',
-                    autorizado_por=auth_user,
-                )
-                if foto_extras:
-                    di_extra.foto_incidencia = foto_extras
-                di_extra.save()
-                items_traslado.append({'codigo': codigo, 'cantidad': cantidad})
-                hay_incidencia = True
+                        # Crear PedidoItem ficticio para trazabilidad
+                        nuevo_item = PedidoItem.objects.create(
+                            pedido=pedido,
+                            codigo=codigo,
+                            descripcion=descripcion,
+                            cantidad_solicitada=0,
+                            cantidad_despachada=cantidad,
+                            cantidad_recibida=cantidad,
+                            estado='INCIDENCIA',
+                            observacion='SKU no contemplado en el pedido original',
+                        )
+                        di_extra = DespachoItem(
+                            despacho=despacho,
+                            pedido_item=nuevo_item,
+                            cantidad_despachada=cantidad,
+                            cantidad_recibida=cantidad,
+                            tipo_incidencia='SKU_NO_CONTEMPLADO',
+                            autorizado_por=auth_user,
+                        )
+                        if foto_extras:
+                            di_extra.foto_incidencia = foto_extras
+                        di_extra.save()
+                        items_traslado.append({'codigo': codigo, 'cantidad': cantidad})
+                        hay_incidencia = True
 
-        despacho.receptor = request.user
-        despacho.fecha_recepcion = datetime.now()
-        despacho.estado = 'PARCIAL' if hay_incidencia else 'RECIBIDO'
-        despacho.save()
+                despacho.receptor = request.user
+                despacho.fecha_recepcion = datetime.now()
+                despacho.estado = 'PARCIAL' if hay_incidencia else 'RECIBIDO'
+                despacho.save()
 
-        estados_items = list(pedido.items.values_list('estado', flat=True))
-        if all(e == 'RECIBIDO' for e in estados_items):
-            pedido.estado = 'RECIBIDO'
-            pedido.fecha_recepcion = datetime.now()
-        elif any(e in ('PENDIENTE', 'BACK_ORDER', 'PARCIAL', 'DESPACHADO') for e in estados_items):
-            pedido.estado = 'PARCIAL'
-        pedido.save()
+                estados_items = list(pedido.items.values_list('estado', flat=True))
+                if all(e == 'RECIBIDO' for e in estados_items):
+                    pedido.estado = 'RECIBIDO'
+                    pedido.fecha_recepcion = datetime.now()
+                elif any(e in ('PENDIENTE', 'BACK_ORDER', 'PARCIAL', 'DESPACHADO') for e in estados_items):
+                    pedido.estado = 'PARCIAL'
+                pedido.save()
 
-        if items_traslado and pedido.deposito_codigo:
-            try:
-                dbisam = PedidosDBISAM()
-                dbisam.insertar_traslado_recepcion(
-                    pedido.numero_pedido,
-                    pedido.deposito_codigo,
-                    items_traslado,
-                    responsable=request.user.username,
-                    proposito=pedido.condicion,
-                )
-            except Exception as e:
-                logger.error(f'Error al insertar traslado DBISAM para despacho #{despacho_id}: {e}')
-                messages.error(
-                    request,
-                    f'Recepción registrada, pero ocurrió un error al registrar el traslado en a2 — se recomienda realizarlo manualmente: {e}'
-                )
+                if items_traslado:
+                    if not pedido.deposito_codigo:
+                        raise ValueError(
+                            f'El pedido #{pedido.numero_pedido} no tiene depósito destino configurado '
+                            f'en a2 — no se puede registrar el traslado de recepción. '
+                            f'Contacta a un supervisor para configurarlo.'
+                        )
+                    dbisam = PedidosDBISAM()
+                    dbisam.insertar_traslado_recepcion(
+                        pedido.numero_pedido,
+                        pedido.deposito_codigo,
+                        items_traslado,
+                        responsable=request.user.username,
+                        proposito=pedido.condicion,
+                    )
+        except ValueError as e:
+            logger.error(f'Recepción del despacho #{despacho_id} bloqueada: {e}')
+            messages.error(request, str(e))
+            return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
+        except Exception as e:
+            logger.error(f'Error al insertar traslado DBISAM para despacho #{despacho_id}: {e}')
+            messages.error(
+                request,
+                'No se pudo registrar la recepción: ocurrió un error al conectar con a2. '
+                'No se guardó ningún cambio — intenta nuevamente en unos minutos.'
+            )
+            return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
 
         messages.success(request, f'Recepción del Despacho #{despacho_id} registrada correctamente')
         return redirect('pedidos-detalle', pk=pk)

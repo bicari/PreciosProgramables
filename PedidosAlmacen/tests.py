@@ -986,3 +986,120 @@ class ValidarTrasladosRecepcionCommandTest(TestCase):
         call_command('validar_traslados_recepcion', stdout=out, stderr=err)
 
         self.assertIn('Error al consultar a2', err.getvalue())
+
+
+class RecibirDespachoTransaccionAtomicaTest(TestCase):
+    """recibir_despacho debe ser todo-o-nada: si el traslado en a2 falla o el
+    pedido no tiene depósito destino configurado, no debe persistir ningún
+    cambio en Postgres, y debe mostrarse un único mensaje de error (nunca
+    también un mensaje de éxito)."""
+
+    def setUp(self):
+        from users.models import User
+        from django.urls import reverse
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem
+        self.reverse = reverse
+        self.user = User.objects.create_superuser(username='recep_atom_u', password='x')
+        self.client.force_login(self.user)
+        self.pedido = Pedido.objects.create(
+            solicitante=self.user, estado='DESPACHADO', deposito_codigo=2,
+            condicion='URGENTE',
+        )
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=5, cantidad_despachada=5, estado='DESPACHADO',
+        )
+        self.despacho = Despacho.objects.create(pedido=self.pedido, estado='ENVIADO')
+        self.di = DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=self.item, cantidad_despachada=5,
+        )
+        self.url = reverse(
+            'pedidos-recibir-despacho',
+            args=[self.pedido.numero_pedido, self.despacho.numero_despacho],
+        )
+
+    def _post(self):
+        return self.client.post(self.url, {
+            f'recibido_{self.di.id}': '5',
+            f'observacion_{self.di.id}': '',
+            f'tipo_incidencia_{self.di.id}': '',
+            'productos_extra': '[]',
+        })
+
+    def _mensajes(self, resp):
+        from django.contrib.messages import get_messages
+        return [str(m) for m in get_messages(resp.wsgi_request)]
+
+    def test_recepcion_exitosa_actualiza_todo_y_solo_muestra_exito(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.insertar_traslado_recepcion.return_value = None
+            resp = self._post()
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, self.reverse('pedidos-detalle', args=[self.pedido.numero_pedido]))
+
+        self.despacho.refresh_from_db()
+        self.pedido.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertEqual(self.despacho.estado, 'RECIBIDO')
+        self.assertEqual(self.pedido.estado, 'RECIBIDO')
+        self.assertEqual(self.item.estado, 'RECIBIDO')
+
+        mock_db.return_value.insertar_traslado_recepcion.assert_called_once_with(
+            self.pedido.numero_pedido, 2, [{'codigo': 'SKU1', 'cantidad': 5}],
+            responsable=self.user.username, proposito='URGENTE',
+        )
+
+        mensajes = self._mensajes(resp)
+        self.assertEqual(len(mensajes), 1)
+        self.assertIn('registrada correctamente', mensajes[0])
+
+    def test_fallo_a2_no_persiste_nada_y_muestra_un_unico_error(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.insertar_traslado_recepcion.side_effect = Exception('odbc down')
+            resp = self._post()
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp.url,
+            self.reverse('pedidos-recibir-despacho', args=[self.pedido.numero_pedido, self.despacho.numero_despacho]),
+        )
+
+        self.despacho.refresh_from_db()
+        self.pedido.refresh_from_db()
+        self.item.refresh_from_db()
+        self.di.refresh_from_db()
+        self.assertEqual(self.despacho.estado, 'ENVIADO')
+        self.assertEqual(self.pedido.estado, 'DESPACHADO')
+        self.assertEqual(self.item.estado, 'DESPACHADO')
+        self.assertEqual(self.di.cantidad_recibida, 0)
+
+        mensajes = self._mensajes(resp)
+        self.assertEqual(len(mensajes), 1)
+        self.assertIn('No se pudo registrar la recepción', mensajes[0])
+        self.assertFalse(any('registrada correctamente' in m for m in mensajes))
+
+    def test_sin_deposito_codigo_bloquea_y_no_llama_a_a2(self):
+        self.pedido.deposito_codigo = None
+        self.pedido.save()
+
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            resp = self._post()
+            mock_db.assert_not_called()
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp.url,
+            self.reverse('pedidos-recibir-despacho', args=[self.pedido.numero_pedido, self.despacho.numero_despacho]),
+        )
+
+        self.despacho.refresh_from_db()
+        self.pedido.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertEqual(self.despacho.estado, 'ENVIADO')
+        self.assertEqual(self.pedido.estado, 'DESPACHADO')
+        self.assertEqual(self.item.estado, 'DESPACHADO')
+
+        mensajes = self._mensajes(resp)
+        self.assertEqual(len(mensajes), 1)
+        self.assertIn('no tiene depósito destino configurado', mensajes[0])
