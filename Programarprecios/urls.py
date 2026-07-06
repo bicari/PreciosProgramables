@@ -30,9 +30,14 @@ admin.site.site_url = "/dashboard"
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/auth/', include('users.api_urls')),
+    path('api/', include('PedidosAlmacen.api_urls')),
+    path('api/', include('ubicaciones.api_urls')),
     path('', include('users.urls')),
     path('', redirect_login),
     path('', include('tasks.urls')),
     path('', include('notas_entrega.urls')),
     path('', include('PedidosAlmacen.urls')),
+    path('', include('ubicaciones.urls')),
+    path('', include('formatos.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

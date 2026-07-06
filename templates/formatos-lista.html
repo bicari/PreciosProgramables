@@ -1,0 +1,78 @@
+{% extends "dashboard.html" %}
+{% block content %}
+{% load static %}
+
+<div class="pd-header">
+    <div class="pd-header-left">
+        <div>
+            <span class="pd-header-eyebrow">Configuración</span>
+            <div class="pd-header-title-row">
+                <h1 class="pd-header-num">Formatos de impresión</h1>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if messages %}
+    {% for message in messages %}
+    <div class="alert alert-{{ message.tags }} alert-dismissible fade show mb-3" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+{% endif %}
+
+<div class="pl-table-card">
+    <table class="table pl-tabla align-middle">
+        <thead>
+            <tr>
+                <th>Documento</th>
+                <th>Estado</th>
+                <th>Última modificación</th>
+                <th>Por</th>
+                <th class="text-end">Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for fila in filas %}
+            <tr>
+                <td>{{ fila.nombre }}</td>
+                <td>
+                    {% if fila.plantilla and fila.plantilla.activa %}
+                    <span class="pl-chip pl-chip-recibido">Activa</span>
+                    {% elif fila.plantilla %}
+                    <span class="pl-chip pl-chip-pendiente">Inactiva (formato clásico)</span>
+                    {% else %}
+                    <span class="pl-chip pl-chip-todos">Sin personalizar</span>
+                    {% endif %}
+                </td>
+                <td>{{ fila.plantilla.fecha_actualizacion|date:"d/m/Y H:i"|default:"—" }}</td>
+                <td>{{ fila.plantilla.actualizado_por.username|default:"—" }}</td>
+                <td class="text-end">
+                    <a href="{% url 'formatos-disenar' fila.tipo %}" class="btn btn-sm btn-primary">
+                        <i class="fas fa-pen"></i> Editar
+                    </a>
+                    {% if fila.plantilla and fila.plantilla.activa %}
+                    <form method="post" action="{% url 'formatos-desactivar' fila.tipo %}" class="d-inline">
+                        {% csrf_token %}
+                        <button class="btn btn-sm btn-outline-warning">Desactivar</button>
+                    </form>
+                    {% else %}
+                    <form method="post" action="{% url 'formatos-activar' fila.tipo %}" class="d-inline">
+                        {% csrf_token %}
+                        <button class="btn btn-sm btn-outline-success">Activar</button>
+                    </form>
+                    {% endif %}
+                    {% if fila.plantilla.definicion_anterior %}
+                    <form method="post" action="{% url 'formatos-restaurar' fila.tipo %}" class="d-inline">
+                        {% csrf_token %}
+                        <button class="btn btn-sm btn-outline-secondary">Restaurar anterior</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

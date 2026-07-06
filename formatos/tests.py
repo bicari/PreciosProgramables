@@ -239,3 +239,84 @@ class ExportarConFallbackTest(TestCase):
         mock_rl.assert_not_called()
         self.assertEqual(resp['Content-Type'], 'application/pdf')
         self.assertTrue(resp.content.startswith(b'%PDF'))
+
+
+import json as json_mod  # noqa: E402
+
+
+class VistasGestionTest(TestCase):
+    def setUp(self):
+        from django.urls import reverse
+        self.reverse = reverse
+        self.admin = User.objects.create_superuser(username='fmt_su', password='x')
+        self.normal = User.objects.create_user(username='fmt_normal', password='x')
+
+    def test_no_superusuario_es_redirigido(self):
+        self.client.force_login(self.normal)
+        for name, args in [('formatos-lista', []), ('formatos-guardar', ['despacho']),
+                           ('formatos-activar', ['despacho'])]:
+            resp = self.client.get(self.reverse(name, args=args))
+            self.assertEqual(resp.status_code, 302, name)
+
+    def test_lista_muestra_ambos_tipos(self):
+        self.client.force_login(self.admin)
+        resp = self.client.get(self.reverse('formatos-lista'))
+        self.assertContains(resp, 'Despacho')
+        self.assertContains(resp, 'Pedido')
+
+    def test_guardar_rota_definicion(self):
+        from .models import obtener_plantilla
+        self.client.force_login(self.admin)
+        plantilla = obtener_plantilla('despacho')
+        original = plantilla.definicion
+        nueva = {**original, 'styles': [{'id': 99}]}
+        resp = self.client.post(
+            self.reverse('formatos-guardar', args=['despacho']),
+            data=json_mod.dumps(nueva), content_type='application/json')
+        self.assertEqual(resp.status_code, 200)
+        plantilla.refresh_from_db()
+        self.assertEqual(plantilla.definicion['styles'], [{'id': 99}])
+        self.assertEqual(plantilla.definicion_anterior, original)
+
+    def test_guardar_rechaza_json_invalido(self):
+        self.client.force_login(self.admin)
+        resp = self.client.post(
+            self.reverse('formatos-guardar', args=['despacho']),
+            data=json_mod.dumps({'sin_campos': True}), content_type='application/json')
+        self.assertEqual(resp.status_code, 400)
+
+    def test_activar_valida_y_activa(self):
+        from .models import obtener_plantilla
+        self.client.force_login(self.admin)
+        plantilla = obtener_plantilla('despacho')
+        resp = self.client.post(self.reverse('formatos-activar', args=['despacho']))
+        self.assertEqual(resp.status_code, 302)
+        plantilla.refresh_from_db()
+        self.assertTrue(plantilla.activa)
+
+    def test_activar_rechaza_plantilla_rota(self):
+        from .models import obtener_plantilla
+        self.client.force_login(self.admin)
+        plantilla = obtener_plantilla('despacho')
+        rota = {**plantilla.definicion,
+                'docElements': [dict(plantilla.definicion['docElements'][0],
+                                     content='${parametro_inexistente}')]}
+        plantilla.definicion = rota
+        plantilla.save()
+        self.client.post(self.reverse('formatos-activar', args=['despacho']))
+        plantilla.refresh_from_db()
+        self.assertFalse(plantilla.activa)
+
+    def test_desactivar_y_restaurar(self):
+        from .models import obtener_plantilla
+        self.client.force_login(self.admin)
+        plantilla = obtener_plantilla('despacho')
+        plantilla.activa = True
+        plantilla.actualizar_definicion({**plantilla.definicion, 'styles': [{'id': 5}]},
+                                        self.admin)
+        self.client.post(self.reverse('formatos-desactivar', args=['despacho']))
+        plantilla.refresh_from_db()
+        self.assertFalse(plantilla.activa)
+        self.client.post(self.reverse('formatos-restaurar', args=['despacho']))
+        plantilla.refresh_from_db()
+        self.assertEqual(plantilla.definicion['styles'], [])
