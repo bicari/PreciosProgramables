@@ -106,6 +106,15 @@ INSTALLED_APPS = ['PedidosAlmacen',
     'django.contrib.staticfiles',
 ]
 AUTH_USER_MODEL = 'users.User'
+
+# Django usa el tag 'error' para messages.error(), pero Bootstrap solo define
+# la clase .alert-danger (no .alert-error) — sin este remapeo, esos mensajes
+# se renderizan sin color de fondo.
+from django.contrib.messages import constants as message_constants
+MESSAGE_TAGS = {
+    message_constants.ERROR: 'danger',
+}
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
