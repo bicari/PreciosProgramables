@@ -117,3 +117,47 @@ class ContratosDatosTest(TestCase):
         from .contratos import datos_ejemplo
         with self.assertRaises(ValueError):
             datos_ejemplo('factura')
+
+
+class SemillasTest(TestCase):
+    def test_semillas_definen_ambos_tipos(self):
+        from .semillas import SEMILLAS
+        self.assertEqual(set(SEMILLAS.keys()), {'despacho', 'pedido'})
+        claves = {'docElements', 'parameters', 'styles', 'version', 'documentProperties'}
+        for definicion in SEMILLAS.values():
+            self.assertEqual(claves, set(definicion.keys()) & claves)
+
+    def test_semilla_despacho_genera_pdf_con_datos_ejemplo(self):
+        from reportbro import Report
+        from .contratos import datos_ejemplo
+        from .semillas import SEMILLAS
+        report = Report(SEMILLAS['despacho'], datos_ejemplo('despacho'))
+        self.assertFalse(report.errors)
+        pdf = report.generate_pdf()
+        self.assertTrue(bytes(pdf).startswith(b'%PDF'))
+
+    def test_semilla_pedido_genera_pdf_con_datos_ejemplo(self):
+        from reportbro import Report
+        from .contratos import datos_ejemplo
+        from .semillas import SEMILLAS
+        report = Report(SEMILLAS['pedido'], datos_ejemplo('pedido'))
+        self.assertFalse(report.errors)
+        pdf = report.generate_pdf()
+        self.assertTrue(bytes(pdf).startswith(b'%PDF'))
+
+    def test_obtener_plantilla_siembra_inactiva(self):
+        from .models import obtener_plantilla
+        p = obtener_plantilla('despacho')
+        self.assertFalse(p.activa)
+        self.assertTrue(p.definicion['parameters'])
+        self.assertEqual(PlantillaImpresion.objects.filter(tipo='despacho').count(), 1)
+        # segunda llamada no duplica ni pisa
+        p.definicion = {'version': 4}
+        p.save()
+        p2 = obtener_plantilla('despacho')
+        self.assertEqual(p2.definicion, {'version': 4})
+
+    def test_obtener_plantilla_tipo_invalido(self):
+        from .models import obtener_plantilla
+        with self.assertRaises(ValueError):
+            obtener_plantilla('factura')

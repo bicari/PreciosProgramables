@@ -48,3 +48,18 @@ class ReportePreview(models.Model):
     key = models.CharField(max_length=36, unique=True)
     pdf = models.BinaryField()
     creado = models.DateTimeField(auto_now_add=True)
+
+
+def obtener_plantilla(tipo: str) -> PlantillaImpresion:
+    """Devuelve la plantilla del tipo, creándola inactiva con la semilla si no existe.
+
+    Raises:
+        ValueError: si el tipo no está en TIPOS_VALIDOS.
+    """
+    from .semillas import SEMILLAS
+
+    if tipo not in TIPOS_VALIDOS:
+        raise ValueError(f'Tipo de documento desconocido: {tipo}')
+    plantilla, _ = PlantillaImpresion.objects.get_or_create(
+        tipo=tipo, defaults={'definicion': SEMILLAS[tipo]})
+    return plantilla
