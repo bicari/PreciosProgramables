@@ -842,13 +842,13 @@ class TrasladosRecepcionExistentesTest(TestCase):
                 NS(FTI_DOCUMENTO='00001234'),
                 NS(FTI_DOCUMENTO='00005678'),
             ]
-            resultado = db.traslados_recepcion_existentes([1234, 5678, 9999])
+            resultado = db.traslados_recepcion_existentes([1234, 5678, 9999], 10)
         self.assertEqual(resultado, {1234, 5678})
 
     def test_lista_vacia_no_consulta_bd(self):
         db = PedidosDBISAM()
         with patch.object(db, 'connect') as mock_connect:
-            resultado = db.traslados_recepcion_existentes([])
+            resultado = db.traslados_recepcion_existentes([], 10)
         self.assertEqual(resultado, set())
         mock_connect.assert_not_called()
 
@@ -857,10 +857,10 @@ class TrasladosRecepcionExistentesTest(TestCase):
         with patch.object(db, 'connect') as mock_connect:
             cursor = self._mock_cursor(mock_connect)
             cursor.execute.return_value.fetchall.return_value = []
-            db.traslados_recepcion_existentes([1234])
+            db.traslados_recepcion_existentes([1234], 15)
             sql = cursor.execute.call_args[0][0]
         self.assertIn('FTI_TIPO = 1', sql)
-        self.assertIn('FTI_DEPOSITOSOURCE = 10', sql)
+        self.assertIn('FTI_DEPOSITOSOURCE = 15', sql)
         self.assertIn("'00001234'", sql)
 
     def test_pagina_en_lotes_de_200(self):
@@ -869,7 +869,7 @@ class TrasladosRecepcionExistentesTest(TestCase):
         with patch.object(db, 'connect') as mock_connect:
             cursor = self._mock_cursor(mock_connect)
             cursor.execute.return_value.fetchall.return_value = []
-            db.traslados_recepcion_existentes(numeros)
+            db.traslados_recepcion_existentes(numeros, 10)
         self.assertEqual(cursor.execute.call_count, 2)
 
     def test_error_dbisam_propaga_databaseerror(self):
@@ -878,7 +878,41 @@ class TrasladosRecepcionExistentesTest(TestCase):
         with patch.object(db, 'connect') as mock_connect:
             mock_connect.side_effect = Exception('odbc down')
             with self.assertRaises(pyodbc.DatabaseError):
-                db.traslados_recepcion_existentes([1234])
+                db.traslados_recepcion_existentes([1234], 10)
+
+
+class InsertarTrasladoCamposOrigenTest(TestCase):
+    """Los traslados deben registrar FTI_DOCUMENTOORIGEN, FTI_CLASIFICACION y FTI_DESCRIPCLASIFY."""
+
+    def _capturar_sql(self, llamada):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            conn = mock_connect.return_value.__enter__.return_value
+            # cursor sin context manager (usado por _codigos_existentes_sinvdep)
+            conn.cursor.return_value.execute.return_value.fetchall.return_value = []
+            cursor = conn.cursor.return_value.__enter__.return_value
+            llamada(db)
+        return cursor.execute.call_args_list[0][0][0]
+
+    def test_traslado_despacho_escribe_pedido_origen_y_clasificacion_1(self):
+        sql = self._capturar_sql(lambda db: db.insertar_traslado_despacho(
+            77, 10, [{'codigo': 'SKU1', 'cantidad': 2}],
+            responsable='juan', proposito='URGENTE', numero_pedido=1234,
+        ))
+        self.assertIn('FTI_DOCUMENTOORIGEN', sql)
+        self.assertIn('FTI_CLASIFICACION', sql)
+        self.assertIn('FTI_DESCRIPCLASIFY', sql)
+        self.assertRegex(sql, r"'00001234',\s*1,\s*'DESPACHO'")
+
+    def test_traslado_recepcion_escribe_despacho_origen_y_clasificacion_2(self):
+        sql = self._capturar_sql(lambda db: db.insertar_traslado_recepcion(
+            1234, 10, 2, [{'codigo': 'SKU1', 'cantidad': 2}],
+            responsable='maria', proposito='SURTIDO', numero_despacho=77,
+        ))
+        self.assertIn('FTI_DOCUMENTOORIGEN', sql)
+        self.assertIn('FTI_CLASIFICACION', sql)
+        self.assertIn('FTI_DESCRIPCLASIFY', sql)
+        self.assertRegex(sql, r"'00000077',\s*2,\s*'RECEPCION TIENDA'")
 
 
 from io import StringIO
@@ -942,7 +976,7 @@ class ValidarTrasladosRecepcionCommandTest(TestCase):
         salida = out.getvalue()
         self.assertIn(f'#{p1.numero_pedido}', salida)
         self.assertNotIn(f'#{p2.numero_pedido}', salida)
-        mock_db.return_value.traslados_recepcion_existentes.assert_called_once_with([p1.numero_pedido])
+        mock_db.return_value.traslados_recepcion_existentes.assert_called_once_with([p1.numero_pedido], 10)
 
     @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
     def test_filtro_dias_excluye_antiguos(self, mock_db):
@@ -1046,8 +1080,9 @@ class RecibirDespachoTransaccionAtomicaTest(TestCase):
         self.assertEqual(self.item.estado, 'RECIBIDO')
 
         mock_db.return_value.insertar_traslado_recepcion.assert_called_once_with(
-            self.pedido.numero_pedido, 2, [{'codigo': 'SKU1', 'cantidad': 5}],
+            self.pedido.numero_pedido, 10, 2, [{'codigo': 'SKU1', 'cantidad': 5}],
             responsable=self.user.username, proposito='URGENTE',
+            numero_despacho=self.despacho.numero_despacho,
         )
 
         mensajes = self._mensajes(resp)
@@ -1103,3 +1138,146 @@ class RecibirDespachoTransaccionAtomicaTest(TestCase):
         mensajes = self._mensajes(resp)
         self.assertEqual(len(mensajes), 1)
         self.assertIn('no tiene depósito destino configurado', mensajes[0])
+
+
+class ConfiguracionPedidosModelTest(TestCase):
+    def test_load_crea_singleton_con_transito_10(self):
+        from .models import ConfiguracionPedidos
+        config = ConfiguracionPedidos.load()
+        self.assertEqual(config.pk, 1)
+        self.assertEqual(config.deposito_transito, 10)
+        # Llamadas posteriores devuelven la misma fila, sin duplicar
+        ConfiguracionPedidos.load()
+        self.assertEqual(ConfiguracionPedidos.objects.count(), 1)
+
+    def test_save_fuerza_singleton(self):
+        from .models import ConfiguracionPedidos
+        ConfiguracionPedidos(deposito_transito=10).save()
+        ConfiguracionPedidos(deposito_transito=15).save()  # sobreescribe pk=1
+        self.assertEqual(ConfiguracionPedidos.objects.count(), 1)
+        self.assertEqual(ConfiguracionPedidos.objects.get(pk=1).deposito_transito, 15)
+
+    def test_clean_rechaza_deposito_no_sincronizado(self):
+        from django.core.exceptions import ValidationError
+        from .models import ConfiguracionPedidos, DepositoPermitido
+        DepositoPermitido.objects.create(codigo=10, nombre='Tránsito')
+        config = ConfiguracionPedidos(deposito_transito=99)
+        with self.assertRaises(ValidationError):
+            config.clean()
+
+    def test_clean_acepta_deposito_sincronizado(self):
+        from .models import ConfiguracionPedidos, DepositoPermitido
+        DepositoPermitido.objects.create(codigo=15, nombre='Tránsito Nuevo')
+        ConfiguracionPedidos(deposito_transito=15).clean()  # no lanza
+
+    def test_clean_no_bloquea_sin_depositos_sincronizados(self):
+        from .models import ConfiguracionPedidos
+        ConfiguracionPedidos(deposito_transito=99).clean()  # tabla vacía → no lanza
+
+
+class SnapshotDepositoTransitoTest(TestCase):
+    """El despacho graba en el pedido el tránsito configurado (snapshot) y la
+    recepción usa ese snapshot como origen, no la configuración vigente."""
+
+    def setUp(self):
+        from users.models import User
+        from django.urls import reverse
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem
+        self.reverse = reverse
+        self.user = User.objects.create_superuser(username='snap_transito_u', password='x')
+        self.client.force_login(self.user)
+        self.pedido = Pedido.objects.create(
+            solicitante=self.user, estado='DESPACHADO', deposito_codigo=2,
+            condicion='URGENTE',
+        )
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=5, cantidad_despachada=5, estado='DESPACHADO',
+        )
+
+    def _set_config(self, deposito_transito):
+        from .models import ConfiguracionPedidos
+        config = ConfiguracionPedidos.load()
+        config.deposito_transito = deposito_transito
+        config.save()
+
+    def test_confirmar_despacho_graba_snapshot_desde_config(self):
+        from .models import Despacho, DespachoItem
+        self._set_config(15)
+        despacho = Despacho.objects.create(pedido=self.pedido, estado='PENDIENTE_APROBACION')
+        DespachoItem.objects.create(
+            despacho=despacho, pedido_item=self.item, cantidad_despachada=5,
+        )
+        url = self.reverse(
+            'pedidos-confirmar-despacho',
+            args=[self.pedido.numero_pedido, despacho.numero_despacho],
+        )
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.return_value = {}
+            mock_db.return_value.insertar_traslado_despacho.return_value = None
+            self.client.post(url, {})
+
+        mock_db.return_value.insertar_traslado_despacho.assert_called_once_with(
+            despacho.numero_despacho, 15, [{'codigo': 'SKU1', 'cantidad': 5}],
+            responsable=self.user.username, proposito='URGENTE',
+            numero_pedido=self.pedido.numero_pedido,
+        )
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.deposito_transito, 15)
+
+    def test_recepcion_usa_snapshot_del_pedido_no_la_config(self):
+        from .models import Despacho, DespachoItem
+        # El pedido se despachó con tránsito 15; luego la config cambió a 99.
+        self.pedido.deposito_transito = 15
+        self.pedido.save(update_fields=['deposito_transito'])
+        self._set_config(99)
+
+        despacho = Despacho.objects.create(pedido=self.pedido, estado='ENVIADO')
+        di = DespachoItem.objects.create(
+            despacho=despacho, pedido_item=self.item, cantidad_despachada=5,
+        )
+        url = self.reverse(
+            'pedidos-recibir-despacho',
+            args=[self.pedido.numero_pedido, despacho.numero_despacho],
+        )
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.insertar_traslado_recepcion.return_value = None
+            self.client.post(url, {
+                f'recibido_{di.id}': '5',
+                f'observacion_{di.id}': '',
+                f'tipo_incidencia_{di.id}': '',
+                'productos_extra': '[]',
+            })
+
+        mock_db.return_value.insertar_traslado_recepcion.assert_called_once_with(
+            self.pedido.numero_pedido, 15, 2, [{'codigo': 'SKU1', 'cantidad': 5}],
+            responsable=self.user.username, proposito='URGENTE',
+            numero_despacho=despacho.numero_despacho,
+        )
+
+
+class VolverUrlSesionListasTest(TestCase):
+    """Las vistas de lista guardan su URL completa (con filtro) en sesión."""
+
+    def setUp(self):
+        from users.models import User
+        self.user = User.objects.create_superuser(username='volver_u', password='x')
+        self.client.force_login(self.user)
+
+    def test_lista_pedidos_guarda_url_con_filtro_en_sesion(self):
+        from django.urls import reverse
+        url = reverse('pedidos-lista') + '?estado=PENDIENTE'
+        self.client.get(url)
+        self.assertEqual(self.client.session['pedidos_volver_url'], url)
+
+    def test_lista_pedidos_sin_filtro_guarda_url_limpia(self):
+        from django.urls import reverse
+        url = reverse('pedidos-lista')
+        self.client.get(url)
+        self.assertEqual(self.client.session['pedidos_volver_url'], url)
+
+    def test_lista_despachos_guarda_url_con_filtro_en_sesion(self):
+        from django.urls import reverse
+        url = reverse('despachos-lista') + '?estado=ENVIADO'
+        self.client.get(url)
+        self.assertEqual(self.client.session['pedidos_volver_url'], url)

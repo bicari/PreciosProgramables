@@ -8,7 +8,7 @@ from django.db.models import Sum, Count, IntegerField, Q, Max
 from django.db.models import Case, When, Value
 from django.utils import timezone
 from datetime import datetime, timedelta, time as dtime
-from .models import Pedido, PedidoItem, Despacho, DespachoItem, DepositoPermitido
+from .models import Pedido, PedidoItem, Despacho, DespachoItem, DepositoPermitido, ConfiguracionPedidos
 from .forms import PedidoForm
 from .dbisam import PedidosDBISAM, DEPOSITO_ALMACEN
 from .notifications import notificar_nuevo_pedido, notificar_despacho, notificar_despacho_parcial
@@ -170,6 +170,7 @@ def lista_pedidos(request):
     if is_pedidos_supervisor(request.user):
         lista_pickers_disponibles = list(_pickers_disponibles())
 
+    request.session['pedidos_volver_url'] = request.get_full_path()
     return render(request, 'pedidos-lista.html', {
         'pedidos': pedidos,
         'estado_filter': estado_filter,
@@ -716,15 +717,22 @@ def confirmar_despacho(request, pk, despacho_id):
         if di.pedido_item and di.cantidad_despachada > 0
     ]
     try:
+        deposito_transito = ConfiguracionPedidos.load().deposito_transito
         dbisam = PedidosDBISAM()
         dbisam.insertar_traslado_despacho(
             despacho.numero_despacho,
+            deposito_transito,
             items_dbisam,
             responsable=request.user.username,
             proposito=pedido.condicion,
+            numero_pedido=pedido.numero_pedido,
         )
         despacho.traslado_a2_registrado = True
         despacho.save(update_fields=['traslado_a2_registrado'])
+        # Snapshot: la recepción debe salir del mismo depósito donde entró el
+        # despacho, aunque la configuración cambie entre ambos pasos.
+        pedido.deposito_transito = deposito_transito
+        pedido.save(update_fields=['deposito_transito'])
     except Exception as e:
         logger.error(f'Error al registrar traslado del despacho #{despacho_id} en a2: {e}')
         messages.warning(
@@ -750,6 +758,7 @@ def lista_despachos(request):
     if estado_filter:
         despachos = despachos.filter(estado=estado_filter)
 
+    request.session['pedidos_volver_url'] = request.get_full_path()
     return render(request, 'despachos-lista.html', {
         'despachos': despachos,
         'estado_filter': estado_filter,
@@ -1047,13 +1056,21 @@ def recibir_despacho(request, pk, despacho_id):
                             f'en a2 — no se puede registrar el traslado de recepción. '
                             f'Contacta a un supervisor para configurarlo.'
                         )
+                    # Origen del traslado: el snapshot grabado al despachar;
+                    # fallback a la config para pedidos antiguos sin snapshot.
+                    deposito_transito = (
+                        pedido.deposito_transito
+                        or ConfiguracionPedidos.load().deposito_transito
+                    )
                     dbisam = PedidosDBISAM()
                     dbisam.insertar_traslado_recepcion(
                         pedido.numero_pedido,
+                        deposito_transito,
                         pedido.deposito_codigo,
                         items_traslado,
                         responsable=request.user.username,
                         proposito=pedido.condicion,
+                        numero_despacho=despacho.numero_despacho,
                     )
         except ValueError as e:
             logger.error(f'Recepción del despacho #{despacho_id} bloqueada: {e}')
@@ -1126,9 +1143,13 @@ def reintentar_traslado_despacho(request, pk, despacho_id):
         return redirect('pedidos-detalle', pk=pk)
 
     # Verificación de seguridad contra a2 para evitar duplicados (despachos históricos)
+    # Snapshot del pedido si existe; fallback a la config para pedidos antiguos.
+    deposito_transito = (
+        pedido.deposito_transito or ConfiguracionPedidos.load().deposito_transito
+    )
     try:
         dbisam = PedidosDBISAM()
-        if dbisam.existe_traslado_despacho(despacho.numero_despacho):
+        if dbisam.existe_traslado_despacho(despacho.numero_despacho, deposito_transito):
             despacho.traslado_a2_registrado = True
             despacho.save(update_fields=['traslado_a2_registrado'])
             messages.warning(
@@ -1155,12 +1176,16 @@ def reintentar_traslado_despacho(request, pk, despacho_id):
     try:
         dbisam.insertar_traslado_despacho(
             despacho.numero_despacho,
+            deposito_transito,
             items_dbisam,
             responsable=request.user.username,
             proposito=pedido.condicion,
+            numero_pedido=pedido.numero_pedido,
         )
         despacho.traslado_a2_registrado = True
         despacho.save(update_fields=['traslado_a2_registrado'])
+        pedido.deposito_transito = deposito_transito
+        pedido.save(update_fields=['deposito_transito'])
         messages.success(request, f'Traslado del despacho #{despacho_id} registrado correctamente en a2')
     except Exception as e:
         logger.error(f'Error al reintentar traslado del despacho #{despacho_id} en a2: {e}')
