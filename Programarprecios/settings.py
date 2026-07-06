@@ -41,7 +41,7 @@ LOGGING = {
             'level': 'INFO',
             'class': 'logging.handlers.RotatingFileHandler',
             'filename': LOG_DIR / 'django.log',
-            'maxBytes': 1024 * 1024 * 5,  # 5 MB
+            'maxBytes': 1024 * 1024 * 5,
             'backupCount': 5,
             'formatter': 'verbose',
         },
@@ -51,12 +51,19 @@ LOGGING = {
             'filename': LOG_DIR / 'errors.log',
             'formatter': 'verbose',
         },
+        'notas_entrega_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': LOG_DIR / 'notas_entrega.log',
+            'maxBytes': 1024 * 1024 * 10,
+            'backupCount': 5,
+            'formatter': 'verbose',
+        },
         'console': {
             'class': 'logging.StreamHandler',
             'formatter': 'simple',
         },
     },
-
     'loggers': {
         'django': {
             'handlers': ['file', 'console'],
@@ -68,9 +75,19 @@ LOGGING = {
             'level': 'ERROR',
             'propagate': False,
         },
-        'myapp': {  
+        'myapp': {
             'handlers': ['file'],
             'level': 'DEBUG',
+        },
+        'notas_entrega': {
+            'handlers': ['notas_entrega_file', 'console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'tasks.dbisam': {
+            'handlers': ['notas_entrega_file'],
+            'level': 'INFO',
+            'propagate': True,
         },
     },
 }
@@ -82,7 +99,7 @@ LOGGING = {
 SECRET_KEY = config('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = config('DEBUG', default=True, cast=bool)
+DEBUG = config('DEBUG', default=False, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost').split(',')
 HORA_EJECUCION = '15:54'  # Hora de ejecución diaria en formato HH:MM (24 horas) Militar
@@ -92,12 +109,18 @@ HORA_EJECUCION = '15:54'  # Hora de ejecución diaria en formato HH:MM (24 horas
 APSCHEDULER_DATETIME_FORMAT = "N j, Y, f:s a"
 APSCHEDULER_RUN_NOW_TIMEOUT = 25  # segundos
 APSCHEDULER_DB_ALIAS = 'default'
-INSTALLED_APPS = ['PedidosAlmacen',
+INSTALLED_APPS = [
+    'PedidosAlmacen',
     'notas_entrega',
     'users',
     'tasks',
+    'ubicaciones',
+    'formatos',
     'django_apscheduler',
     'django_bootstrap5',
+    'rest_framework',
+    'rest_framework.authtoken',
+    'corsheaders',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -117,6 +140,7 @@ MESSAGE_TAGS = {
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -200,7 +224,11 @@ TIME_ZONE = 'America/Caracas'
 USE_I18N = True
 
 USE_TZ = False
-DBISAM_DATABASE= {'DSN': 'A2GKC', 'CatalogName': 'C:\\a2Softway12.36.ID\\Empre001\\Data', 'TMP_TABLE_TASKS': 'C:\\Proyectos\\Python\\Precios-KsaHome\\Tmp'}
+DBISAM_DATABASE = {
+    'DSN': config('DBISAM_DSN', default='A2GKC'),
+    'CatalogName': config('DBISAM_CATALOG', default='C:\\a2Softway12.36.ID\\Empre001\\Data'),
+    'TMP_TABLE_TASKS': config('DBISAM_TMP_DIR', default='C:\\Proyectos\\Python\\Precios-KsaHome\\Tmp'),
+}
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
@@ -213,6 +241,17 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+}
+
+CORS_ALLOW_ALL_ORIGINS = DEBUG  # Solo en desarrollo; en producción usar CORS_ALLOWED_ORIGINS
 
 # Configuración de sesiones django
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
