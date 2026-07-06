@@ -1,4 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
+from django.urls import reverse
 from django.http import JsonResponse, HttpResponse
 from django.contrib.auth import authenticate as django_authenticate
 from django.contrib.auth.decorators import login_required, user_passes_test
@@ -347,6 +348,7 @@ def detalle_pedido(request, pk):
         'es_superuser': request.user.is_superuser,
         'es_picker_asignado': es_picker_asignado,
         'vistas_pdf': vistas_pdf,
+        'volver_url': request.session.get('pedidos_volver_url') or reverse('pedidos-lista'),
     })
 
 

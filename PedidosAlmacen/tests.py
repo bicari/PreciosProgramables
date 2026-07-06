@@ -1281,3 +1281,30 @@ class VolverUrlSesionListasTest(TestCase):
         url = reverse('despachos-lista') + '?estado=ENVIADO'
         self.client.get(url)
         self.assertEqual(self.client.session['pedidos_volver_url'], url)
+
+
+class VolverUrlDetallePedidoTest(TestCase):
+    """El detalle del pedido usa la URL de origen guardada en sesión, con fallback."""
+
+    def setUp(self):
+        from users.models import User
+        from django.urls import reverse
+        from .models import Pedido
+        self.reverse = reverse
+        self.user = User.objects.create_superuser(username='volver_det_u', password='x')
+        self.client.force_login(self.user)
+        self.pedido = Pedido.objects.create(solicitante=self.user)
+        self.url = reverse('pedidos-detalle', args=[self.pedido.numero_pedido])
+
+    def test_boton_volver_usa_url_de_sesion(self):
+        origen = self.reverse('despachos-lista') + '?estado=ENVIADO'
+        session = self.client.session
+        session['pedidos_volver_url'] = origen
+        session.save()
+
+        resp = self.client.get(self.url)
+        self.assertContains(resp, f'href="{origen}"')
+
+    def test_sin_sesion_cae_a_lista_de_pedidos(self):
+        resp = self.client.get(self.url)
+        self.assertContains(resp, 'href="{}"'.format(self.reverse('pedidos-lista')))
