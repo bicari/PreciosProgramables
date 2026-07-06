@@ -1,0 +1,55 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Diseñar formato — {{ nombre }}</title>
+    <link rel="stylesheet" href="{% static 'vendor/reportbro/reportbro.css' %}">
+    <style>
+        html, body { margin: 0; height: 100%; }
+        .fmt-topbar {
+            display: flex; align-items: center; gap: 12px;
+            background: #2e353d; color: #fff; padding: 8px 14px;
+            font-family: system-ui, sans-serif; font-size: 14px;
+        }
+        .fmt-topbar a { color: #9fc5ff; text-decoration: none; }
+        #reportbro { height: calc(100% - 40px); }
+    </style>
+</head>
+<body>
+    <div class="fmt-topbar">
+        <a href="{% url 'formatos-lista' %}">&larr; Formatos</a>
+        <strong>Plantilla: {{ nombre }}</strong>
+        <span id="fmt-estado"></span>
+    </div>
+    <div id="reportbro"></div>
+
+    <script src="{% static 'vendor/reportbro/reportbro.js' %}"></script>
+    <script>
+        function guardarReporte() {
+            fetch("{% url 'formatos-guardar' tipo %}", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}',
+                },
+                body: JSON.stringify(rb.getReport()),
+            }).then(function (resp) {
+                if (resp.ok) {
+                    rb.setModified(false);
+                    document.getElementById('fmt-estado').textContent = 'Guardado ✓';
+                } else {
+                    alert('Error al guardar la plantilla');
+                }
+            }).catch(function () { alert('Error de red al guardar'); });
+        }
+
+        const rb = new ReportBro(document.getElementById('reportbro'), {
+            reportServerUrl: "{% url 'formatos-report-run' tipo %}",
+            saveCallback: guardarReporte,
+        });
+        rb.load({{ definicion_json }});
+    </script>
+</body>
+</html>

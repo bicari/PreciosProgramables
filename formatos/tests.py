@@ -320,3 +320,55 @@ class VistasGestionTest(TestCase):
         self.client.post(self.reverse('formatos-restaurar', args=['despacho']))
         plantilla.refresh_from_db()
         self.assertEqual(plantilla.definicion['styles'], [])
+
+
+class DisenadorYPreviewTest(TestCase):
+    def setUp(self):
+        from django.urls import reverse
+        self.reverse = reverse
+        self.admin = User.objects.create_superuser(username='fmt_dis', password='x')
+        self.client.force_login(self.admin)
+
+    def test_disenar_carga_definicion(self):
+        resp = self.client.get(self.reverse('formatos-disenar', args=['despacho']))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'ReportBro(')
+        self.assertContains(resp, 'numero_despacho')
+
+    def test_preview_put_devuelve_key_y_get_descarga_pdf(self):
+        from .models import obtener_plantilla
+        definicion = obtener_plantilla('despacho').definicion
+        url = self.reverse('formatos-report-run', args=['despacho'])
+        resp = self.client.put(
+            url, data=json_mod.dumps({
+                'report': definicion, 'outputFormat': 'pdf',
+                'data': {}, 'isTestData': True}),
+            content_type='application/json')
+        self.assertEqual(resp.status_code, 200)
+        cuerpo = resp.content.decode()
+        self.assertTrue(cuerpo.startswith('key:'), cuerpo)
+        key = cuerpo[4:]
+        resp2 = self.client.get(url, {'key': key, 'outputFormat': 'pdf'})
+        self.assertEqual(resp2['Content-Type'], 'application/pdf')
+        self.assertTrue(resp2.content.startswith(b'%PDF'))
+
+    def test_preview_reporta_errores_de_plantilla(self):
+        from .models import obtener_plantilla
+        definicion = obtener_plantilla('despacho').definicion
+        rota = {**definicion,
+                'docElements': [dict(definicion['docElements'][0],
+                                     content='${parametro_inexistente}')]}
+        url = self.reverse('formatos-report-run', args=['despacho'])
+        resp = self.client.put(
+            url, data=json_mod.dumps({
+                'report': rota, 'outputFormat': 'pdf',
+                'data': {}, 'isTestData': True}),
+            content_type='application/json')
+        self.assertIn('errors', resp.content.decode())
+
+    def test_preview_requiere_superusuario(self):
+        normal = User.objects.create_user(username='fmt_dis_n', password='x')
+        self.client.force_login(normal)
+        url = self.reverse('formatos-report-run', args=['despacho'])
+        resp = self.client.put(url, data='{}', content_type='application/json')
+        self.assertEqual(resp.status_code, 403)
