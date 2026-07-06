@@ -99,8 +99,29 @@
                         <li><a href="/pedidos/crear/">Nuevo Pedido</a></li>
                         {% endif %}
                         {% if request.user|has_group:"Pedidos Supervisor" %}
+                        <li><a href="/despachos/">Despachos</a></li>
                         <li><a href="/pedidos/reporte/">Reporte</a></li>
                         {% endif %}
+                        {% if request.user.is_superuser %}
+                        <li><a href="/formatos/">Formatos de Impresión</a></li>
+                        {% endif %}
+                    </ul>
+                </li>
+                {% endif %}
+
+                {% if request.user|has_group:"Pedidos Ubicaciones" %}
+                <li class="menu-item">
+                    <input type="checkbox" id="menu-ubicaciones" class="menu-toggle">
+                    <label for="menu-ubicaciones" class="menu-label">
+                        <i class="fas fa-map-marker-alt"></i>
+                        <span class="menu-text">Ubicaciones</span>
+                        <span class="arrow">></span>
+                    </label>
+                    <ul class="sub-menu">
+                        <li><a href="/ubicaciones/racks/">Racks</a></li>
+                        <li><a href="/ubicaciones/trasladar/">Trasladar</a></li>
+                        <li><a href="/ubicaciones/fusionar/">Fusionar</a></li>
+                        <li><a href="/ubicaciones/movimientos/">Histórico</a></li>
                     </ul>
                 </li>
                 {% endif %}
@@ -108,6 +129,12 @@
         </div>
         <div>
             <ul class="menu-content">
+                <li class="menu-item user-identity">
+                    <div class="menu-label">
+                        <span class="user-avatar">{{ request.user.username|first|upper }}</span>
+                        <span class="menu-text">{{ request.user.username|capfirst }}</span>
+                    </div>
+                </li>
                 {%if request.user.is_staff%}
                 <li class="menu-item">
                     <a href="/admin" class="menu-label">
@@ -126,6 +153,14 @@
         </div>
     </div>
     
+    <!-- Overlay para cerrar sidebar en móvil -->
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <!-- Botón hamburguesa flotante (solo visible en móvil) -->
+    <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Abrir menú">
+        <i class="fa-solid fa-bars"></i>
+    </button>
+
     <!-- Contenido Principal -->
     <div class="container col d-flex main-content">
         <div class="container">
@@ -133,7 +168,54 @@
             <h1>Bienvenido al Dashboard</h1>
             {% endblock content%}
         </div>
-       
+
     </div>
+
+<script>
+(function() {
+    const overlay = document.getElementById('sidebar-overlay');
+    const mobilBtn = document.getElementById('mobile-menu-btn');
+    const menu = document.querySelector('.nav-side-menu');
+    const content = document.querySelector('.main-content');
+    const isMobile = () => window.innerWidth < 768;
+
+    function openMobileSidebar() {
+        menu.classList.add('mobile-open');
+        overlay.classList.add('active');
+    }
+    function closeMobileSidebar() {
+        menu.classList.remove('mobile-open');
+        overlay.classList.remove('active');
+    }
+
+    if (mobilBtn) {
+        mobilBtn.addEventListener('click', function() {
+            if (menu.classList.contains('mobile-open')) {
+                closeMobileSidebar();
+            } else {
+                openMobileSidebar();
+            }
+        });
+    }
+    if (overlay) {
+        overlay.addEventListener('click', closeMobileSidebar);
+    }
+
+    // Cerrar sidebar móvil al hacer clic en links del menú
+    document.querySelectorAll('.sub-menu a, .menu-item > a.menu-label').forEach(link => {
+        link.addEventListener('click', function() {
+            if (isMobile()) closeMobileSidebar();
+        });
+    });
+
+    // Redimensionado: limpiar estado móvil si cambia a desktop
+    window.addEventListener('resize', function() {
+        if (!isMobile()) {
+            menu.classList.remove('mobile-open');
+            overlay.classList.remove('active');
+        }
+    });
+})();
+</script>
 </body>
 </html>
