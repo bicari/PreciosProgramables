@@ -48,6 +48,7 @@ CLAVES_PEDIDO = {
     'numero_pedido', 'estado', 'condicion', 'deposito', 'categoria',
     'solicitante', 'despachador', 'picker', 'fecha_creacion', 'fecha_despacho',
     'fecha_recepcion', 'observaciones', 'items', 'total_items', 'total_solicitado',
+    'mostrar_cantidades',
 }
 CLAVES_ITEM_DESPACHO = {
     'codigo', 'descripcion', 'referencia', 'puesto', 'ref_proveedor',
@@ -98,6 +99,21 @@ class ContratosDatosTest(TestCase):
         self.assertEqual(set(datos.keys()), CLAVES_PEDIDO)
         self.assertEqual(set(datos['items'][0].keys()), CLAVES_ITEM_PEDIDO)
         self.assertEqual(datos['total_solicitado'], 10)
+        self.assertTrue(datos['mostrar_cantidades'])
+        self.assertEqual(datos['items'][0]['cantidad_despachada'], 8)
+
+    def test_datos_pedido_sin_privilegio_anula_cantidades(self):
+        from .contratos import datos_pedido
+        datos = datos_pedido(self.pedido, self.pedido.items.all(),
+                             mostrar_cantidades=False)
+        self.assertFalse(datos['mostrar_cantidades'])
+        fila = datos['items'][0]
+        self.assertIsNone(fila['cantidad_despachada'])
+        self.assertIsNone(fila['cantidad_back_order'])
+        self.assertIsNone(fila['cantidad_recibida'])
+        # lo no sensible se conserva
+        self.assertEqual(fila['cantidad_solicitada'], 10)
+        self.assertEqual(datos['total_solicitado'], 10)
 
     def test_datos_ejemplo_usa_ultimo_registro_real(self):
         from .contratos import datos_ejemplo
@@ -141,6 +157,23 @@ class SemillasTest(TestCase):
         from .contratos import datos_ejemplo
         from .semillas import SEMILLAS
         report = Report(SEMILLAS['pedido'], datos_ejemplo('pedido'))
+        self.assertFalse(report.errors)
+        pdf = report.generate_pdf()
+        self.assertTrue(bytes(pdf).startswith(b'%PDF'))
+
+    def test_semilla_pedido_genera_pdf_sin_cantidades(self):
+        """Con mostrar_cantidades=False (cantidades en None) la semilla sigue generando."""
+        from reportbro import Report
+        from .contratos import datos_pedido
+        from .semillas import SEMILLAS
+        from PedidosAlmacen.models import Pedido, PedidoItem
+        user = User.objects.create_superuser(username='fmt_sem_nc', password='x')
+        pedido = Pedido.objects.create(solicitante=user)
+        PedidoItem.objects.create(
+            pedido=pedido, codigo='A1', descripcion='Taza',
+            cantidad_solicitada=5, cantidad_despachada=3)
+        datos = datos_pedido(pedido, pedido.items.all(), mostrar_cantidades=False)
+        report = Report(SEMILLAS['pedido'], datos)
         self.assertFalse(report.errors)
         pdf = report.generate_pdf()
         self.assertTrue(bytes(pdf).startswith(b'%PDF'))
@@ -239,6 +272,42 @@ class ExportarConFallbackTest(TestCase):
         mock_rl.assert_not_called()
         self.assertEqual(resp['Content-Type'], 'application/pdf')
         self.assertTrue(resp.content.startswith(b'%PDF'))
+
+    def test_pedido_pdf_de_tienda_pasa_mostrar_cantidades_false(self):
+        """Un usuario de tienda genera el PDF de su pedido con cantidades anuladas."""
+        from unittest.mock import patch
+        from django.contrib.auth.models import Group
+        from django.urls import reverse
+        from .contratos import datos_pedido as datos_pedido_real
+        from .semillas import SEMILLAS
+        grupo, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        tienda = User.objects.create_user(username='fmt_tienda', password='x')
+        tienda.groups.add(grupo)
+        self.pedido.solicitante = tienda
+        self.pedido.save(update_fields=['solicitante'])
+        PlantillaImpresion.objects.create(
+            tipo='pedido', definicion=SEMILLAS['pedido'], activa=True)
+        self.client.force_login(tienda)
+
+        with patch('formatos.contratos.datos_pedido',
+                   side_effect=datos_pedido_real) as mock_datos:
+            resp = self.client.get(reverse('pedidos-pdf', args=[self.pedido.numero_pedido]))
+        self.assertEqual(resp['Content-Type'], 'application/pdf')
+        self.assertFalse(mock_datos.call_args.kwargs['mostrar_cantidades'])
+
+    def test_pedido_pdf_supervisor_pasa_mostrar_cantidades_true(self):
+        from unittest.mock import patch
+        from django.urls import reverse
+        from .contratos import datos_pedido as datos_pedido_real
+        from .semillas import SEMILLAS
+        PlantillaImpresion.objects.create(
+            tipo='pedido', definicion=SEMILLAS['pedido'], activa=True)
+
+        with patch('formatos.contratos.datos_pedido',
+                   side_effect=datos_pedido_real) as mock_datos:
+            resp = self.client.get(reverse('pedidos-pdf', args=[self.pedido.numero_pedido]))
+        self.assertEqual(resp['Content-Type'], 'application/pdf')
+        self.assertTrue(mock_datos.call_args.kwargs['mostrar_cantidades'])
 
 
 import json as json_mod  # noqa: E402

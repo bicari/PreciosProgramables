@@ -38,7 +38,7 @@ def _texto(id_, contenido, x, y, ancho, alto, *, container='0_content',
     }
 
 
-def _celda(id_, contenido, ancho, *, bold=False, align='left', size=8):
+def _celda(id_, contenido, ancho, *, bold=False, align='left', size=8, print_if=''):
     return {
         'elementType': 'table_text', 'id': id_, 'width': ancho,
         'content': contenido, 'eval': False, 'colspan': '', 'styleId': '',
@@ -47,21 +47,27 @@ def _celda(id_, contenido, ancho, *, bold=False, align='left', size=8):
         'textColor': '#000000', 'backgroundColor': '', 'font': 'helvetica',
         'fontSize': size, 'lineSpacing': 1,
         'paddingLeft': 2, 'paddingTop': 2, 'paddingRight': 2, 'paddingBottom': 2,
-        'pattern': '', 'link': '', 'cs_condition': '', 'printIf': '',
+        'pattern': '', 'link': '', 'cs_condition': '', 'printIf': print_if,
         'growWeight': 0, 'borderWidth': 1,
     }
 
 
 def _tabla(id_, y, columnas):
-    """columnas: lista de (titulo, expresion, ancho, align)."""
+    """columnas: lista de (titulo, expresion, ancho, align[, print_if]).
+
+    Si la tupla trae un quinto elemento, se usa como condición printIf de la
+    celda de encabezado: reportbro-lib omite la columna completa cuando la
+    condición evalúa a False.
+    """
     ancho_total = sum(c[2] for c in columnas)
     header = [
-        _celda(id_ + 10 + i, titulo, ancho, bold=True, align='center')
-        for i, (titulo, _, ancho, _) in enumerate(columnas)
+        _celda(id_ + 10 + i, col[0], col[2], bold=True, align='center',
+               print_if=col[4] if len(col) > 4 else '')
+        for i, col in enumerate(columnas)
     ]
     contenido = [
-        _celda(id_ + 40 + i, expresion, ancho, align=align)
-        for i, (_, expresion, ancho, align) in enumerate(columnas)
+        _celda(id_ + 40 + i, col[1], col[2], align=col[3])
+        for i, col in enumerate(columnas)
     ]
     return {
         'elementType': 'table', 'id': id_, 'containerId': '0_content',
@@ -171,12 +177,15 @@ SEMILLA_PEDIDO = {
                0, 5, 575, 16),
         _tabla(200, 27, [
             ('Código', '${codigo}', 60, 'left'),
-            ('Descripción', '${descripcion}', 165, 'left'),
-            ('Referencia', '${referencia}', 65, 'left'),
+            ('Descripción', '${descripcion}', 120, 'left'),
+            ('Referencia', '${referencia}', 55, 'left'),
             ('Puesto', '${puesto}', 55, 'left'),
-            ('Ref. Prov.', '${ref_proveedor}', 65, 'left'),
+            ('Ref. Prov.', '${ref_proveedor}', 50, 'left'),
             ('Solicitado', '${cantidad_solicitada}', 55, 'right'),
-            ('Observación', '${observacion}', 110, 'left'),
+            # Columnas sensibles: ocultas para usuarios sin privilegio
+            ('Despachado', '${cantidad_despachada}', 55, 'right', '${mostrar_cantidades}'),
+            ('Recibido', '${cantidad_recibida}', 45, 'right', '${mostrar_cantidades}'),
+            ('Observación', '${observacion}', 80, 'left'),
         ]),
         _texto(105, 'Items: ${total_items}    Total solicitado: ${total_solicitado}',
                0, 52, 575, 16, bold=True, align='right'),
@@ -192,6 +201,7 @@ SEMILLA_PEDIDO = {
         _param(22, 'items', 'array', children=_children(30, _CHILDREN_ITEM_PEDIDO)),
         _param(23, 'total_items', 'number'),
         _param(24, 'total_solicitado', 'number'),
+        _param(25, 'mostrar_cantidades', 'boolean'),
     ],
     'styles': [],
     'version': 4,

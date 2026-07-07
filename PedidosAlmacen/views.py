@@ -1493,9 +1493,12 @@ def exportar_pedido_pdf(request, pk):
     mostrar_cantidades = is_pedidos_almacen(request.user) or is_pedidos_supervisor(request.user)
     pdf_bytes = None
     if vista == 'todos':
-        from formatos.contratos import datos_pedido
+        from formatos import contratos
         from formatos.generacion import generar_pdf as generar_pdf_formato
-        pdf_bytes = generar_pdf_formato('pedido', datos_pedido(pedido, items))
+        pdf_bytes = generar_pdf_formato(
+            'pedido',
+            contratos.datos_pedido(pedido, items, mostrar_cantidades=mostrar_cantidades),
+        )
     if pdf_bytes is None:
         pdf_bytes = generar_pedido_pdf(pedido, items, vista=vista, mostrar_cantidades=mostrar_cantidades)
 

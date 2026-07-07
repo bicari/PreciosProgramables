@@ -63,8 +63,19 @@ def datos_despacho(despacho, items) -> dict:
     }
 
 
-def datos_pedido(pedido, items) -> dict:
-    """Arma el diccionario de datos de un pedido para ReportBro."""
+def datos_pedido(pedido, items, mostrar_cantidades: bool = True) -> dict:
+    """Arma el diccionario de datos de un pedido para ReportBro.
+
+    Args:
+        pedido: Instancia de Pedido.
+        items: Iterable de PedidoItem.
+        mostrar_cantidades: Si es False (usuarios sin privilegio, ej. tienda),
+            las cantidades sensibles (despachada, back order, recibida) se
+            envían como None — defensa a nivel de datos: aunque la plantilla
+            muestre esas columnas, los valores llegan vacíos. La plantilla
+            además puede ocultar la columna completa con printIf
+            ``${mostrar_cantidades}`` en la celda de encabezado.
+    """
     filas = [{
         'codigo': it.codigo,
         'descripcion': it.descripcion,
@@ -72,13 +83,14 @@ def datos_pedido(pedido, items) -> dict:
         'puesto': it.puesto,
         'ref_proveedor': it.ref_proveedor,
         'cantidad_solicitada': it.cantidad_solicitada,
-        'cantidad_despachada': it.cantidad_despachada,
-        'cantidad_back_order': it.cantidad_back_order,
-        'cantidad_recibida': it.cantidad_recibida,
+        'cantidad_despachada': it.cantidad_despachada if mostrar_cantidades else None,
+        'cantidad_back_order': it.cantidad_back_order if mostrar_cantidades else None,
+        'cantidad_recibida': it.cantidad_recibida if mostrar_cantidades else None,
         'estado': it.get_estado_display(),
         'observacion': it.observacion,
     } for it in items]
     return {
+        'mostrar_cantidades': mostrar_cantidades,
         'numero_pedido': pedido.numero_pedido,
         'estado': pedido.get_estado_display(),
         'condicion': pedido.get_condicion_display() if pedido.condicion else '',
@@ -113,6 +125,7 @@ _EJEMPLO_DESPACHO = {
 }
 
 _EJEMPLO_PEDIDO = {
+    'mostrar_cantidades': True,
     'numero_pedido': 1, 'estado': 'Pendiente', 'condicion': 'Surtido',
     'deposito': 'Tienda de ejemplo', 'categoria': 'Hogar',
     'solicitante': 'tienda', 'despachador': '', 'picker': '',
