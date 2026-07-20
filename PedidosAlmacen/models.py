@@ -63,6 +63,7 @@ class PedidoItem(models.Model):
         ('RECIBIDO', 'Recibido'),
         ('BACK_ORDER', 'Back Order'),
         ('INCIDENCIA', 'Incidencia'),
+        ('INCIDENCIA_RESUELTA', 'Incidencia Resuelta'),
     ]
     pedido = models.ForeignKey(Pedido, on_delete=models.CASCADE, related_name='items')
     codigo = models.CharField(max_length=50)
@@ -138,6 +139,12 @@ class DespachoItem(models.Model):
         upload_to='incidencias/%Y/%m/%d/',
         null=True, blank=True,
     )
+    # Resolución ACTIVA de la incidencia; null = incidencia pendiente.
+    # El historial completo (incluidas resoluciones anuladas) vive en IncidenciaEvento.
+    resolucion = models.ForeignKey(
+        'ResolucionIncidencia', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='items_resueltos',
+    )
 
     def __str__(self):
         codigo = self.pedido_item.codigo if self.pedido_item else self.codigo_real
@@ -193,3 +200,68 @@ class ConfiguracionPedidos(models.Model):
     def load(cls) -> 'ConfiguracionPedidos':
         obj, _ = cls.objects.get_or_create(pk=1, defaults={'deposito_transito': 10})
         return obj
+
+
+class ResolucionIncidencia(models.Model):
+    """Acto de resolución que agrupa incidencias resueltas con un mismo documento."""
+    TIPO_CHOICES = [
+        ('TRASLADO', 'Traslado a2'),
+        ('MANUAL', 'Manual'),
+    ]
+    ESTADO_CHOICES = [
+        ('ACTIVA', 'Activa'),
+        ('ANULADA', 'Anulada'),
+    ]
+    tipo = models.CharField(max_length=10, choices=TIPO_CHOICES)
+    documento_traslado = models.CharField(max_length=20, blank=True, default='')
+    observacion = models.CharField(max_length=255, blank=True, default='')
+    resuelto_por = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True,
+        related_name='incidencias_resueltas',
+    )
+    fecha_resolucion = models.DateTimeField(auto_now_add=True)
+    estado = models.CharField(max_length=10, choices=ESTADO_CHOICES, default='ACTIVA')
+    anulada_por = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='resoluciones_anuladas',
+    )
+    fecha_anulacion = models.DateTimeField(null=True, blank=True)
+    motivo_anulacion = models.CharField(max_length=255, blank=True, default='')
+
+    class Meta:
+        ordering = ['-fecha_resolucion']
+        verbose_name = 'Resolución de incidencia'
+        verbose_name_plural = 'Resoluciones de incidencias'
+
+    def __str__(self) -> str:
+        ref = self.documento_traslado or 'manual'
+        return f"Resolución #{self.pk} ({ref})"
+
+
+class IncidenciaEvento(models.Model):
+    """Log inmutable de resoluciones/anulaciones por item. Nunca se edita ni borra."""
+    TIPO_EVENTO_CHOICES = [
+        ('RESOLUCION', 'Resolución'),
+        ('ANULACION', 'Anulación'),
+    ]
+    despacho_item = models.ForeignKey(
+        DespachoItem, on_delete=models.CASCADE, related_name='eventos_incidencia',
+    )
+    resolucion = models.ForeignKey(
+        ResolucionIncidencia, on_delete=models.PROTECT, related_name='eventos',
+    )
+    tipo_evento = models.CharField(max_length=10, choices=TIPO_EVENTO_CHOICES)
+    usuario = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True,
+        related_name='eventos_incidencia',
+    )
+    fecha = models.DateTimeField(auto_now_add=True)
+    detalle = models.CharField(max_length=255, blank=True, default='')
+
+    class Meta:
+        ordering = ['fecha']
+        verbose_name = 'Evento de incidencia'
+        verbose_name_plural = 'Eventos de incidencias'
+
+    def __str__(self) -> str:
+        return f"{self.tipo_evento} item #{self.despacho_item_id} ({self.fecha:%d/%m/%Y})"

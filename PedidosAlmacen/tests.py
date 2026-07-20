@@ -1436,3 +1436,50 @@ class VolverUrlDetallePedidoTest(TestCase):
     def test_sin_sesion_cae_a_lista_de_pedidos(self):
         resp = self.client.get(self.url)
         self.assertContains(resp, 'href="{}"'.format(self.reverse('pedidos-lista')))
+
+
+class ResolucionIncidenciaModelTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem
+        self.user = User.objects.create_superuser(username='sup_ri', password='x')
+        self.pedido = Pedido.objects.create(solicitante=self.user, estado='PARCIAL')
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='Producto 1',
+            cantidad_solicitada=5, estado='INCIDENCIA',
+        )
+        self.despacho = Despacho.objects.create(pedido=self.pedido, estado='PARCIAL')
+        self.di = DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=self.item,
+            cantidad_despachada=5, tipo_incidencia='CANTIDAD_MENOR',
+        )
+
+    def test_estado_incidencia_resuelta_en_choices(self):
+        from .models import PedidoItem
+        self.assertIn(
+            ('INCIDENCIA_RESUELTA', 'Incidencia Resuelta'),
+            PedidoItem.ESTADO_ITEM_CHOICES,
+        )
+
+    def test_crear_resolucion_con_items_y_eventos(self):
+        from .models import ResolucionIncidencia, IncidenciaEvento
+        res = ResolucionIncidencia.objects.create(
+            tipo='TRASLADO', documento_traslado='00000099', resuelto_por=self.user,
+        )
+        self.assertEqual(res.estado, 'ACTIVA')
+        self.di.resolucion = res
+        self.di.save()
+        ev = IncidenciaEvento.objects.create(
+            despacho_item=self.di, resolucion=res, tipo_evento='RESOLUCION',
+            usuario=self.user, detalle='Traslado a2 00000099',
+        )
+        self.assertEqual(list(res.items_resueltos.all()), [self.di])
+        self.assertEqual(list(self.di.eventos_incidencia.all()), [ev])
+        self.assertEqual(list(res.eventos.all()), [ev])
+
+    def test_resolucion_nula_significa_pendiente(self):
+        from .models import DespachoItem
+        pendientes = DespachoItem.objects.exclude(tipo_incidencia='').filter(
+            resolucion__isnull=True,
+        )
+        self.assertEqual(list(pendientes), [self.di])
