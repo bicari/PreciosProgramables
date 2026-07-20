@@ -1,0 +1,132 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="fas fa-clipboard-check me-2 text-success"></i>Resolución de Incidencias</h2>
+        <a href="{% url 'pedidos-reporte-incidencias' %}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left"></i> Ver Reporte
+        </a>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags }}{% endif %} alert-dismissible fade show">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    <!-- Filtros -->
+    <div class="card mb-4">
+        <div class="card-header"><h6 class="mb-0"><i class="fas fa-filter me-1"></i>Filtros</h6></div>
+        <div class="card-body">
+            <form method="get" class="row g-3 align-items-end">
+                <input type="hidden" name="vista" value="{{ vista }}">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Fecha inicio</label>
+                    <input type="date" name="fecha_inicio" class="form-control" value="{{ fecha_inicio }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Fecha fin</label>
+                    <input type="date" name="fecha_fin" class="form-control" value="{{ fecha_fin }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Tipo de incidencia</label>
+                    <select name="tipo" class="form-select">
+                        <option value="">Todos los tipos</option>
+                        {% for valor, etiqueta in tipos_incidencia %}
+                        <option value="{{ valor }}" {% if tipo_filtro == valor %}selected{% endif %}>{{ etiqueta }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary w-100"><i class="fas fa-search"></i> Aplicar</button>
+                    <a href="{% url 'pedidos-resolver-incidencias' %}?vista={{ vista }}" class="btn btn-outline-secondary"><i class="fas fa-times"></i></a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Pestañas -->
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+            <a class="nav-link {% if vista == 'pendientes' %}active{% endif %}"
+               href="?vista=pendientes&fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&tipo={{ tipo_filtro }}">
+                <i class="fas fa-hourglass-half me-1"></i>Pendientes
+                <span class="badge bg-warning text-dark">{{ total_pendientes }}</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if vista == 'resueltas' %}active{% endif %}"
+               href="?vista=resueltas&fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&tipo={{ tipo_filtro }}">
+                <i class="fas fa-check-double me-1"></i>Resueltas
+                <span class="badge bg-success">{{ total_resueltas }}</span>
+            </a>
+        </li>
+    </ul>
+
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-sm mb-0 align-middle">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Pedido</th>
+                            <th>Despacho</th>
+                            <th>Fecha</th>
+                            <th>Tipo</th>
+                            <th>Producto</th>
+                            <th class="text-center">Cant.</th>
+                            <th>Solicitante</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for inc in incidencias %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'pedidos-detalle' inc.despacho.pedido.numero_pedido %}"
+                                   class="fw-bold text-decoration-none">#{{ inc.despacho.pedido.numero_pedido }}</a>
+                            </td>
+                            <td class="text-muted">#{{ inc.despacho.numero_despacho }}</td>
+                            <td class="text-nowrap">
+                                {% if inc.despacho.fecha_despacho %}{{ inc.despacho.fecha_despacho|date:"d/m/Y" }}{% else %}—{% endif %}
+                            </td>
+                            <td>
+                                {% if inc.tipo_incidencia == 'PRODUCTO_ERRONEO' %}
+                                    <span class="badge bg-danger"><i class="fas fa-exchange-alt me-1"></i>Cambio SKU</span>
+                                {% elif inc.tipo_incidencia == 'SKU_NO_CONTEMPLADO' %}
+                                    <span class="badge bg-primary"><i class="fas fa-plus-circle me-1"></i>Prod. Nuevo</span>
+                                {% elif inc.tipo_incidencia == 'CANTIDAD_MENOR' %}
+                                    <span class="badge bg-secondary"><i class="fas fa-arrow-down me-1"></i>Cant. Menor</span>
+                                {% elif inc.tipo_incidencia == 'CANTIDAD_MAYOR' %}
+                                    <span class="badge bg-warning text-dark"><i class="fas fa-arrow-up me-1"></i>Cant. Mayor</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if inc.tipo_incidencia == 'PRODUCTO_ERRONEO' and inc.codigo_real %}
+                                    <span class="fw-semibold text-success">{{ inc.codigo_real }}</span><br>
+                                    <small>{{ inc.descripcion_real|default:"" }}</small>
+                                {% elif inc.pedido_item %}
+                                    <span class="fw-semibold">{{ inc.pedido_item.codigo }}</span><br>
+                                    <small>{{ inc.pedido_item.descripcion }}</small>
+                                {% else %}—{% endif %}
+                            </td>
+                            <td class="text-center fw-bold">{{ inc.cantidad_despachada }}</td>
+                            <td>{{ inc.despacho.pedido.solicitante.username|capfirst }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="7" class="text-center text-muted py-4">
+                                <i class="fas fa-check-circle text-success fa-2x mb-2 d-block"></i>
+                                No hay incidencias {{ vista }} en el período seleccionado.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock content %}

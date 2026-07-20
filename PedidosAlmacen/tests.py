@@ -1520,3 +1520,61 @@ class ValidarTrasladoResolucionTest(TestCase):
         primera_query = cursor.execute.call_args_list[0][0][0]
         self.assertIn("'00000099'", primera_query)
         self.assertIn('FTI_TIPO = 1', primera_query)
+
+
+class ResolverIncidenciasVistaTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem, ResolucionIncidencia
+        self.sup = User.objects.create_superuser(username='sup_res', password='x')
+        self.tienda = User.objects.create_user(username='tnd_res', password='x')
+        g, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.tienda.groups.add(g)
+        self.pedido = Pedido.objects.create(solicitante=self.tienda, estado='PARCIAL')
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='Producto 1',
+            cantidad_solicitada=5, estado='INCIDENCIA',
+        )
+        self.despacho = Despacho.objects.create(pedido=self.pedido, estado='PARCIAL')
+        self.pendiente = DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=self.item,
+            cantidad_despachada=5, tipo_incidencia='CANTIDAD_MENOR',
+        )
+        self.resolucion = ResolucionIncidencia.objects.create(
+            tipo='MANUAL', observacion='ajuste', resuelto_por=self.sup,
+        )
+        item2 = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU2', descripcion='Producto 2',
+            cantidad_solicitada=3, estado='INCIDENCIA_RESUELTA',
+        )
+        self.resuelta = DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=item2,
+            cantidad_despachada=3, tipo_incidencia='CANTIDAD_MAYOR',
+            resolucion=self.resolucion,
+        )
+
+    def test_no_supervisor_redirige(self):
+        self.client.force_login(self.tienda)
+        resp = self.client.get('/pedidos/incidencias/resolver/')
+        self.assertEqual(resp.status_code, 302)
+
+    def test_pendientes_por_defecto(self):
+        self.client.force_login(self.sup)
+        resp = self.client.get('/pedidos/incidencias/resolver/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(list(resp.context['incidencias']), [self.pendiente])
+        self.assertEqual(resp.context['total_pendientes'], 1)
+        self.assertEqual(resp.context['total_resueltas'], 1)
+
+    def test_vista_resueltas(self):
+        self.client.force_login(self.sup)
+        resp = self.client.get('/pedidos/incidencias/resolver/?vista=resueltas')
+        self.assertEqual(list(resp.context['incidencias']), [self.resuelta])
+
+    def test_sku_incidencia_helper(self):
+        from .views import _sku_incidencia
+        self.assertEqual(_sku_incidencia(self.pendiente), 'SKU1')
+        self.pendiente.tipo_incidencia = 'PRODUCTO_ERRONEO'
+        self.pendiente.codigo_real = 'REAL9'
+        self.assertEqual(_sku_incidencia(self.pendiente), 'REAL9')

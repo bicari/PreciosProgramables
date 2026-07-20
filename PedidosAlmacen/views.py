@@ -9,7 +9,10 @@ from django.db.models import Sum, Count, IntegerField, Q, Max
 from django.db.models import Case, When, Value
 from django.utils import timezone
 from datetime import datetime, timedelta, time as dtime
-from .models import Pedido, PedidoItem, Despacho, DespachoItem, DepositoPermitido, ConfiguracionPedidos
+from .models import (
+    Pedido, PedidoItem, Despacho, DespachoItem, DepositoPermitido,
+    ConfiguracionPedidos, ResolucionIncidencia, IncidenciaEvento,
+)
 from .forms import PedidoForm
 from .dbisam import PedidosDBISAM, DEPOSITO_ALMACEN
 from .notifications import notificar_nuevo_pedido, notificar_despacho, notificar_despacho_parcial
@@ -1595,6 +1598,76 @@ def reporte_incidencias(request):
         'fecha_fin': fecha_fin,
         'tipo_filtro': tipo_filtro,
         'tipos_incidencia': TIPOS_INCIDENCIA,
+    })
+
+
+def _sku_incidencia(di: DespachoItem) -> str:
+    """SKU que debe figurar en el traslado a2 que resuelve la incidencia.
+
+    Para PRODUCTO_ERRONEO es el producto que realmente llegó (codigo_real);
+    para el resto, el código del PedidoItem asociado.
+    """
+    if di.tipo_incidencia == 'PRODUCTO_ERRONEO' and di.codigo_real:
+        return di.codigo_real.strip()
+    if di.pedido_item:
+        return di.pedido_item.codigo.strip()
+    return di.codigo_real.strip()
+
+
+def _incidencias_base_qs():
+    """Queryset base de DespachoItems con incidencia, excluyendo anulados."""
+    return (
+        DespachoItem.objects.exclude(tipo_incidencia='')
+        .select_related(
+            'despacho__pedido__solicitante', 'pedido_item', 'autorizado_por',
+            'resolucion__resuelto_por',
+        )
+        .exclude(despacho__estado='ANULADO')
+        .exclude(despacho__pedido__estado='ANULADO')
+        .order_by('-despacho__fecha_despacho')
+    )
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def resolver_incidencias(request):
+    """Página de resolución de incidencias: pestañas Pendientes/Resueltas."""
+    vista = request.GET.get('vista', 'pendientes')
+    if vista not in ('pendientes', 'resueltas'):
+        vista = 'pendientes'
+    fecha_inicio = request.GET.get('fecha_inicio', '')
+    fecha_fin = request.GET.get('fecha_fin', '')
+    tipo_filtro = request.GET.get('tipo', '')
+
+    qs = _incidencias_base_qs()
+    if fecha_inicio:
+        try:
+            qs = qs.filter(despacho__fecha_despacho__date__gte=datetime.strptime(fecha_inicio, '%Y-%m-%d').date())
+        except ValueError:
+            pass
+    if fecha_fin:
+        try:
+            qs = qs.filter(despacho__fecha_despacho__date__lte=datetime.strptime(fecha_fin, '%Y-%m-%d').date())
+        except ValueError:
+            pass
+    if tipo_filtro in [t[0] for t in DespachoItem.TIPO_INCIDENCIA_CHOICES]:
+        qs = qs.filter(tipo_incidencia=tipo_filtro)
+
+    pendientes = qs.filter(resolucion__isnull=True)
+    resueltas = qs.filter(resolucion__isnull=False).prefetch_related(
+        'eventos_incidencia__usuario',
+    )
+    incidencias = pendientes if vista == 'pendientes' else resueltas
+
+    return render(request, 'pedidos-resolver-incidencias.html', {
+        'incidencias': incidencias,
+        'vista': vista,
+        'total_pendientes': pendientes.count(),
+        'total_resueltas': resueltas.count(),
+        'tipos_incidencia': DespachoItem.TIPO_INCIDENCIA_CHOICES,
+        'fecha_inicio': fecha_inicio,
+        'fecha_fin': fecha_fin,
+        'tipo_filtro': tipo_filtro,
     })
 
 
