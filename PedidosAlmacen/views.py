@@ -1800,8 +1800,11 @@ def confirmar_resolucion_incidencias(request):
             return redirect('pedidos-resolver-incidencias')
 
     with transaction.atomic():
+        # of=('self',): bloquear solo las filas de DespachoItem; el JOIN a
+        # pedido_item es nullable (LEFT OUTER) y Postgres no admite FOR UPDATE
+        # sobre el lado nullable de un outer join.
         bloqueados = list(
-            DespachoItem.objects.select_for_update()
+            DespachoItem.objects.select_for_update(of=('self',))
             .filter(id__in=[di.id for di in items], resolucion__isnull=True)
             .select_related('pedido_item')
         )
