@@ -1715,6 +1715,127 @@ def validar_traslado_incidencias(request):
     })
 
 
+def _incidencias_pendientes_despacho(despacho: Despacho) -> bool:
+    """True si el despacho tiene incidencias sin resolución activa."""
+    return despacho.items.exclude(tipo_incidencia='').filter(resolucion__isnull=True).exists()
+
+
+def _actualizar_estados_tras_resolucion(despacho: Despacho) -> None:
+    """Promueve despacho y pedido cuando ya no quedan incidencias pendientes.
+
+    Despacho: PARCIAL → RECIBIDO. Pedido: → RECIBIDO si todos sus items quedan
+    en RECIBIDO o INCIDENCIA_RESUELTA (equivalente a recibido).
+    """
+    if despacho.estado == 'PARCIAL' and not _incidencias_pendientes_despacho(despacho):
+        despacho.estado = 'RECIBIDO'
+        despacho.save(update_fields=['estado'])
+
+    pedido = despacho.pedido
+    estados = list(pedido.items.values_list('estado', flat=True))
+    if (
+        estados
+        and pedido.estado not in ('ANULADO', 'CERRADO', 'RECIBIDO')
+        and all(e in ('RECIBIDO', 'INCIDENCIA_RESUELTA') for e in estados)
+    ):
+        pedido.estado = 'RECIBIDO'
+        if not pedido.fecha_recepcion:
+            pedido.fecha_recepcion = timezone.now()
+        pedido.save(update_fields=['estado', 'fecha_recepcion'])
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def confirmar_resolucion_incidencias(request):
+    """Crea una resolución (traslado validado contra a2, o manual) para las incidencias elegidas."""
+    if request.method != 'POST':
+        return redirect('pedidos-resolver-incidencias')
+
+    item_ids = request.POST.getlist('item_ids')
+    tipo = request.POST.get('tipo', '')
+    documento = request.POST.get('documento', '').strip()
+    observacion = request.POST.get('observacion', '').strip()
+
+    if not item_ids:
+        messages.error(request, 'Selecciona al menos una incidencia.')
+        return redirect('pedidos-resolver-incidencias')
+    if tipo not in ('TRASLADO', 'MANUAL'):
+        messages.error(request, 'Tipo de resolución inválido.')
+        return redirect('pedidos-resolver-incidencias')
+    if tipo == 'MANUAL' and not observacion:
+        messages.error(request, 'La observación es obligatoria en una resolución manual.')
+        return redirect('pedidos-resolver-incidencias')
+    if tipo == 'TRASLADO' and not documento:
+        messages.error(request, 'Indica el número de documento del traslado.')
+        return redirect('pedidos-resolver-incidencias')
+
+    items = list(
+        DespachoItem.objects.exclude(tipo_incidencia='')
+        .filter(id__in=item_ids)
+        .select_related('pedido_item')
+    )
+    if len(items) != len(set(item_ids)):
+        messages.error(request, 'Alguna de las incidencias seleccionadas no existe.')
+        return redirect('pedidos-resolver-incidencias')
+
+    # Revalidación en servidor contra a2 (no confía en el AJAX previo)
+    if tipo == 'TRASLADO':
+        try:
+            resultado = PedidosDBISAM().validar_traslado_resolucion(documento)
+        except ValueError:
+            messages.error(request, 'Número de documento inválido.')
+            return redirect('pedidos-resolver-incidencias')
+        except Exception:
+            logger.exception('Error validando traslado de resolución contra a2')
+            messages.error(request, 'No se pudo validar contra a2. Intenta de nuevo.')
+            return redirect('pedidos-resolver-incidencias')
+        if not resultado['existe']:
+            messages.error(request, f'El documento {documento} no existe como traslado en a2.')
+            return redirect('pedidos-resolver-incidencias')
+        faltantes = sorted({_sku_incidencia(di) for di in items} - resultado['codigos_traslado'])
+        if faltantes:
+            messages.error(
+                request,
+                f'El traslado {documento} no incluye los SKUs: {", ".join(faltantes)}.',
+            )
+            return redirect('pedidos-resolver-incidencias')
+
+    with transaction.atomic():
+        bloqueados = list(
+            DespachoItem.objects.select_for_update()
+            .filter(id__in=[di.id for di in items], resolucion__isnull=True)
+            .select_related('pedido_item')
+        )
+        if len(bloqueados) != len(items):
+            messages.error(request, 'Alguna incidencia ya fue resuelta por otro usuario. Refresca la página.')
+            return redirect('pedidos-resolver-incidencias')
+
+        resolucion = ResolucionIncidencia.objects.create(
+            tipo=tipo,
+            documento_traslado=documento if tipo == 'TRASLADO' else '',
+            observacion=observacion,
+            resuelto_por=request.user,
+        )
+        despachos_ids = set()
+        for di in bloqueados:
+            di.resolucion = resolucion
+            di.save(update_fields=['resolucion'])
+            IncidenciaEvento.objects.create(
+                despacho_item=di, resolucion=resolucion, tipo_evento='RESOLUCION',
+                usuario=request.user,
+                detalle=(f'Traslado a2 {documento}' if tipo == 'TRASLADO' else f'Manual: {observacion}'),
+            )
+            if di.pedido_item and di.pedido_item.estado == 'INCIDENCIA':
+                di.pedido_item.estado = 'INCIDENCIA_RESUELTA'
+                di.pedido_item.save(update_fields=['estado'])
+            despachos_ids.add(di.despacho_id)
+
+        for despacho in Despacho.objects.select_for_update().filter(numero_despacho__in=despachos_ids):
+            _actualizar_estados_tras_resolucion(despacho)
+
+    messages.success(request, f'{len(bloqueados)} incidencia(s) resuelta(s) correctamente.')
+    return redirect('pedidos-resolver-incidencias')
+
+
 @login_required(login_url='/login/')
 def contar_pendientes(request):
     if is_pedidos_supervisor(request.user):

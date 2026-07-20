@@ -1641,3 +1641,136 @@ class ValidarTrasladoEndpointTest(TestCase):
     def test_sin_documento_devuelve_400(self):
         resp = self.client.post(self.url, {'documento': '', 'item_ids': [self.di.id]})
         self.assertEqual(resp.status_code, 400)
+
+
+class ConfirmarResolucionTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem
+        self.sup = User.objects.create_superuser(username='sup_conf', password='x')
+        self.pedido = Pedido.objects.create(solicitante=self.sup, estado='PARCIAL')
+        self.item1 = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='P1',
+            cantidad_solicitada=5, cantidad_recibida=5, estado='INCIDENCIA',
+        )
+        self.item2 = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU2', descripcion='P2',
+            cantidad_solicitada=3, cantidad_recibida=3, estado='INCIDENCIA',
+        )
+        self.despacho = Despacho.objects.create(pedido=self.pedido, estado='PARCIAL')
+        self.di1 = DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=self.item1,
+            cantidad_despachada=5, tipo_incidencia='CANTIDAD_MENOR',
+        )
+        self.di2 = DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=self.item2,
+            cantidad_despachada=3, tipo_incidencia='CANTIDAD_MAYOR',
+        )
+        self.url = '/pedidos/incidencias/resolver/confirmar/'
+        self.client.force_login(self.sup)
+
+    def _post_traslado(self, item_ids, documento='99'):
+        return self.client.post(self.url, {
+            'item_ids': item_ids, 'tipo': 'TRASLADO', 'documento': documento,
+        })
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_resuelve_todas_despacho_recibido(self, mock_db):
+        from .models import ResolucionIncidencia, IncidenciaEvento
+        mock_db.return_value.validar_traslado_resolucion.return_value = {
+            'existe': True, 'codigos_traslado': {'SKU1', 'SKU2'},
+        }
+        resp = self._post_traslado([self.di1.id, self.di2.id])
+        self.assertEqual(resp.status_code, 302)
+        self.di1.refresh_from_db(); self.di2.refresh_from_db()
+        self.item1.refresh_from_db(); self.item2.refresh_from_db()
+        self.despacho.refresh_from_db()
+        res = ResolucionIncidencia.objects.get()
+        self.assertEqual(res.tipo, 'TRASLADO')
+        self.assertEqual(res.documento_traslado, '99')
+        self.assertEqual(self.di1.resolucion, res)
+        self.assertEqual(self.di2.resolucion, res)
+        self.assertEqual(self.item1.estado, 'INCIDENCIA_RESUELTA')
+        self.assertEqual(self.item2.estado, 'INCIDENCIA_RESUELTA')
+        self.assertEqual(self.despacho.estado, 'RECIBIDO')
+        self.assertEqual(IncidenciaEvento.objects.filter(tipo_evento='RESOLUCION').count(), 2)
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_resolucion_parcial_despacho_sigue_parcial(self, mock_db):
+        mock_db.return_value.validar_traslado_resolucion.return_value = {
+            'existe': True, 'codigos_traslado': {'SKU1'},
+        }
+        self._post_traslado([self.di1.id])
+        self.despacho.refresh_from_db()
+        self.item1.refresh_from_db()
+        self.assertEqual(self.item1.estado, 'INCIDENCIA_RESUELTA')
+        self.assertEqual(self.despacho.estado, 'PARCIAL')
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_documento_inexistente_no_resuelve(self, mock_db):
+        from .models import ResolucionIncidencia
+        mock_db.return_value.validar_traslado_resolucion.return_value = {
+            'existe': False, 'codigos_traslado': set(),
+        }
+        self._post_traslado([self.di1.id])
+        self.assertEqual(ResolucionIncidencia.objects.count(), 0)
+        self.item1.refresh_from_db()
+        self.assertEqual(self.item1.estado, 'INCIDENCIA')
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_sku_no_cubierto_no_resuelve(self, mock_db):
+        from .models import ResolucionIncidencia
+        mock_db.return_value.validar_traslado_resolucion.return_value = {
+            'existe': True, 'codigos_traslado': {'OTRO'},
+        }
+        self._post_traslado([self.di1.id])
+        self.assertEqual(ResolucionIncidencia.objects.count(), 0)
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_error_odbc_no_resuelve(self, mock_db):
+        from .models import ResolucionIncidencia
+        mock_db.return_value.validar_traslado_resolucion.side_effect = Exception('odbc down')
+        self._post_traslado([self.di1.id])
+        self.assertEqual(ResolucionIncidencia.objects.count(), 0)
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_manual_no_llama_a2(self, mock_db):
+        from .models import ResolucionIncidencia
+        self.client.post(self.url, {
+            'item_ids': [self.di1.id], 'tipo': 'MANUAL',
+            'observacion': 'Se ajustó directo en a2',
+        })
+        mock_db.return_value.validar_traslado_resolucion.assert_not_called()
+        res = ResolucionIncidencia.objects.get()
+        self.assertEqual(res.tipo, 'MANUAL')
+        self.item1.refresh_from_db()
+        self.assertEqual(self.item1.estado, 'INCIDENCIA_RESUELTA')
+
+    def test_manual_sin_observacion_no_resuelve(self):
+        from .models import ResolucionIncidencia
+        self.client.post(self.url, {'item_ids': [self.di1.id], 'tipo': 'MANUAL', 'observacion': ''})
+        self.assertEqual(ResolucionIncidencia.objects.count(), 0)
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_ya_resuelta_por_otra_sesion_no_duplica(self, mock_db):
+        from .models import ResolucionIncidencia
+        mock_db.return_value.validar_traslado_resolucion.return_value = {
+            'existe': True, 'codigos_traslado': {'SKU1'},
+        }
+        previa = ResolucionIncidencia.objects.create(tipo='MANUAL', observacion='x', resuelto_por=self.sup)
+        self.di1.resolucion = previa
+        self.di1.save()
+        self._post_traslado([self.di1.id])
+        self.assertEqual(ResolucionIncidencia.objects.count(), 1)
+        self.di1.refresh_from_db()
+        self.assertEqual(self.di1.resolucion, previa)
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_pedido_recibido_si_todo_resuelto(self, mock_db):
+        mock_db.return_value.validar_traslado_resolucion.return_value = {
+            'existe': True, 'codigos_traslado': {'SKU1', 'SKU2'},
+        }
+        self._post_traslado([self.di1.id, self.di2.id])
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'RECIBIDO')
+        self.assertIsNotNone(self.pedido.fecha_recepcion)
