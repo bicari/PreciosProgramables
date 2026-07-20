@@ -1672,6 +1672,50 @@ def resolver_incidencias(request):
 
 
 @login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def validar_traslado_incidencias(request):
+    """AJAX: valida un documento de traslado a2 contra las incidencias seleccionadas."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'Método no permitido'}, status=405)
+    documento = request.POST.get('documento', '').strip()
+    item_ids = request.POST.getlist('item_ids')
+    if not documento or not item_ids:
+        return JsonResponse({'ok': False, 'error': 'Documento e incidencias son requeridos'}, status=400)
+
+    items = list(
+        DespachoItem.objects.exclude(tipo_incidencia='')
+        .filter(id__in=item_ids)
+        .select_related('pedido_item')
+    )
+    if not items:
+        return JsonResponse({'ok': False, 'error': 'Incidencias no encontradas'}, status=400)
+
+    try:
+        resultado = PedidosDBISAM().validar_traslado_resolucion(documento)
+    except ValueError:
+        return JsonResponse({'ok': False, 'error': 'Número de documento inválido'}, status=400)
+    except Exception:
+        logger.exception('Error validando traslado de resolución contra a2')
+        return JsonResponse(
+            {'ok': False, 'error': 'No se pudo consultar a2. Intenta de nuevo.'},
+            status=502,
+        )
+
+    if not resultado['existe']:
+        return JsonResponse({'ok': True, 'existe': False, 'skus': [], 'faltantes': [], 'valido': False})
+
+    skus = sorted({_sku_incidencia(di) for di in items})
+    faltantes = sorted(set(skus) - resultado['codigos_traslado'])
+    return JsonResponse({
+        'ok': True,
+        'existe': True,
+        'skus': skus,
+        'faltantes': faltantes,
+        'valido': not faltantes,
+    })
+
+
+@login_required(login_url='/login/')
 def contar_pendientes(request):
     if is_pedidos_supervisor(request.user):
         count = (

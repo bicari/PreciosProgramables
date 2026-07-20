@@ -1578,3 +1578,66 @@ class ResolverIncidenciasVistaTest(TestCase):
         self.pendiente.tipo_incidencia = 'PRODUCTO_ERRONEO'
         self.pendiente.codigo_real = 'REAL9'
         self.assertEqual(_sku_incidencia(self.pendiente), 'REAL9')
+
+
+class ValidarTrasladoEndpointTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem
+        self.sup = User.objects.create_superuser(username='sup_val', password='x')
+        self.pedido = Pedido.objects.create(solicitante=self.sup, estado='PARCIAL')
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='Producto 1',
+            cantidad_solicitada=5, estado='INCIDENCIA',
+        )
+        self.despacho = Despacho.objects.create(pedido=self.pedido, estado='PARCIAL')
+        self.di = DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=self.item,
+            cantidad_despachada=5, tipo_incidencia='CANTIDAD_MENOR',
+        )
+        self.url = '/pedidos/incidencias/resolver/validar/'
+        self.client.force_login(self.sup)
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_traslado_valido_cubre_skus(self, mock_db):
+        mock_db.return_value.validar_traslado_resolucion.return_value = {
+            'existe': True, 'codigos_traslado': {'SKU1', 'OTRO'},
+        }
+        resp = self.client.post(self.url, {'documento': '99', 'item_ids': [self.di.id]})
+        data = resp.json()
+        self.assertTrue(data['ok'])
+        self.assertTrue(data['existe'])
+        self.assertTrue(data['valido'])
+        self.assertEqual(data['faltantes'], [])
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_traslado_no_cubre_sku(self, mock_db):
+        mock_db.return_value.validar_traslado_resolucion.return_value = {
+            'existe': True, 'codigos_traslado': {'OTRO'},
+        }
+        resp = self.client.post(self.url, {'documento': '99', 'item_ids': [self.di.id]})
+        data = resp.json()
+        self.assertTrue(data['existe'])
+        self.assertFalse(data['valido'])
+        self.assertEqual(data['faltantes'], ['SKU1'])
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_documento_inexistente(self, mock_db):
+        mock_db.return_value.validar_traslado_resolucion.return_value = {
+            'existe': False, 'codigos_traslado': set(),
+        }
+        resp = self.client.post(self.url, {'documento': '99', 'item_ids': [self.di.id]})
+        data = resp.json()
+        self.assertTrue(data['ok'])
+        self.assertFalse(data['existe'])
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_error_odbc_devuelve_502(self, mock_db):
+        mock_db.return_value.validar_traslado_resolucion.side_effect = Exception('odbc down')
+        resp = self.client.post(self.url, {'documento': '99', 'item_ids': [self.di.id]})
+        self.assertEqual(resp.status_code, 502)
+        self.assertFalse(resp.json()['ok'])
+
+    def test_sin_documento_devuelve_400(self):
+        resp = self.client.post(self.url, {'documento': '', 'item_ids': [self.di.id]})
+        self.assertEqual(resp.status_code, 400)
