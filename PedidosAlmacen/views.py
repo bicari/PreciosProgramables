@@ -1836,6 +1836,66 @@ def confirmar_resolucion_incidencias(request):
     return redirect('pedidos-resolver-incidencias')
 
 
+def _revertir_estados_tras_anulacion(despacho: Despacho) -> None:
+    """Devuelve despacho y pedido a PARCIAL si reaparecen incidencias pendientes."""
+    if despacho.estado == 'RECIBIDO' and _incidencias_pendientes_despacho(despacho):
+        despacho.estado = 'PARCIAL'
+        despacho.save(update_fields=['estado'])
+
+    pedido = despacho.pedido
+    if pedido.estado == 'RECIBIDO' and pedido.items.filter(estado='INCIDENCIA').exists():
+        pedido.estado = 'PARCIAL'
+        pedido.save(update_fields=['estado'])
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def anular_resolucion_incidencia(request, resolucion_id):
+    """Anula una resolución activa: las incidencias vuelven a pendientes."""
+    if request.method != 'POST':
+        return redirect('pedidos-resolver-incidencias')
+    motivo = request.POST.get('motivo', '').strip()
+    if not motivo:
+        messages.error(request, 'El motivo de anulación es obligatorio.')
+        return redirect('pedidos-resolver-incidencias')
+
+    with transaction.atomic():
+        try:
+            resolucion = (
+                ResolucionIncidencia.objects.select_for_update()
+                .get(pk=resolucion_id, estado='ACTIVA')
+            )
+        except ResolucionIncidencia.DoesNotExist:
+            messages.error(request, 'La resolución no existe o ya fue anulada.')
+            return redirect('pedidos-resolver-incidencias')
+
+        resolucion.estado = 'ANULADA'
+        resolucion.anulada_por = request.user
+        resolucion.fecha_anulacion = timezone.now()
+        resolucion.motivo_anulacion = motivo
+        resolucion.save(update_fields=['estado', 'anulada_por', 'fecha_anulacion', 'motivo_anulacion'])
+
+        items = list(resolucion.items_resueltos.select_related('pedido_item'))
+        despachos_ids = set()
+        for di in items:
+            IncidenciaEvento.objects.create(
+                despacho_item=di, resolucion=resolucion, tipo_evento='ANULACION',
+                usuario=request.user, detalle=motivo,
+            )
+            di.resolucion = None
+            di.save(update_fields=['resolucion'])
+            if di.pedido_item and di.pedido_item.estado == 'INCIDENCIA_RESUELTA':
+                di.pedido_item.estado = 'INCIDENCIA'
+                di.pedido_item.save(update_fields=['estado'])
+            despachos_ids.add(di.despacho_id)
+
+        for despacho in Despacho.objects.select_for_update().filter(numero_despacho__in=despachos_ids):
+            _revertir_estados_tras_anulacion(despacho)
+
+    messages.success(request, f'Resolución anulada: {len(items)} incidencia(s) vuelven a pendientes.')
+    return redirect('pedidos-resolver-incidencias')
+
+
 @login_required(login_url='/login/')
 def contar_pendientes(request):
     if is_pedidos_supervisor(request.user):

@@ -19,6 +19,7 @@ urlpatterns = [
     path('pedidos/incidencias/resolver/', views.resolver_incidencias, name='pedidos-resolver-incidencias'),
     path('pedidos/incidencias/resolver/validar/', views.validar_traslado_incidencias, name='pedidos-validar-traslado-incidencias'),
     path('pedidos/incidencias/resolver/confirmar/', views.confirmar_resolucion_incidencias, name='pedidos-confirmar-resolucion'),
+    path('pedidos/incidencias/resolver/anular/<int:resolucion_id>/', views.anular_resolucion_incidencia, name='pedidos-anular-resolucion'),
     path('pedidos/<int:pk>/asignar-picker/', views.asignar_picker, name='pedidos-asignar-picker'),
     path('pedidos/<int:pk>/desasignar-picker/', views.desasignar_picker, name='pedidos-desasignar-picker'),
     path('pedidos/<int:pk>/preparar/', views.preparar_pedido, name='pedidos-preparar'),

@@ -1774,3 +1774,84 @@ class ConfirmarResolucionTest(TestCase):
         self.pedido.refresh_from_db()
         self.assertEqual(self.pedido.estado, 'RECIBIDO')
         self.assertIsNotNone(self.pedido.fecha_recepcion)
+
+
+class AnularResolucionTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from .models import (
+            Pedido, PedidoItem, Despacho, DespachoItem,
+            ResolucionIncidencia, IncidenciaEvento,
+        )
+        self.sup = User.objects.create_superuser(username='sup_anul', password='x')
+        self.pedido = Pedido.objects.create(solicitante=self.sup, estado='RECIBIDO')
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='P1',
+            cantidad_solicitada=5, estado='INCIDENCIA_RESUELTA',
+        )
+        self.despacho = Despacho.objects.create(pedido=self.pedido, estado='RECIBIDO')
+        self.res = ResolucionIncidencia.objects.create(
+            tipo='TRASLADO', documento_traslado='00000099', resuelto_por=self.sup,
+        )
+        self.di = DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=self.item,
+            cantidad_despachada=5, tipo_incidencia='CANTIDAD_MENOR',
+            resolucion=self.res,
+        )
+        IncidenciaEvento.objects.create(
+            despacho_item=self.di, resolucion=self.res,
+            tipo_evento='RESOLUCION', usuario=self.sup, detalle='Traslado a2 00000099',
+        )
+        self.url = f'/pedidos/incidencias/resolver/anular/{self.res.id}/'
+        self.client.force_login(self.sup)
+
+    def test_anula_y_revierte_estados(self):
+        from .models import IncidenciaEvento
+        resp = self.client.post(self.url, {'motivo': 'Documento equivocado'})
+        self.assertEqual(resp.status_code, 302)
+        self.res.refresh_from_db(); self.di.refresh_from_db()
+        self.item.refresh_from_db(); self.despacho.refresh_from_db()
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.res.estado, 'ANULADA')
+        self.assertEqual(self.res.anulada_por, self.sup)
+        self.assertEqual(self.res.motivo_anulacion, 'Documento equivocado')
+        self.assertIsNotNone(self.res.fecha_anulacion)
+        self.assertIsNone(self.di.resolucion)
+        self.assertEqual(self.item.estado, 'INCIDENCIA')
+        self.assertEqual(self.despacho.estado, 'PARCIAL')
+        self.assertEqual(self.pedido.estado, 'PARCIAL')
+        self.assertEqual(
+            IncidenciaEvento.objects.filter(despacho_item=self.di).count(), 2,
+        )
+
+    def test_sin_motivo_no_anula(self):
+        self.client.post(self.url, {'motivo': ''})
+        self.res.refresh_from_db()
+        self.assertEqual(self.res.estado, 'ACTIVA')
+
+    def test_ya_anulada_no_se_reanula(self):
+        self.client.post(self.url, {'motivo': 'Primera'})
+        self.client.post(self.url, {'motivo': 'Segunda'})
+        self.res.refresh_from_db()
+        self.assertEqual(self.res.motivo_anulacion, 'Primera')
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_re_resolucion_tras_anulacion_acumula_historial(self, mock_db):
+        from .models import IncidenciaEvento, ResolucionIncidencia
+        mock_db.return_value.validar_traslado_resolucion.return_value = {
+            'existe': True, 'codigos_traslado': {'SKU1'},
+        }
+        self.client.post(self.url, {'motivo': 'Documento equivocado'})
+        self.client.post('/pedidos/incidencias/resolver/confirmar/', {
+            'item_ids': [self.di.id], 'tipo': 'TRASLADO', 'documento': '100',
+        })
+        self.di.refresh_from_db(); self.item.refresh_from_db()
+        nueva = ResolucionIncidencia.objects.exclude(pk=self.res.pk).get()
+        self.assertEqual(self.di.resolucion, nueva)
+        self.assertEqual(self.item.estado, 'INCIDENCIA_RESUELTA')
+        # Historial: resolución original + anulación + nueva resolución
+        eventos = list(
+            IncidenciaEvento.objects.filter(despacho_item=self.di)
+            .values_list('tipo_evento', flat=True)
+        )
+        self.assertEqual(eventos, ['RESOLUCION', 'ANULACION', 'RESOLUCION'])
