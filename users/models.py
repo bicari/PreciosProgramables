@@ -26,6 +26,7 @@ class UserManager(BaseUserManager):
 # Create your models here.
 class User(AbstractBaseUser, PermissionsMixin):
     username = models.CharField(max_length=150, unique=True)
+    email = models.EmailField('correo electrónico', blank=True, default='')
     password = models.CharField(max_length=128)
     status   = models.BooleanField(default=True)
     last_login = models.DateTimeField(blank=True, null=True, verbose_name='last login')

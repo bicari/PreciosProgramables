@@ -200,6 +200,51 @@ class PrintLabelTask(forms.Form):
         )
     )
 
-    def get_system_printers(self ):
+    departamento = forms.CharField(
+        label='Departamento',
+        required=False,
+        max_length=40,
+        widget=forms.HiddenInput(),
+    )
+
+    rango_desde = forms.IntegerField(
+        label='Desde',
+        required=False,
+        min_value=1,
+        widget=forms.NumberInput(
+            attrs={
+                'class': 'form-control',
+                'id': 'rango_desde',
+                'placeholder': 'Desde',
+            }
+        )
+    )
+
+    rango_hasta = forms.IntegerField(
+        label='Hasta',
+        required=False,
+        min_value=1,
+        widget=forms.NumberInput(
+            attrs={
+                'class': 'form-control',
+                'id': 'rango_hasta',
+                'placeholder': 'Hasta',
+            }
+        )
+    )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        departamento = cleaned_data.get('departamento') or None
+        if not departamento:
+            desde = cleaned_data.get('rango_desde')
+            hasta = cleaned_data.get('rango_hasta')
+            if (desde is None) != (hasta is None):
+                raise forms.ValidationError('Debe completar ambos campos del rango (Desde y Hasta).')
+            if desde is not None and hasta is not None and hasta < desde:
+                raise forms.ValidationError("'Hasta' debe ser mayor o igual que 'Desde'.")
+        return cleaned_data
+
+    def get_system_printers(self):
         printer_system = win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL)
         return [(printer[2], printer[2]) for printer in printer_system]

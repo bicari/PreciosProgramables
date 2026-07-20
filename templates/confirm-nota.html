@@ -6,7 +6,11 @@
         <h2>Solicitud procesada con éxito</h2>
         <p>La recepción ha sido generada correctamente.</p>
         <p>Nota Entrega Nro: {{document}} </p>
-        
+        {% if not email_ok %}
+        <div class="alert alert-warning mt-2" role="alert">
+            La nota se registró correctamente, pero el correo de notificación no se pudo enviar.
+        </div>
+        {% endif %}
         <div>
             <img src="{% static "test/check.png" %}" alt="confirmado", style="width: 120px; height: 100px;">
         </div>

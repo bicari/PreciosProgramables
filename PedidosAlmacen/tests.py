@@ -1140,6 +1140,134 @@ class RecibirDespachoTransaccionAtomicaTest(TestCase):
         self.assertIn('no tiene depósito destino configurado', mensajes[0])
 
 
+class RecibirDespachoSkuExtraDuplicadoTest(TestCase):
+    """Un producto extra ("SKU no contemplado") cuyo código ya existe en el
+    pedido debe bloquearse en la recepción: no se crea el PedidoItem duplicado,
+    no se persiste ningún cambio y no se llama a a2. Lo mismo aplica si el
+    mismo código viene repetido dentro de la propia lista de extras."""
+
+    GIF_1PX = (
+        b'GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04'
+        b'\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D'
+        b'\x01\x00;'
+    )
+
+    def setUp(self):
+        import json
+        from users.models import User
+        from django.urls import reverse
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem
+        self.json = json
+        self.reverse = reverse
+        self.user = User.objects.create_superuser(username='extra_dup_u', password='x')
+        self.client.force_login(self.user)
+        self.pedido = Pedido.objects.create(
+            solicitante=self.user, estado='DESPACHADO', deposito_codigo=2,
+            condicion='URGENTE',
+        )
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=5, cantidad_despachada=5, estado='DESPACHADO',
+        )
+        self.despacho = Despacho.objects.create(pedido=self.pedido, estado='ENVIADO')
+        self.di = DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=self.item, cantidad_despachada=5,
+        )
+        self.url = reverse(
+            'pedidos-recibir-despacho',
+            args=[self.pedido.numero_pedido, self.despacho.numero_despacho],
+        )
+        # Autorización de supervisor requerida para incidencias especiales
+        session = self.client.session
+        session['despacho_auth_user_id'] = self.user.id
+        session.save()
+
+    def _post(self, extras):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        return self.client.post(self.url, {
+            f'recibido_{self.di.id}': '5',
+            f'observacion_{self.di.id}': '',
+            f'tipo_incidencia_{self.di.id}': '',
+            'productos_extra': self.json.dumps(extras),
+            'foto_extras': SimpleUploadedFile('foto.gif', self.GIF_1PX, content_type='image/gif'),
+        })
+
+    def _mensajes(self, resp):
+        from django.contrib.messages import get_messages
+        return [str(m) for m in get_messages(resp.wsgi_request)]
+
+    def test_extra_con_sku_ya_en_pedido_se_bloquea(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            resp = self._post([{'codigo': 'SKU1', 'descripcion': 'Producto Uno', 'cantidad': 2}])
+            mock_db.return_value.insertar_traslado_recepcion.assert_not_called()
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp.url,
+            self.reverse('pedidos-recibir-despacho', args=[self.pedido.numero_pedido, self.despacho.numero_despacho]),
+        )
+        self.assertEqual(self.pedido.items.count(), 1)  # sin duplicado
+        self.despacho.refresh_from_db()
+        self.di.refresh_from_db()
+        self.assertEqual(self.despacho.estado, 'ENVIADO')
+        self.assertEqual(self.di.cantidad_recibida, 0)
+
+        mensajes = self._mensajes(resp)
+        self.assertEqual(len(mensajes), 1)
+        self.assertIn('ya existe en el pedido', mensajes[0])
+        self.assertIn('SKU1', mensajes[0])
+
+    def test_extra_con_sku_ya_en_pedido_distinto_case_se_bloquea(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            resp = self._post([{'codigo': ' sku1 ', 'descripcion': 'Producto Uno', 'cantidad': 2}])
+            mock_db.return_value.insertar_traslado_recepcion.assert_not_called()
+
+        self.assertEqual(self.pedido.items.count(), 1)
+        mensajes = self._mensajes(resp)
+        self.assertEqual(len(mensajes), 1)
+        self.assertIn('ya existe en el pedido', mensajes[0])
+
+    def test_extra_repetido_en_lista_se_bloquea(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            resp = self._post([
+                {'codigo': 'SKU9', 'descripcion': 'Extra', 'cantidad': 1},
+                {'codigo': 'SKU9', 'descripcion': 'Extra', 'cantidad': 2},
+            ])
+            mock_db.return_value.insertar_traslado_recepcion.assert_not_called()
+
+        self.assertEqual(self.pedido.items.count(), 1)
+        self.assertFalse(self.pedido.items.filter(codigo='SKU9').exists())
+        mensajes = self._mensajes(resp)
+        self.assertEqual(len(mensajes), 1)
+        self.assertIn('repetido', mensajes[0])
+        self.assertIn('SKU9', mensajes[0])
+
+    def test_get_renderiza_codigos_del_pedido_para_validacion_js(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'CODIGOS_PEDIDO')
+        self.assertContains(resp, 'SKU1')
+
+    def test_extra_sku_genuinamente_nuevo_sigue_funcionando(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.insertar_traslado_recepcion.return_value = None
+            resp = self._post([{'codigo': 'SKU9', 'descripcion': 'Extra', 'cantidad': 2}])
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, self.reverse('pedidos-detalle', args=[self.pedido.numero_pedido]))
+        self.assertEqual(self.pedido.items.count(), 2)
+        extra = self.pedido.items.get(codigo='SKU9')
+        self.assertEqual(extra.estado, 'INCIDENCIA')
+        self.assertEqual(extra.cantidad_solicitada, 0)
+        self.assertEqual(extra.cantidad_recibida, 2)
+        mock_db.return_value.insertar_traslado_recepcion.assert_called_once_with(
+            self.pedido.numero_pedido, 10, 2,
+            [{'codigo': 'SKU1', 'cantidad': 5}, {'codigo': 'SKU9', 'cantidad': 2}],
+            responsable=self.user.username, proposito='URGENTE',
+            numero_despacho=self.despacho.numero_despacho,
+        )
+
+
 class ConfiguracionPedidosModelTest(TestCase):
     def test_load_crea_singleton_con_transito_10(self):
         from .models import ConfiguracionPedidos

@@ -41,6 +41,7 @@ print(pyodbc.drivers())
 - Nombres de variables en snake_case
 - Nombres de clases en PascalCase
 - Constantes en UPPER_SNAKE_CASE
+- Entorno virtual venv
 
 ### Ejemplo de Función
 ```python

@@ -1,0 +1,32 @@
+{% if resultados %}
+<div class="table-responsive">
+<table class="table table-sm table-hover mb-0">
+    <thead>
+        <tr><th>Código</th><th>Descripción</th><th>Existencia</th><th></th></tr>
+    </thead>
+    <tbody>
+        {% for prod in resultados %}
+        <tr>
+            <td>{{ prod.codigo }}</td>
+            <td>{{ prod.descripcion }}</td>
+            <td>
+                {% if prod.existencia > 0 %}
+                    <span class="badge bg-success">{{ prod.existencia|floatformat:0 }}</span>
+                {% else %}
+                    <span class="badge bg-danger">0</span>
+                {% endif %}
+            </td>
+            <td>
+                <button type="button" class="btn btn-sm btn-outline-primary"
+                    onclick="seleccionarProducto('{{ prod.codigo|escapejs }}', '{{ prod.descripcion|escapejs }}')">
+                    Seleccionar
+                </button>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<p class="text-muted p-2 mb-0">No se encontraron resultados.</p>
+{% endif %}

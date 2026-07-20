@@ -1,334 +1,565 @@
 {% extends "dashboard.html" %} {% block content %} {% load static %}
 
-<div class="container-fluid">
-  <h2 class="text-center mt-6 mb-8">Recepción de Productos</h2>
-</div>
+<style>
+/* ═══════════════════════════════════════════════════════════
+   RECEPCIÓN DE PRODUCTOS — estilos scoped
+═══════════════════════════════════════════════════════════ */
+
+/* Encabezado */
+.ne-header {
+  display: flex; align-items: center; gap: 1rem;
+  padding: 1.5rem 0 1.25rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid #E5E9EF;
+}
+.ne-header-icon {
+  width: 46px; height: 46px; border-radius: 10px;
+  background: #1B6CA8;
+  display: flex; align-items: center; justify-content: center;
+  color: white; font-size: 1.3rem; flex-shrink: 0;
+  box-shadow: 0 4px 14px rgba(27,108,168,0.28);
+}
+.ne-header-title {
+  font-size: 1.3rem; font-weight: 700;
+  color: #1A2332; margin: 0; letter-spacing: -0.015em;
+}
+.ne-header-sub { font-size: 0.78rem; color: #6B7280; margin: 2px 0 0; }
+
+/* Indicador de pasos */
+.ne-steps {
+  display: flex; align-items: center;
+  background: #fff; border: 1px solid #E5E9EF; border-radius: 10px;
+  padding: 0.85rem 1.5rem; margin-bottom: 1.5rem;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05); overflow-x: auto; gap: 0;
+}
+.ne-step { display: flex; align-items: center; gap: 0.55rem; flex-shrink: 0; }
+.ne-step-line {
+  flex-shrink: 0; width: 2.5rem; height: 1px;
+  background: #D1D5DB; margin: 0 0.5rem; transition: background 0.3s;
+}
+.ne-step-circle {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 2px solid #D1D5DB; color: #9CA3AF;
+  font-size: 0.68rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; background: white; transition: all 0.25s;
+}
+.ne-step-label {
+  font-size: 0.72rem; font-weight: 500;
+  color: #9CA3AF; white-space: nowrap; transition: color 0.25s;
+}
+.ne-step.is-active .ne-step-circle {
+  background: #1B6CA8; border-color: #1B6CA8; color: white;
+  box-shadow: 0 0 0 3px rgba(27,108,168,0.15);
+}
+.ne-step.is-active .ne-step-label { color: #1A2332; font-weight: 600; }
+.ne-step.is-done .ne-step-circle { background: #059669; border-color: #059669; color: white; }
+.ne-step.is-done .ne-step-label { color: #059669; }
+
+/* Cuadrícula de paneles */
+.ne-panels {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem;
+}
+@media (max-width: 900px) { .ne-panels { grid-template-columns: 1fr; } }
+
+/* Tarjeta */
+.ne-card {
+  background: #fff; border-radius: 12px;
+  border: 1px solid #E5E9EF;
+  box-shadow: 0 1px 8px rgba(0,0,0,0.06); overflow: hidden;
+}
+.ne-card-head {
+  padding: 0.85rem 1.25rem 0.75rem; border-bottom: 1px solid #F3F4F6;
+  display: flex; align-items: center; gap: 0.6rem;
+}
+.ne-card-icon {
+  width: 30px; height: 30px; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.85rem; flex-shrink: 0;
+}
+.ne-ci-blue { background: #EEF4FB; color: #1B6CA8; }
+.ne-ci-amber { background: #FEF3C7; color: #D97706; }
+.ne-card-title { font-size: 0.88rem; font-weight: 600; color: #1A2332; margin: 0; }
+.ne-card-body { padding: 1rem 1.25rem; }
+
+/* Inputs */
+.ne-row { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: nowrap; }
+.ne-in {
+  flex: 1; min-width: 0;
+  border: 1.5px solid #D1D5DB; border-radius: 8px;
+  padding: 0.45rem 0.7rem; font-size: 0.845rem;
+  color: #1A2332; background: #F9FAFB;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.ne-in:focus {
+  outline: none; border-color: #1B6CA8;
+  background: #fff; box-shadow: 0 0 0 3px rgba(27,108,168,0.1);
+}
+.ne-in:disabled {
+  background: #F3F4F6; color: #9CA3AF;
+  cursor: not-allowed; border-color: #E5E7EB;
+}
+.ne-in::placeholder { color: #B0B8C4; font-size: 0.82rem; }
+.ne-btn {
+  width: 36px; height: 36px; border-radius: 7px; border: 1.5px solid;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 0.82rem; flex-shrink: 0;
+  background: transparent; transition: background 0.15s, color 0.15s;
+}
+.ne-btn-blue { border-color: #1B6CA8; color: #1B6CA8; }
+.ne-btn-blue:hover { background: #1B6CA8; color: white; }
+.ne-btn-red { border-color: #DC2626; color: #DC2626; }
+.ne-btn-red:hover { background: #DC2626; color: white; }
+
+/* Banner de proveedor */
+#card-proveedor {
+  display: none;
+  background: linear-gradient(135deg, #EEF4FB 0%, #E4EFFA 100%);
+  border: 1px solid #BFDBFE !important; border-radius: 8px;
+  padding: 0.45rem 0.85rem; margin-bottom: 0.75rem;
+  font-size: 0.83rem; font-weight: 600; color: #1B6CA8;
+  align-items: center; gap: 0.5rem;
+  text-align: left !important;
+}
+#card-proveedor:not(.d-none) { display: flex; }
+
+/* Alertas */
+.ne-alert {
+  background: #FEF2F2; border: 1px solid #FECACA;
+  border-radius: 8px; padding: 0.45rem 0.7rem;
+  font-size: 0.8rem; color: #991B1B; margin-bottom: 0.75rem;
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem;
+}
+.ne-alert.d-none { display: none !important; }
+
+/* Tablas */
+.ne-tbl-box { border-radius: 8px; border: 1px solid #EAECEF; overflow: hidden; }
+.ne-tbl-scroll { max-height: 370px; overflow-y: auto; }
+.ne-tbl { width: 100%; border-collapse: collapse; font-size: 0.815rem; }
+.ne-tbl thead th {
+  padding: 0.5rem 0.65rem;
+  font-size: 0.66rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: #6B7280; background: #F8FAFC;
+  border-bottom: 1px solid #E5E9EF; white-space: nowrap;
+  position: sticky; top: 0; z-index: 1;
+}
+.ne-tbl tbody tr { border-bottom: 1px solid #F3F4F6; transition: background 0.1s; }
+.ne-tbl tbody tr:last-child { border-bottom: none; }
+.ne-tbl tbody tr:hover:not(.table-success):not(.table-warning):not(.table-danger) {
+  background: #F8FAFC;
+}
+.ne-tbl tbody td { padding: 0.42rem 0.65rem; color: #374151; vertical-align: middle; }
+.ne-tbl tbody tr.table-success { background: #ECFDF5 !important; }
+.ne-tbl tbody tr.table-success td { color: #065F46; }
+.ne-tbl tbody tr.table-warning { background: #FFFBEB !important; }
+.ne-tbl tbody tr.table-warning td { color: #92400E; }
+.ne-tbl tbody tr.table-danger { background: #FEF2F2 !important; }
+.ne-tbl tbody tr.table-danger td { color: #991B1B; }
+.ne-tbl .htmx-swapping td { opacity: 0; transition: opacity 1s ease-out; }
+
+/* Barra sticky de totalización */
+#totalizar-documento {
+  position: sticky; bottom: 0; z-index: 100;
+  background: #fff; border-top: 2px solid #1B6CA8;
+  border-radius: 12px 12px 0 0;
+  padding: 0.85rem 1.5rem;
+  box-shadow: 0 -4px 24px rgba(27,108,168,0.1);
+  display: flex; align-items: center; gap: 1.5rem;
+  transition: opacity 0.25s, visibility 0.25s, transform 0.25s;
+}
+/* override .hidden global para este elemento específico */
+#totalizar-documento.hidden {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none;
+  transform: translateY(0.75rem);
+}
+.ne-stat { display: flex; flex-direction: column; gap: 1px; }
+.ne-stat-label {
+  font-size: 0.62rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em; color: #9CA3AF;
+}
+.ne-stat-value { font-size: 1.4rem; font-weight: 700; color: #1A2332; line-height: 1.1; }
+.ne-sep { width: 1px; height: 38px; background: #E5E9EF; flex-shrink: 0; }
+.ne-process-btn {
+  margin-left: auto;
+  background: #059669; color: white;
+  border: none; border-radius: 8px;
+  padding: 0.6rem 1.4rem; font-size: 0.875rem; font-weight: 600;
+  display: flex; align-items: center; gap: 0.5rem;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+  box-shadow: 0 2px 10px rgba(5,150,105,0.3);
+}
+.ne-process-btn:hover { background: #047857; box-shadow: 0 4px 14px rgba(5,150,105,0.4); }
+.ne-process-btn:active { transform: scale(0.98); }
+
+/* Modal */
+#modalGlobal .modal-content { border-radius: 12px; border: none; box-shadow: 0 20px 60px rgba(0,0,0,0.15); }
+#modalGlobal .modal-header {
+  background: #1B6CA8; color: white;
+  border-radius: 12px 12px 0 0; padding: 1rem 1.25rem; border-bottom: none;
+}
+#modalGlobal .modal-header .btn-close { filter: brightness(0) invert(1); }
+#modalGlobal .modal-title { font-weight: 600; font-size: 0.95rem; }
+#modalGlobal .modal-body { padding: 1.25rem 1.5rem; }
+#modalGlobal .modal-footer { padding: 0.75rem 1.25rem; border-top: 1px solid #F0F2F5; }
+#modalGlobal .input-group-text {
+  background: #F8FAFC; border-color: #D1D5DB;
+  font-size: 0.82rem; font-weight: 600; color: #6B7280; white-space: nowrap;
+}
+#modalGlobal .form-control { border-color: #D1D5DB; font-size: 0.875rem; }
+#modalGlobal .form-control:focus {
+  border-color: #1B6CA8; box-shadow: 0 0 0 3px rgba(27,108,168,0.1);
+}
+</style>
+
+<!-- ── Modal de confirmación ─────────────────────── -->
 <div class="modal fade" id="modalGlobal" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
-    
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="modalGlobalLabel">Por favor confirma la operación</h5>
+        <h5 class="modal-title" id="modalGlobalLabel">
+          <i class="fa-solid fa-clipboard-check me-2"></i>Confirmar recepción
+        </h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      <form id="form-recepcion">
+      <form id="form-recepcion" data-ajax="true">
         <div class="modal-body">
           <div class="mb-3">
-            Esta seguro desea procesar la nota de recepción?
-          </div>
-          <div class="input-group w-100 mb-3">
+            <div class="input-group w-100">
               <span class="input-group-text">Comentario:</span>
-              <textarea class="form-control" id="message-text"></textarea>
+              <textarea class="form-control" id="message-text" rows="2" placeholder="Opcional..."></textarea>
+            </div>
           </div>
-          <div class="input-group w-100 mb-3">
+          <div class="mb-3">
+            <div class="input-group w-100">
               <span class="input-group-text">Número Doc Proveedor:</span>
-              <input type="text" class="form-control" id="document-proveedor" required></input>
+              <input type="text" class="form-control" id="document-proveedor" placeholder="FAC-0001234" required>
+            </div>
           </div>
-          <div class="input-group w-100 mb-3">
-              <span class="input-group-text">Fecha vencimiento: </span>
-              <input type="date" class="form-control" id="fecha-vencimiento" 
-              hx-on:htmx:load="console.info('desde el load')" onkeydown='return false' required>
-              </input>
+          <div class="mb-3">
+            <div class="input-group w-100">
+              <span class="input-group-text">Fecha vencimiento:</span>
+              <input type="date" class="form-control" id="fecha-vencimiento" onkeydown="return false" required>
+            </div>
           </div>
-          <div class="input-group w-100 mb-3">
+          <div class="mb-1">
+            <div class="input-group w-100">
               <span class="input-group-text">Total Documento</span>
-              <input type="text" class="form-control" id="total" readonly value="">
+              <input type="text" class="form-control" id="total" readonly value="" placeholder="Calculando…">
+            </div>
           </div>
         </div>
-
         <div class="modal-footer">
-          <button class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
-          <button 
-            id="procesar-modal" type="submit" class="btn btn-primary"
-              >
-            <span id="spinner-button" role="status" aria-hidden="true"></span>
-            Procesar
+          <button class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+          <button type="button" id="btn-preliminar" class="btn btn-outline-primary">
+            <i class="fa-solid fa-file-pdf me-1"></i> Preliminar
           </button>
-          <div class="alert alert-danger alert-dismissible fade show d-none"role="alert">
+          <button id="procesar-modal" type="submit" class="btn btn-success">
+            <span id="spinner-button" role="status" aria-hidden="true"></span>
+            <i class="fa-solid fa-check me-1"></i> Procesar
+          </button>
+          <div class="alert alert-danger alert-dismissible fade show d-none w-100 mt-2" role="alert">
             <span id="error-message">Error al procesar la nota.</span>
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
           </div>
         </div>
       </form>
-      
-
-      
     </div>
   </div>
 </div>
-<form >
-     <!-- Modal -->
 
-  
-<div class="container-fluid">
-  
-  <div class="grid gap-4 d-flex">
-    <div class="card shadow-sm col-md-6 p-3">
-      <div class="row justify-content-center mb-2">
-        <h5 class="text-center">📦 Recepción Sku</h5>
+<form>
+  <div id="modal-container"></div>
+
+  <!-- Encabezado de página -->
+  <div class="ne-header">
+    <div class="ne-header-icon"><i class="fa-solid fa-truck-ramp-box"></i></div>
+    <div>
+      <h2 class="ne-header-title">Recepción de Productos</h2>
+      <p class="ne-header-sub">Registro y procesamiento de notas de entrega de proveedor</p>
+    </div>
+  </div>
+
+  <!-- Indicador de pasos -->
+  <div class="ne-steps">
+    <div class="ne-step is-active" id="ne-step-1">
+      <div class="ne-step-circle">1</div>
+      <span class="ne-step-label">Proveedor</span>
+    </div>
+    <div class="ne-step-line"></div>
+    <div class="ne-step" id="ne-step-2">
+      <div class="ne-step-circle">2</div>
+      <span class="ne-step-label">Órdenes de compra</span>
+    </div>
+    <div class="ne-step-line"></div>
+    <div class="ne-step" id="ne-step-3">
+      <div class="ne-step-circle">3</div>
+      <span class="ne-step-label">Productos recibidos</span>
+    </div>
+    <div class="ne-step-line"></div>
+    <div class="ne-step" id="ne-step-4">
+      <div class="ne-step-circle">4</div>
+      <span class="ne-step-label">Procesar nota</span>
+    </div>
+  </div>
+
+  <!-- Paneles -->
+  <div class="ne-panels">
+
+    <!-- Panel izquierdo: Productos recibidos -->
+    <div class="ne-card">
+      <div class="ne-card-head">
+        <div class="ne-card-icon ne-ci-blue"><i class="fa-solid fa-barcode"></i></div>
+        <h5 class="ne-card-title">Productos Recibidos</h5>
       </div>
-      <div class="card-header text-center d-none" id="card-proveedor">
-      </div>
-      <div class="input-group mb-3">
-        <input
-          type="text"
-          class="form-control"
-          name="sku"
-          id="search-producto"
-          placeholder="Ingrese código de producto"
-          hx-get="/search-product"
-          ,hx-trigger="input changed delay:500ms, keyup[key=='Enter'], load"
-          hx-target="#search-results"
-          hx-indicator=".htmx-indicator"
-          hx-swap="beforeend"
-          hx-on:htmx:after-request="postSearchActions(event);
-          if (event.detail.xhr.status === 200 && document.getElementById('search-orden-compra').rows.length > 0){
-            const bandaTotalizacion = document.getElementById('totalizar-documento')
-            bandaTotalizacion.classList.remove('hidden')
-            const cantItems = document.getElementById('search-results').rows.length
-            const bandaItems = document.getElementById('band-items')
-            bandaItems.textContent = cantItems.toString();
-            const filas = document.querySelectorAll('#search-results tr');
-            let total = 0;
-            filas.forEach(fila => {
-              const cantidadCell = fila.cells[2]; // Asumiendo que la cantidad está en la tercera celda (índice 2)
-              const valor = parseFloat(cantidadCell.textContent.trim()) || 0;
-              total += valor;
+      <div class="ne-card-body">
+
+        <div class="ne-row">
+          <input
+            type="text"
+            class="ne-in"
+            name="sku"
+            id="search-producto"
+            placeholder="Código de producto (SKU)"
+            hx-get="/search-product"
+            ,hx-trigger="input changed delay:500ms, keyup[key=='Enter'], load"
+            hx-target="#search-results"
+            hx-indicator=".htmx-indicator"
+            hx-swap="beforeend"
+            hx-on:htmx:after-request="postSearchActions(event);
+            if (event.detail.xhr.status === 200 && document.getElementById('search-orden-compra').rows.length > 0){
+              const bandaTotalizacion = document.getElementById('totalizar-documento')
+              bandaTotalizacion.classList.remove('hidden')
+              const cantItems = document.getElementById('search-results').rows.length
+              const bandaItems = document.getElementById('band-items')
+              bandaItems.textContent = cantItems.toString();
+              const filas = document.querySelectorAll('#search-results tr');
+              let total = 0;
+              filas.forEach(fila => {
+                const cantidadCell = fila.cells[2];
+                const valor = parseFloat(cantidadCell.textContent.trim()) || 0;
+                total += valor;
                 }
               );
-            const bandaTotal = document.getElementById('band-total')
-            bandaTotal.textContent = total.toString();
-            
+              const bandaTotal = document.getElementById('band-total')
+              bandaTotal.textContent = total.toString();
+            }"
+            disabled
+          />
+          <button
+            type="button"
+            class="ne-btn ne-btn-blue"
+            hx-get="/modal_search"
+            hx-trigger="click"
+            hx-target="#modal-container"
+            hx-swap="innerHTML"
+            title="Buscar producto"
+          ><i class="fa-solid fa-magnifying-glass"></i></button>
+        </div>
 
-          }"
-          disabled
-        />
-        <button
-          type="button"
-          class="btn btn-info"
-          hx-get="/modal_search"
-          hx-trigger="click"
-          hx-target="#modal-container"
-          hx-swap="innerHTML"
-        >
-          <i class="fa-solid fa-magnifying-glass"></i>
-        </button>
+        <div id="error-product" class="ne-alert d-none" role="alert">
+          <span>{{message}}</span>
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close" style="font-size:0.65rem;"></button>
+        </div>
 
-        <div id="modal-container"></div>
-      </div>
-      <div
-        id="error-product"
-        class="alert alert-danger alert-dismissible fade show w-100 d-none"
-        role="alert"
-      >
-        {{message}}
-        <button
-          type="button"
-          class="btn-close"
-          data-bs-dismiss="alert"
-          aria-label="Close"
-        ></button>
-      </div>
+        <div class="ne-tbl-box">
+          <div class="ne-tbl-scroll">
+            <table class="ne-tbl">
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Descripción</th>
+                  <th>Cant.</th>
+                </tr>
+              </thead>
+              <tbody id="search-results"></tbody>
+            </table>
+          </div>
+        </div>
 
-      <div class="table" style="max-height: 400px; overflow-y: auto">
-        <table id="myDataTable" class="table table-sm" style="width: 100%">
-          <thead class="table-dark">
-            <tr>
-              <th>Codigo</th>
-              <th>Descripcion</th>
-              <th>Cantidad</th>
-            </tr>
-          </thead>
-          <tbody
-            id="search-results"
-          > 
-          </tbody>
-        </table>
       </div>
     </div>
-    
-    <div class="card shadow-sm col-md-6 p-3">
-      <div class="row justify-content-center mb-2">
-        <h5 class="text-center">🧾 Ordenes de compra</h5>
+
+    <!-- Panel derecho: Órdenes de compra -->
+    <div class="ne-card">
+      <div class="ne-card-head">
+        <div class="ne-card-icon ne-ci-amber"><i class="fa-solid fa-file-invoice"></i></div>
+        <h5 class="ne-card-title">Órdenes de Compra</h5>
       </div>
-      <div class="input-group mb-3">
-        
-        <input 
-          type="text"
-          class="form-control"
-          name="proveedor"
-          id="search-proveedor"
-          placeholder="Código Proveedor"
-          pattern="^[JGEjge]\d+$"
-          maxlength="10"
-          hx-get="/search-proveedor"
-          hx-trigger="keydown[key=='Enter']"
-          hx-on:htmx:after-request="
-            if (event.detail.xhr.status === 200){
-              document.getElementById('search-orden').disabled=false; 
-              document.getElementById('search-orden').focus()}
-              "
-          hx-target="#card-proveedor"
-          hx-swap="outerHTML"
-          hx-indicator="#spinner-search"
-        
-          >
-          
+      <div class="ne-card-body">
+
+        <div class="card-header text-center d-none" id="card-proveedor"></div>
+
+        <div class="ne-row">
+          <input
+            type="text"
+            class="ne-in"
+            name="proveedor"
+            id="search-proveedor"
+            placeholder="Código proveedor (J/G/E…)"
+            pattern="^[JGEjge]\d+$"
+            maxlength="10"
+            hx-get="/search-proveedor"
+            hx-trigger="keydown[key=='Enter']"
+            hx-on:htmx:after-request="
+              if (event.detail.xhr.status === 200){
+                document.getElementById('search-orden').disabled=false;
+                document.getElementById('search-orden').focus()
+              }"
+            hx-target="#card-proveedor"
+            hx-swap="outerHTML"
+            hx-indicator="#spinner-search"
+          />
           <button
-          type="button"
-          class="btn btn-info"
-          hx-get="/modal_search_proveedor"
-          hx-trigger="click"
-          hx-target="#modal-container"
-          hx-swap="innerHTML"
-        >
-          
-          <i class="fa-solid fa-magnifying-glass"></i>
-        </button>
-        <div id="spinner-search" class="htmx-indicator" style="display:inline;">
-            <div class="spinner-grow text-primary" role="status">
-              <span class="visually-hidden">Loading...</span>
+            type="button"
+            class="ne-btn ne-btn-blue"
+            hx-get="/modal_search_proveedor"
+            hx-trigger="click"
+            hx-target="#modal-container"
+            hx-swap="innerHTML"
+            title="Buscar proveedor"
+          ><i class="fa-solid fa-magnifying-glass"></i></button>
+          <div id="spinner-search" class="htmx-indicator" style="display:inline;">
+            <div class="spinner-border spinner-border-sm text-primary" role="status" style="width:18px;height:18px;border-width:2px;">
+              <span class="visually-hidden">Cargando...</span>
             </div>
           </div>
-        <input
-          type="text"
-          class="form-control"
-          name="data"
-          id="search-orden"
-          placeholder="Número de OC"
-          hx-get="/search-order"
-          hx-trigger="keydown[key=='Enter']"
-          hx-target="#search-orden-compra"
-          hx-indicator=".htmx-indicator"
-          hx-swap="beforeend"
-          hx-include="#search-proveedor"
-          hx-on:htmx:before-request="isPresentTableOc(event);"
-          hx-on:htmx:after-request="
-                  document.getElementById('search-orden').value = '';
-                  if(event.detail.xhr.status === 200){
-                    document.getElementById('search-producto').disabled = false;
-                    document.getElementById('search-producto').focus();
-                  }"
-          disabled
-        />
-        
-        
-        <button
-          type="button"
-          class="btn btn-danger"
-          hx-post="/product-delete/"
-          hx-trigger="click"
-          hx-include="#search-orden"
-          hx-target="#search-orden-compra"
-          hx-on:htmx:after-request="
-              document.getElementById('card-proveedor').classList.add('d-none'); 
+          <input
+            type="text"
+            class="ne-in"
+            name="data"
+            id="search-orden"
+            placeholder="N° Orden de Compra"
+            hx-get="/search-order"
+            hx-trigger="keydown[key=='Enter']"
+            hx-target="#search-orden-compra"
+            hx-indicator=".htmx-indicator"
+            hx-swap="beforeend"
+            hx-include="#search-proveedor"
+            hx-on:htmx:before-request="isPresentTableOc(event);"
+            hx-on:htmx:after-request="
+              document.getElementById('search-orden').value = '';
+              if(event.detail.xhr.status === 200){
+                document.getElementById('search-producto').disabled = false;
+                document.getElementById('search-producto').focus();
+              }"
+            disabled
+          />
+          <button
+            type="button"
+            class="ne-btn ne-btn-red"
+            hx-post="/product-delete/"
+            hx-trigger="click"
+            hx-include="#search-orden"
+            hx-target="#search-orden-compra"
+            hx-on:htmx:after-request="
+              document.getElementById('card-proveedor').classList.add('d-none');
               document.getElementById('search-orden').disabled=true
               document.getElementById('search-producto').disabled=true;
               document.getElementById('totalizar-documento').classList.add('hidden');
               const tablaProductos = document.getElementById('search-results');
               const tablaOrden = document.getElementById('search-orden-compra');
-              // En lugar de borrar la tabla entera, borra solo el contenido de los cuerpos
               document.querySelector('#search-results tbody').innerHTML = '';
-              document.querySelector('#search-orden-compra tbody').innerHTML = '';
-              "
-          hx-swap="innerHTML"
-        >
-          <i class="fa-solid fa-trash"></i>
-        </button>
-      </div>
-      <div
-        id="error-orden"
-        class="alert alert-danger alert-dismissible fade show w-100 d-none"
-        role="alert"
-      >
-      
-        <button
-          type="button"
-          class="btn-close"
-          data-bs-dismiss="alert"
-          aria-label="Close"
-        ></button>
-      </div>
-      <div class="table-responsive" style="max-height: 400px">
-        <table id="myDataTable" class="table table-sm" style="width: 100%">
-          <thead>
-            <tr>
-              <th>Código</th>
-              <th>Orden Compra</th>
-              <th>Cantidad</th>
-              <th>Diferencia</th>
-            </tr>
-          </thead>
-          <tbody
-            id="search-orden-compra"
-            hx-target="closest tr"
-            hx-swap="outerHTML swap:1s"
-          ></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</div>
+              document.querySelector('#search-orden-compra tbody').innerHTML = '';"
+            hx-swap="innerHTML"
+            title="Limpiar sesión"
+          ><i class="fa-solid fa-trash"></i></button>
+        </div>
 
-<div
-  class="container-fluid mt-4 hidden justify-content-center"
-  id="totalizar-documento"
->
-  <div class="row justify-content-around">
-    <div class="col-lg-2 col-md-8">
-      <div class="card h-100 shadow-sm border-0">
-        <div class="card-body h-100">
-          <div
-            class="d-flex flex-column flex-md-row justify-content-between align-items-center"
-          >
-            <h5  class="mb-3 mb-md-0 text-primary fw-semibold">
-                <span>Items: </span>
-                <span id="band-items"></span>
-            </h5>
+        <div id="error-orden" class="ne-alert d-none" role="alert">
+          <span></span>
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close" style="font-size:0.65rem;"></button>
+        </div>
+
+        <div class="ne-tbl-box">
+          <div class="ne-tbl-scroll">
+            <table class="ne-tbl">
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Orden Compra</th>
+                  <th>Cantidad</th>
+                  <th>Diferencia</th>
+                </tr>
+              </thead>
+              <tbody
+                id="search-orden-compra"
+                hx-target="closest tr"
+                hx-swap="outerHTML swap:1s"
+              ></tbody>
+            </table>
           </div>
         </div>
+
       </div>
     </div>
-    <div class="col-lg-6 col-md-8">
-      <div class="card shadow-sm border-0">
-        <div class="card-body">
-          <div
-            class="d-flex flex-column flex-md-row justify-content-between align-items-center"
-          >
-            <h5 class="mb-3 mb-md-0 text-primary fw-semibold">
-              <i class="fa-solid fa-file-invoice-dollar me-2"></i> Totalizar
-              Documento
-            </h5>
-            <button
-              type="button"
-              class="btn btn-success btn-sm px-4"
-              data-bs-toggle="modal"
-              data-bs-target="#modalGlobal"
-              id="procesar-recepcion">
-              <i class="fa-solid fa-check-circle me-2"></i> Procesar
-            </button>
-          </div>
-        </div>
-      </div>
+  </div><!-- /ne-panels -->
+
+  <!-- Barra de totalización sticky -->
+  <div id="totalizar-documento" class="hidden">
+    <div class="ne-stat">
+      <span class="ne-stat-label">Ítems</span>
+      <span class="ne-stat-value" id="band-items">0</span>
     </div>
-    <div class="col-lg-2 col-md-8">
-      <div class="card shadow-sm border-0">
-        <div class="card h-100 shadow-sm border-0">
-        <div class="card-body h-100">
-          <div
-            class="d-flex flex-column flex-md-row justify-content-between align-items-center"
-          >
-            <h5  class="mb-3 mb-md-0 text-primary fw-semibold">
-                <span>Total Items: </span>
-                <span id="band-total"></span>
-            </h5>
-          </div>
-        </div>
-      </div>
-      
+    <div class="ne-sep"></div>
+    <div class="ne-stat">
+      <span class="ne-stat-label">Total unidades</span>
+      <span class="ne-stat-value" id="band-total">0</span>
     </div>
+    <button
+      type="button"
+      class="ne-process-btn"
+      data-bs-toggle="modal"
+      data-bs-target="#modalGlobal"
+      id="procesar-recepcion"
+    >
+      <i class="fa-solid fa-check-circle"></i>
+      Procesar Nota
+    </button>
   </div>
-</div>
+
 </form>
+
+<!-- Lógica del indicador de pasos (scoped a esta página) -->
+<script>
+(function () {
+  function setStep(n) {
+    for (var i = 1; i <= 4; i++) {
+      var el = document.getElementById('ne-step-' + i);
+      if (!el) continue;
+      el.classList.remove('is-active', 'is-done');
+      if (i < n) el.classList.add('is-done');
+      else if (i === n) el.classList.add('is-active');
+    }
+  }
+
+  function checkSteps() {
+    var cp = document.getElementById('card-proveedor');
+    var hasProvider = cp && !cp.classList.contains('d-none') && cp.textContent.trim().length > 0;
+    var tbOC = document.getElementById('search-orden-compra');
+    var tbProd = document.getElementById('search-results');
+    var hasOC = tbOC && tbOC.querySelectorAll('tr').length > 0;
+    var hasProd = tbProd && tbProd.querySelectorAll('tr').length > 0;
+
+    if (hasProd && hasOC) setStep(4);
+    else if (hasOC) setStep(3);
+    else if (hasProvider) setStep(2);
+    else setStep(1);
+  }
+
+  // Observar cambios en los paneles (cubre HTMX y JS directo)
+  var panels = document.querySelector('.ne-panels');
+  if (panels) {
+    new MutationObserver(checkSteps).observe(panels, {
+      attributes: true, attributeFilter: ['class'],
+      childList: true, subtree: true
+    });
+  }
+  // También capturar reemplazos outerHTML del card-proveedor via HTMX
+  document.body.addEventListener('htmx:afterSwap', checkSteps);
+})();
+</script>
 
 {% endblock content%}

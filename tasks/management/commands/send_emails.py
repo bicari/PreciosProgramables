@@ -3,7 +3,7 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 
 class Command(BaseCommand):
     help = 'Envía correos electrónicos a los usuarios'
@@ -45,7 +45,8 @@ class Command(BaseCommand):
     def enviar_correos_masivos(self):
         """Envía correos a todos los usuarios"""
         try:
-            usuarios = User.objects.filter(is_active=True, email__isnull=False)
+            User = get_user_model()
+            usuarios = User.objects.filter(status=True).exclude(email='')
             total = usuarios.count()
             
             self.stdout.write(f'Enviando correos a {total} usuarios...')

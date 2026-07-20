@@ -48,5 +48,26 @@ class ProductsTasks(models.Model):
     is_oferta = models.BooleanField(default=False)
 
     def __str__(self):
-        return f"{self.sku} - {self.task.task_number}"    
+        return f"{self.sku} - {self.task.task_number}"
+
+
+class ListaEtiquetaDetalle(models.Model):
+    """Persiste el orden de filas del Excel para la impresión correcta de etiquetas.
+
+    Separado de ProductsTasks intencionalmente: ProductsTasks se elimina tras la
+    ejecución diferida, mientras que este detalle debe sobrevivir para permitir
+    imprimir etiquetas en el orden original del Excel incluso después de aplicar
+    los precios.
+    """
+
+    task = models.ForeignKey(Tasks, on_delete=models.CASCADE, related_name='orden_items')
+    orden = models.PositiveIntegerField()  # posición 1-based según el Excel
+    sku = models.CharField(max_length=100)
+
+    class Meta:
+        ordering = ['orden']
+        unique_together = ('task', 'orden')
+
+    def __str__(self) -> str:
+        return f"Lista {self.task_id} — pos {self.orden}: {self.sku}"
 # Create your models here.

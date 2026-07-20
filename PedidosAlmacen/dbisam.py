@@ -6,7 +6,11 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 DEPOSITO_ALMACEN = 1    # Almacén principal (origen en despacho)
-DEPOSITO_TRANSITO = 10  # Almacén tránsito (escala entre despacho y recepción)
+# El depósito de tránsito no es constante: se configura en ConfiguracionPedidos
+# (Postgres) y cada método lo recibe como parámetro explícito.
+
+CLASIFICACION_DESPACHO = 1          # FTI_CLASIFICACION traslado almacén → tránsito
+CLASIFICACION_RECEPCION_TIENDA = 2  # FTI_CLASIFICACION traslado tránsito → tienda
 
 
 def _clean(value):
@@ -177,6 +181,9 @@ class PedidosDBISAM:
         log_ref: str,
         responsable: str = '',
         proposito: str = '',
+        documento_origen: str = '',
+        clasificacion: int = 0,
+        descrip_clasify: str = '',
     ) -> None:
         """Inserta un traslado genérico en SOPERACIONINV/SDETALLEINV y ajusta SINVDEP."""
         fecha = datetime.now().strftime('%Y-%m-%d')
@@ -287,7 +294,10 @@ class PedidosDBISAM:
                         FTI_HORA,
                         FTI_FECHALIBRO,
                         FTI_PROPOSITO,
-                        FTI_RESPONSABLE
+                        FTI_RESPONSABLE,
+                        FTI_DOCUMENTOORIGEN,
+                        FTI_CLASIFICACION,
+                        FTI_DESCRIPCLASIFY
                     ) VALUES (
                         '{nro_documento}',
                         1,
@@ -303,7 +313,8 @@ class PedidosDBISAM:
                         '{hora}',
                         '{fecha}',
                         '{proposito}',
-                        '{responsable}'
+                        '{responsable}',
+                        '{documento_origen}', {clasificacion}, '{descrip_clasify}'
                     );
                     {''.join(detalle_queries)}
                     {''.join(update_sinvdep)}
@@ -320,12 +331,14 @@ class PedidosDBISAM:
             logger.error(f'Error insertando traslado DBISAM {log_ref}: {e}')
             raise pyodbc.DatabaseError(str(e))
 
-    def existe_traslado_despacho(self, numero_despacho: int) -> bool:
+    def existe_traslado_despacho(self, numero_despacho: int, deposito_transito: int) -> bool:
         """
         Verifica si ya existe el traslado de un despacho en a2 (SOPERACIONINV).
 
         Args:
             numero_despacho: Número del despacho a verificar.
+            deposito_transito: Código del depósito de tránsito usado como
+                destino del traslado de despacho.
 
         Returns:
             True si el traslado ya existe en a2, False en caso contrario.
@@ -341,13 +354,13 @@ class PedidosDBISAM:
                         f"SELECT COUNT(*) FROM SOPERACIONINV "
                         f"WHERE FTI_DOCUMENTO = '{nro_doc}' AND FTI_TIPO = 1 "
                         f"AND FTI_DEPOSITOSOURCE = {DEPOSITO_ALMACEN} "
-                        f"AND FTI_DEPOSITODESTINO = {DEPOSITO_TRANSITO}"
+                        f"AND FTI_DEPOSITODESTINO = {int(deposito_transito)}"
                     ).fetchone()
                     return bool(row and row[0] > 0)
         except Exception as e:
             raise pyodbc.DatabaseError(str(e))
 
-    def traslados_recepcion_existentes(self, numeros_pedido: list[int]) -> set[int]:
+    def traslados_recepcion_existentes(self, numeros_pedido: list[int], deposito_transito: int) -> set[int]:
         """
         Verifica cuáles de los pedidos dados tienen registrado el traslado de
         recepción (tránsito → destino) en a2 (SOPERACIONINV).
@@ -355,6 +368,8 @@ class PedidosDBISAM:
         Args:
             numeros_pedido: Números de pedido (PK de Pedido en Postgres) a
                 verificar.
+            deposito_transito: Código del depósito de tránsito usado como
+                origen del traslado de recepción.
 
         Returns:
             Conjunto de números de pedido que SÍ tienen el traslado
@@ -378,7 +393,7 @@ class PedidosDBISAM:
                         rows = cursor.execute(f"""SELECT DISTINCT FTI_DOCUMENTO
                                                 FROM SOPERACIONINV
                                                 WHERE FTI_TIPO = 1
-                                                  AND FTI_DEPOSITOSOURCE = {DEPOSITO_TRANSITO}
+                                                  AND FTI_DEPOSITOSOURCE = {int(deposito_transito)}
                                                   AND FTI_DOCUMENTO IN ({docs_str})""").fetchall()
                         encontrados.update(int(row.FTI_DOCUMENTO) for row in rows)
             return encontrados
@@ -388,47 +403,68 @@ class PedidosDBISAM:
     def insertar_traslado_despacho(
         self,
         numero_despacho: int,
+        deposito_transito: int,
         items: list[dict],
         responsable: str = '',
         proposito: str = '',
+        numero_pedido: int | None = None,
     ) -> None:
         """
-        Al despachar: mueve productos del almacén (depósito 1) al tránsito (depósito 10).
+        Al despachar: mueve productos del almacén (depósito 1) al depósito de tránsito.
 
         Args:
             numero_despacho: Número de despacho, usado como FTI_DOCUMENTO.
+            deposito_transito: Código del depósito de tránsito (destino del
+                traslado), leído de ConfiguracionPedidos por el caller.
             items: Lista de dicts con claves 'codigo' y 'cantidad'.
             responsable: Username del usuario que confirma el despacho.
             proposito: Condición del pedido (URGENTE, SURTIDO, CLIENTE_RETIRA).
+            numero_pedido: Número del pedido que originó el despacho, usado
+                como FTI_DOCUMENTOORIGEN para trazabilidad en a2.
         """
         nro_doc = str(numero_despacho).rjust(8, '0')
+        doc_origen = str(numero_pedido).rjust(8, '0') if numero_pedido is not None else ''
         self._insertar_traslado(
-            nro_doc, DEPOSITO_ALMACEN, DEPOSITO_TRANSITO, items,
+            nro_doc, DEPOSITO_ALMACEN, int(deposito_transito), items,
             f'despacho={numero_despacho}', responsable=responsable, proposito=proposito,
+            documento_origen=doc_origen,
+            clasificacion=CLASIFICACION_DESPACHO,
+            descrip_clasify='DESPACHO',
         )
 
     def insertar_traslado_recepcion(
         self,
         numero_pedido: int,
+        deposito_transito: int,
         deposito_destino: int,
         items: list[dict],
         responsable: str = '',
         proposito: str = '',
+        numero_despacho: int | None = None,
     ) -> None:
         """
-        Al recibir: mueve productos del tránsito (depósito 10) al depósito destino del solicitante.
+        Al recibir: mueve productos del depósito de tránsito al depósito destino del solicitante.
 
         Args:
             numero_pedido: Número de pedido PostgreSQL, usado como FTI_DOCUMENTO.
+            deposito_transito: Código del depósito de tránsito (origen del
+                traslado). Debe ser el snapshot Pedido.deposito_transito del
+                despacho, para sacar el stock del mismo depósito donde entró.
             deposito_destino: Código numérico del depósito destino (solicitante).
             items: Lista de dicts con claves 'codigo' y 'cantidad'.
             responsable: Username del usuario que recibe el despacho.
             proposito: Condición del pedido (URGENTE, SURTIDO, CLIENTE_RETIRA).
+            numero_despacho: Número del despacho que se está recepcionando,
+                usado como FTI_DOCUMENTOORIGEN para trazabilidad en a2.
         """
         nro_doc = str(numero_pedido).rjust(8, '0')
+        doc_origen = str(numero_despacho).rjust(8, '0') if numero_despacho is not None else ''
         self._insertar_traslado(
-            nro_doc, DEPOSITO_TRANSITO, deposito_destino, items,
+            nro_doc, int(deposito_transito), deposito_destino, items,
             f'pedido={numero_pedido}', responsable=responsable, proposito=proposito,
+            documento_origen=doc_origen,
+            clasificacion=CLASIFICACION_RECEPCION_TIENDA,
+            descrip_clasify='RECEPCION TIENDA',
         )
 
     def buscar_en_categoria(self, categoria, query, tipo='codigo', solo_existencia=False):

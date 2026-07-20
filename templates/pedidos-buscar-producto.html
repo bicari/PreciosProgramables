@@ -39,14 +39,23 @@
                 {% endif %}
             </td>
             <td data-label="Ref. Prov.">{{ producto.ref_proveedor }}</td>
-            <td>
+            <td data-label="Agregar">
                 {% if producto.existencia > 0 %}
-                <button type="button" class="btn btn-sm btn-success w-100"
-                    onclick="agregarItem('{{ producto.codigo }}', '{{ producto.descripcion|escapejs }}', '{{ producto.referencia|escapejs }}', '{{ producto.puesto|escapejs }}', '{{ producto.ref_proveedor|escapejs }}')">
-                    <i class="fas fa-plus"></i> Agregar
-                </button>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <div class="qty-stepper qty-stepper-sm">
+                        <button type="button" class="btn-qty"
+                            onclick="var e=document.getElementById('qs{{ forloop.counter }}');e.value=Math.max(1,+e.value-1)">−</button>
+                        <input type="number" class="qty-val" value="1" min="1" id="qs{{ forloop.counter }}">
+                        <button type="button" class="btn-qty"
+                            onclick="var e=document.getElementById('qs{{ forloop.counter }}');e.value=+e.value+1">+</button>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-success"
+                        onclick="agregarItem('{{ producto.codigo|escapejs }}','{{ producto.descripcion|escapejs }}','{{ producto.referencia|escapejs }}','{{ producto.puesto|escapejs }}','{{ producto.ref_proveedor|escapejs }}',+document.getElementById('qs{{ forloop.counter }}').value)">
+                        <i class="fas fa-plus"></i> Agregar
+                    </button>
+                </div>
                 {% else %}
-                <button type="button" class="btn btn-sm btn-secondary w-100" disabled
+                <button type="button" class="btn btn-sm btn-secondary" disabled
                     title="Sin existencia en almacen">
                     <i class="fas fa-ban"></i> Sin stock
                 </button>

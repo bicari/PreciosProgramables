@@ -1,74 +1,392 @@
 {% extends "dashboard.html" %}
 {% block content %}
-{%load static%}
+{% load static %}
+
 <link rel="stylesheet" href="{% static 'vendor/datatables/css/dataTables.bootstrap5.min.css' %}">
 <script src="{% static 'vendor/jquery/jquery-3.6.0.min.js' %}"></script>
 <script src="{% static 'vendor/datatables/js/jquery.dataTables.min.js' %}"></script>
 <script src="{% static 'vendor/datatables/js/dataTables.bootstrap5.min.js' %}"></script>
+
 <script>
     $(document).ready(function() {
-// Initialize DataTable
         $('#myDataTable').DataTable({
             "language": {
-            "url": "/static/vendor/datatables/i18n/es-ES.json"
-        },
-        paging: true, // Enable pagination
-        searching: true, // Enable search
-        ordering: true, // Enable sorting
-        info: true, // Show information
-        lengthChange: false, // Disable the "Show X entries" dropdown
+                "url": "/static/vendor/datatables/i18n/es-ES.json"
+            },
+            paging: true,
+            searching: true,
+            ordering: true,
+            info: true,
+            lengthChange: false,
+            order: [[0, 'desc']],
+            columnDefs: [{ orderable: false, targets: -1 }],
         });
     });
+
+    function verDetalle(taskId) {
+        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('modalDetalle'));
+        document.getElementById('modalDetalleLabel').textContent = 'Detalle de lista #' + taskId;
+        document.getElementById('modalDetalleBody').innerHTML =
+            '<div class="text-center py-5"><span class="spinner-border" role="status"></span></div>';
+        modal.show();
+
+        fetch('/list-tasks/' + taskId + '/detalle/')
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    document.getElementById('modalDetalleBody').innerHTML =
+                        '<div class="alert alert-danger">' + data.error + '</div>';
+                    return;
+                }
+                const isOferta = data.is_oferta;
+                let html = `<p class="text-muted mb-2">Total: <strong>${data.total}</strong> productos</p>
+                <div class="table-responsive">
+                <table class="table table-sm table-striped table-hover align-middle">
+                <thead class="table-dark">
+                <tr>
+                    <th>SKU</th>
+                    <th>Cód. Barra</th>
+                    <th>Descripción</th>
+                    <th>Departamento</th>
+                    <th>Precio Antes</th>
+                    <th>Precio Nuevo</th>
+                    <th>Actualizar</th>`;
+                if (isOferta) {
+                    html += `<th>Fecha Inicio</th><th>Fecha Final</th>`;
+                }
+                html += `</tr></thead><tbody>`;
+                data.items.forEach(item => {
+                    const icon = item.actualizado ? '&#10003;' : '&#10007;';
+                    const cls  = item.actualizado ? 'text-success' : 'text-danger';
+                    html += `<tr>
+                        <td>${item.sku}</td>
+                        <td>${item.codbarra}</td>
+                        <td>${item.descripcion}</td>
+                        <td>${item.departamento}</td>
+                        <td>${item.precio_antes !== null ? item.precio_antes.toFixed(2) : '-'}</td>
+                        <td>${item.precio !== null ? item.precio.toFixed(2) : '-'}</td>
+                        <td class="${cls} fw-bold">${icon}</td>`;
+                    if (isOferta) {
+                        html += `<td>${item.fecha_inicio || '-'}</td><td>${item.fecha_final || '-'}</td>`;
+                    }
+                    html += `</tr>`;
+                });
+                html += `</tbody></table></div>`;
+                document.getElementById('modalDetalleBody').innerHTML = html;
+            })
+            .catch(err => {
+                document.getElementById('modalDetalleBody').innerHTML =
+                    '<div class="alert alert-danger">Error de comunicación: ' + err + '</div>';
+            });
+    }
 </script>
 
-
-<div class="container mt-5">
-    <h1>Estatus listas</h1>
-    <table id="myDataTable" class="table table-striped-columns" style="width:100%">
-        <thead>
-            <tr>
-                <th>Id Lista</th>
-                <th>Responsable</th>
-                <!-- 
-                <th>Descripcion</th>
-                -->
-                <th>Fecha Ejecución</th>
-                <th>Fecha creación</th>
-                <th>Estado</th>
-                <th>Archivo</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for task in tasks%}
-            <tr>
-                <td>{{ task.task_number }}</td>
-                
-                <td>{{task.user_id.username | capfirst}}</td>
-                
-                <!--
-                <td>Descripcion</td>-->
-                <td>{{task.date_to_execute}}</td>
-                <td>{{task.created_at}}</td>
-                {% if task.check_process %}
-                <td>Procesado &#9989</td>
-                {% else %}
-                <td>Pendiente &#128347</td>
-                {% endif %}
-                <td>
-                    {% if task.file %}
-                            <a href="{% url 'download_excel' task.task_number %}" class="btn-download">
-                                <i class="fas fa-file-excel"></i> Descargar
-                            </a>
-                    {% else %}
-                            <button class="btn-download" disabled>
-                                <i class="fas fa-times-circle"></i> No disponible
-                            </button>
-                    {% endif %}
-                </td>
-            </tr>    
-            {% endfor %}
-        </tbody>
-    </table>
+<!-- Modal detalle de lista -->
+<div class="modal fade" id="modalDetalle" tabindex="-1" aria-labelledby="modalDetalleLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header lts-modal-header">
+                <h5 class="modal-title" id="modalDetalleLabel">Detalle de lista</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body" id="modalDetalleBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
 </div>
 
-{% endblock content%}
+<!-- Contenido -->
+<div class="lts-wrap">
+    <div class="lts-card">
+
+        <!-- Encabezado (mismo patrón que form-list.html) -->
+        <div class="lts-header">
+            <i class="fa-solid fa-list-check lts-header-icon"></i>
+            <div>
+                <h1 class="lts-title">Estatus de listas</h1>
+                <p class="lts-subtitle">Historial de listas de precios programadas</p>
+            </div>
+        </div>
+
+        <div class="lts-body">
+            <table id="myDataTable" class="table table-hover align-middle" style="width:100%">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Responsable</th>
+                        <th>Tipo</th>
+                        <th>Fecha ejecución</th>
+                        <th>Fecha creación</th>
+                        <th>Estado</th>
+                        <th>Archivo</th>
+                        <th>Detalle</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for task in tasks %}
+                    <tr>
+                        <td class="lts-id">#{{ task.task_number }}</td>
+                        <td>{{ task.user_id.username|capfirst }}</td>
+                        <td>
+                            {% if task.is_oferta %}
+                            <span class="lts-badge lts-badge-oferta">Oferta</span>
+                            {% else %}
+                            <span class="lts-badge lts-badge-normal">Normal</span>
+                            {% endif %}
+                        </td>
+                        <td class="lts-date">{{ task.date_to_execute }}</td>
+                        <td class="lts-date">{{ task.created_at }}</td>
+                        <td>
+                            {% if task.check_process %}
+                            <span class="lts-badge lts-badge-done">
+                                <i class="fa-solid fa-circle-check"></i> Procesado
+                            </span>
+                            {% else %}
+                            <span class="lts-badge lts-badge-pending">
+                                <i class="fa-regular fa-clock"></i> Pendiente
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if task.file %}
+                            <a href="{% url 'download_excel' task.task_number %}" class="lts-action-link lts-link-dl">
+                                <i class="fas fa-file-excel"></i> Descargar
+                            </a>
+                            {% else %}
+                            <span class="lts-action-link lts-link-na">
+                                <i class="fas fa-times-circle"></i> No disponible
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if task.dbisam_table %}
+                            <button class="btn btn-sm lts-btn-detail" onclick="verDetalle({{ task.task_number }})" title="Ver productos de la lista">
+                                <i class="fas fa-table-list"></i> Ver
+                            </button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* ── Contenedor ───────────────────────────────────── */
+    .lts-wrap {
+        padding: 1.5rem 0.25rem;
+    }
+
+    /* ── Tarjeta (mismo sistema que form-list) ────────── */
+    .lts-card {
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
+        overflow: hidden;
+    }
+
+    /* ── Encabezado oscuro ────────────────────────────── */
+    .lts-header {
+        background: #2e353d;
+        color: #fff;
+        padding: 1.25rem 1.75rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .lts-header-icon {
+        font-size: 2.2rem;
+        color: #7ec8e3;    /* azul suave — distinto del verde Excel del formulario */
+        flex-shrink: 0;
+    }
+
+    .lts-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin: 0;
+        letter-spacing: 0.01em;
+    }
+
+    .lts-subtitle {
+        font-size: 0.78rem;
+        color: rgba(255, 255, 255, 0.55);
+        margin: 0.15rem 0 0;
+    }
+
+    /* ── Cuerpo con tabla ─────────────────────────────── */
+    .lts-body {
+        padding: 1.5rem 1.75rem;
+        overflow-x: auto;
+    }
+
+    /* ── Tabla ────────────────────────────────────────── */
+    #myDataTable thead tr th {
+        font-size: 0.7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: #6c757d;
+        border-bottom: 2px solid #e9ecef;
+        white-space: nowrap;
+    }
+
+    #myDataTable tbody tr {
+        border-bottom: 1px solid #f0f2f4;
+    }
+
+    #myDataTable tbody tr:hover td {
+        background-color: #f0f6ff;
+    }
+
+    #myDataTable tbody td {
+        font-size: 0.875rem;
+        vertical-align: middle;
+        border-bottom: none;
+    }
+
+    .lts-id {
+        font-weight: 600;
+        color: #6c757d;
+        font-size: 0.8rem;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .lts-date {
+        font-size: 0.8rem;
+        color: #6c757d;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
+
+    /* ── Badges ───────────────────────────────────────── */
+    .lts-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        padding: 0.25rem 0.65rem;
+        border-radius: 100px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        line-height: 1.4;
+    }
+
+    .lts-badge-done {
+        background: #d1f0de;
+        color: #0a5c2a;
+    }
+
+    .lts-badge-pending {
+        background: #fff3cd;
+        color: #7d5a00;
+    }
+
+    .lts-badge-oferta {
+        background: #cfe2ff;
+        color: #0a3578;
+    }
+
+    .lts-badge-normal {
+        background: #e2e3e5;
+        color: #41464b;
+    }
+
+    /* ── Acciones de columna ──────────────────────────── */
+    .lts-action-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        font-size: 0.8rem;
+        font-weight: 500;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+
+    .lts-link-dl {
+        color: #198754;
+    }
+
+    .lts-link-dl:hover {
+        color: #0f5132;
+        text-decoration: underline;
+    }
+
+    .lts-link-na {
+        color: #adb5bd;
+        cursor: default;
+    }
+
+    .lts-btn-detail {
+        font-size: 0.78rem;
+        padding: 0.25rem 0.65rem;
+        border: 1px solid #dee2e6;
+        background: #f8f9fa;
+        color: #495057;
+        border-radius: 6px;
+        white-space: nowrap;
+        transition: background 0.15s, border-color 0.15s;
+    }
+
+    .lts-btn-detail:hover {
+        background: #e9ecef;
+        border-color: #ced4da;
+        color: #212529;
+    }
+
+    /* ── Modal header oscuro ──────────────────────────── */
+    .lts-modal-header {
+        background: #2e353d;
+        color: #fff;
+    }
+
+    .lts-modal-header .modal-title {
+        font-size: 1rem;
+        font-weight: 600;
+    }
+
+    /* ── DataTables overrides dentro del card ─────────── */
+    .lts-body .dataTables_wrapper .dataTables_filter input {
+        border-radius: 8px;
+        border: 1px solid #dee2e6;
+        padding: 0.35rem 0.65rem;
+        font-size: 0.875rem;
+    }
+
+    .lts-body .dataTables_wrapper .dataTables_filter input:focus {
+        border-color: #86b7fe;
+        box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.1);
+        outline: none;
+    }
+
+    .lts-body .dataTables_info {
+        font-size: 0.8rem;
+        color: #6c757d;
+    }
+
+    /* ── Responsive ───────────────────────────────────── */
+    @media (max-width: 767px) {
+        .lts-body {
+            padding: 1rem;
+        }
+
+        .lts-header {
+            padding: 1rem 1.25rem;
+        }
+
+        .lts-header-icon {
+            font-size: 1.75rem;
+        }
+
+        .lts-title {
+            font-size: 1rem;
+        }
+    }
+</style>
+
+{% endblock content %}

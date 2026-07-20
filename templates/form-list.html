@@ -1,22 +1,15 @@
 {% extends "dashboard.html" %}
 
 {% block content %}
-
-
+{% load static %}
 
 <script>
-    
     document.addEventListener('DOMContentLoaded', function() {
-       
         {% if error %}
-        
-        console.log('Mostrando modal automáticamente');
         var modalEl = document.getElementById('exampleModal');
         var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
         modal.show();
         {% endif %}
-        
-
     });
 
     document.addEventListener('DOMContentLoaded', ()=>{
@@ -24,8 +17,7 @@
         if (errorMessage) {
             setInterval(() => {
                 errorMessage.style.display = 'none';
-            }, 10000); // Oculta el mensaje después de 5 segundos
-            
+            }, 10000);
         }
     })
 
@@ -35,10 +27,120 @@
             submitButton.disabled = true;
             submitButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Procesando...';
         }
-        
     });
-</script>
 
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('btn-previsualizar').addEventListener('click', function() {
+            const file     = document.querySelector('[name=file]').files[0];
+            const dateTime = document.querySelector('[name=date_time]').value;
+            const header   = document.querySelector('[name=header]').value;
+            const isOferta = document.querySelector('[name=is_oferta]').checked ? 'on' : 'off';
+            const csrf     = document.querySelector('[name=csrfmiddlewaretoken]').value;
+            const btn      = this;
+            const spinner  = document.getElementById('spin-preview');
+            const panel    = document.getElementById('preliminar-resultado');
+
+            if (!file)     { alert('Seleccione un archivo Excel.'); return; }
+            if (!dateTime) { alert('Ingrese la fecha de ejecución.'); return; }
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('date_time', dateTime);
+            formData.append('header', header);
+            formData.append('is_oferta', isOferta);
+
+            btn.disabled = true;
+            spinner.classList.remove('d-none');
+            panel.classList.add('d-none');
+
+            fetch('/validar-lista/', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrf },
+                body: formData,
+            })
+            .then(r => r.json())
+            .then(data => {
+                panel.innerHTML = data.error ? renderError(data.error) : renderPreview(data);
+                panel.classList.remove('d-none');
+            })
+            .catch(err => {
+                panel.innerHTML = renderError('Error de comunicación con el servidor: ' + err);
+                panel.classList.remove('d-none');
+            })
+            .finally(() => {
+                btn.disabled = false;
+                spinner.classList.add('d-none');
+            });
+        });
+    });
+
+    function renderError(msg) {
+        return `<div class="alert alert-danger mt-3"><strong>Error:</strong> ${msg}</div>`;
+    }
+
+    function renderPreview(data) {
+        const { total, pasaran, repetidos, invalidos, ya_programados, con_oferta_activa, sin_inventario } = data;
+        const hayRepetidos = Object.keys(repetidos).length > 0;
+        const hayBlockeantes = hayRepetidos || invalidos.length > 0;
+        const badgeClass = pasaran > 0 && !hayBlockeantes ? 'bg-success' : 'bg-warning text-dark';
+
+        let html = `<div class="card lp-result-card">
+            <div class="card-header lp-result-header">
+                <i class="fa-solid fa-clipboard-check me-2"></i><strong>Resultado de la previsualización</strong>
+            </div>
+            <div class="card-body">
+                <p class="mb-3">Total de filas en el archivo: <strong>${total}</strong>
+                &nbsp;·&nbsp; Pasarán las validaciones: <span class="badge ${badgeClass} fs-6">${pasaran}</span></p>`;
+
+        if (hayRepetidos) {
+            html += `<div class="alert alert-danger">
+                <strong>&#9940; SKU repetidos en el Excel (corrija antes de guardar):</strong>
+                <ul class="mb-0 mt-1">`;
+            for (const [sku, lineas] of Object.entries(repetidos)) {
+                html += `<li>SKU <strong>${sku}</strong> aparece en las líneas: ${lineas.join(', ')}</li>`;
+            }
+            html += `</ul></div>`;
+        }
+
+        if (invalidos.length > 0) {
+            html += `<div class="alert alert-warning">
+                <strong>&#9888; Filas con datos inválidos (SKU o PRECIO incorrecto):</strong>
+                <ul class="mb-0 mt-1">`;
+            invalidos.forEach(item => {
+                html += `<li>SKU <strong>${item.sku}</strong> — línea ${item.linea}</li>`;
+            });
+            html += `</ul></div>`;
+        }
+
+        if (ya_programados.length > 0) {
+            html += `<div class="alert alert-info">
+                <strong>&#8505; Ya programados para esta fecha (${ya_programados.length}):</strong>
+                <span class="ms-1">${ya_programados.join(', ')}</span>
+            </div>`;
+        }
+
+        if (con_oferta_activa.length > 0) {
+            html += `<div class="alert alert-info">
+                <strong>&#8505; Con oferta activa vigente (${con_oferta_activa.length}) &mdash; no se actualizará el precio:</strong>
+                <span class="ms-1">${con_oferta_activa.join(', ')}</span>
+            </div>`;
+        }
+
+        if (sin_inventario.length > 0) {
+            html += `<div class="alert alert-warning">
+                <strong>&#9888; No encontrados en el inventario (${sin_inventario.length}):</strong>
+                <span class="ms-1">${sin_inventario.join(', ')}</span>
+            </div>`;
+        }
+
+        if (!hayBlockeantes && invalidos.length === 0 && ya_programados.length === 0 && con_oferta_activa.length === 0 && sin_inventario.length === 0) {
+            html += `<div class="alert alert-success">&#10003; Todos los productos pasaron las validaciones.</div>`;
+        }
+
+        html += `</div></div>`;
+        return html;
+    }
+</script>
 
 <!-- Modal -->
 <div class="modal fade" id="exampleModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true">
@@ -46,102 +148,237 @@
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="exampleModalLabel">Advertencia</h5>
-        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-          <span aria-hidden="true">&times;</span>
-        </button>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
       <div class="modal-body">
-        <div>
-            Existe una lista de precios con el mismo proveedor y fecha y hora, no es posible procesar la lista
-        </div>
+        Existe una lista de precios con el mismo proveedor y fecha y hora. No es posible procesar la lista.
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-        
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
       </div>
     </div>
   </div>
 </div>
 
+<!-- Contenido -->
+<div class="lp-wrap">
 
-<div class="container row d-flex justify-content-center">
-    <div class= "row text-center">
-        <h2> Lista de precios </h1>
+    <div class="lp-card">
+        <!-- Encabezado de la tarjeta -->
+        <div class="lp-card-header">
+            <i class="fa-solid fa-file-excel lp-excel-icon"></i>
+            <div>
+                <h1 class="lp-title">Nueva lista de precios</h1>
+                <p class="lp-subtitle">Carga y configura tu archivo Excel para programar actualizaciones</p>
+            </div>
+        </div>
+
+        <form class="lp-form" method="post" action="/list-form/" enctype="multipart/form-data">
+            {% csrf_token %}
+
+            <!-- Responsable -->
+            <div class="form-floating lp-field">
+                {{form.user_id}}
+                <label for="floatingInput">Usuario responsable</label>
+            </div>
+
+            <!-- Sección: Archivo y programación -->
+            <div class="lp-section-divider">Archivo y programación</div>
+
+            <div class="lp-field">
+                <label class="lp-label">Fila de inicio de datos</label>
+                {{form.header}}
+            </div>
+
+            <div class="lp-field">
+                <label class="lp-label">Fecha de ejecución</label>
+                {{form.date_time}}
+            </div>
+
+            <div class="lp-field">
+                <label class="lp-label">Archivo Excel</label>
+                {{form.file}}
+            </div>
+
+            <!-- Sección: Opciones -->
+            <div class="lp-section-divider">Opciones de procesamiento</div>
+
+            <div class="lp-switches">
+                <label class="lp-switch-row">
+                    {{form.check_process}}
+                    <span>Procesar archivo de inmediato</span>
+                </label>
+                <label class="lp-switch-row">
+                    {{form.validar_ofertas}}
+                    <span>Ignorar las ofertas activas</span>
+                </label>
+                <label class="lp-switch-row">
+                    {{form.is_oferta}}
+                    <span>Es una oferta</span>
+                </label>
+            </div>
+
+            {% if messages %}
+            {% for msg in messages %}
+            <div class="alert alert-danger mt-3" role="alert">{{ msg }}</div>
+            {% endfor %}
+            {% endif %}
+
+            <!-- Acciones -->
+            <div class="lp-actions">
+                <button class="btn btn-outline-secondary" type="button" id="btn-previsualizar">
+                    <span id="spin-preview" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                    <i class="fa-solid fa-eye me-1"></i>Previsualizar
+                </button>
+                <button class="btn btn-primary lp-btn-save" type="submit" id="guardarLista">
+                    <i class="fa-solid fa-floppy-disk me-1"></i>Guardar lista
+                </button>
+            </div>
+        </form>
     </div>
 
+    <div id="preliminar-resultado" class="lp-result d-none"></div>
 </div>
 
-<form class="container row d-flex justify-content-center", method="post", action="/list-form/", enctype="multipart/form-data">
-    {% csrf_token %}
+<style>
+    /* ── Contenedor principal ─────────────────────────── */
+    .lp-wrap {
+        max-width: 600px;
+        margin: 2rem auto;
+        padding: 0 0.5rem;
+    }
 
-    <div class="form-floating mb-3">
-        {{form.user_id}}
-        <label for="floatingInput">Usuario responsable</label>
-    </div>
-    <!--
-    <div class="mb-3">
-        <label for="exampleFormControlInput1" class="form-label">Rif proveedor:</label>
-        {{form.rif_proveedor}}
-    </div>
-    -->
-    <div class="mb-3">
-        <label for="Cabecera de datos">Fila inicio de los datos: </label>
-        {{form.header}}
-    </div>
+    /* ── Tarjeta ──────────────────────────────────────── */
+    .lp-card {
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 2px 16px rgba(0, 0, 0, 0.09);
+        overflow: hidden;
+    }
 
-    <div class="mb-3">
-        <label for="formFile" class="form-label">Fecha ejecución:</label>
-        
-        {{form.date_time}}
-    </div>
-    <!--
-    <div class="mb-3">
-        <label for="formFile" class="form-label">Archivo de excel con formato</label>
-        <input class="form-control" type="file" id="formFile" required>
-    </div>
-    -->
-    <div class="mb-3">
-        <label for="formFile" class="form-label">Archivo de excel con formato:</label>
-        {{form.file}}
+    /* ── Encabezado oscuro (eco del sidebar) ─────────── */
+    .lp-card-header {
+        background: #2e353d;
+        color: #fff;
+        padding: 1.25rem 1.75rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
 
-    </div>
-    <div class="d-flex flex-row mb-3 gap-2">
-       
-            <div class="form-check form-switch">
-                 {{form.check_process}}
-                <label for="forCheck", class="text-nowrap form-label">Procesar archivo de inmediato:</label>
-            </div> 
-            <div class="form-check form-switch">
-                 {{form.validar_ofertas}}
-                <label for="forCheck", class="text-nowrap form-label">Ignorar las ofertas activas</label>
-            </div>
-            <div class="form-check form-switch">
-                 {{form.is_oferta}}
-                <label for="forCheck", class="text-nowrap form-label">Es una oferta</label>
-            </div>
-        
-    
-        
-    
-    </div>
-    {% if message%}
+    .lp-excel-icon {
+        font-size: 2.2rem;
+        color: #6abf69;
+        flex-shrink: 0;
+    }
 
-    <div class="mb-3"> 
-      <div class="alert alert-danger" role="alert">
-        {{message}}  
-      </div> 
-    </div>
-    
-    {%endif%}
-    <div class = "col-1 d-grid">
-        <button class="btn btn-primary" type="submit" id="guardarLista" >Guardar</button>
-    </div>
-</form>
+    .lp-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin: 0;
+        letter-spacing: 0.01em;
+    }
 
+    .lp-subtitle {
+        font-size: 0.78rem;
+        color: rgba(255, 255, 255, 0.55);
+        margin: 0.15rem 0 0;
+    }
+
+    /* ── Cuerpo del formulario ────────────────────────── */
+    .lp-form {
+        padding: 1.75rem;
+    }
+
+    .lp-field {
+        margin-bottom: 1rem;
+    }
+
+    .lp-label {
+        display: block;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #6c757d;
+        margin-bottom: 0.35rem;
+    }
+
+    /* ── Divisores de sección ─────────────────────────── */
+    .lp-section-divider {
+        font-size: 0.68rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        color: #adb5bd;
+        border-top: 1px solid #e9ecef;
+        padding-top: 0.6rem;
+        margin: 1.4rem 0 1rem;
+    }
+
+    /* ── Switches ─────────────────────────────────────── */
+    .lp-switches {
+        display: flex;
+        flex-direction: column;
+        gap: 0.65rem;
+    }
+
+    .lp-switch-row {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        cursor: pointer;
+        font-size: 0.9rem;
+        color: #343a40;
+        margin: 0;
+    }
+
+    /* ── Acciones ─────────────────────────────────────── */
+    .lp-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.65rem;
+        margin-top: 1.75rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid #e9ecef;
+    }
+
+    .lp-btn-save {
+        min-width: 140px;
+    }
+
+    /* ── Inputs dentro del formulario ─────────────────── */
+    .lp-form .form-control,
+    .lp-form .form-select {
+        border-radius: 8px;
+        border-color: #dee2e6;
+        transition: border-color 0.18s, box-shadow 0.18s;
+    }
+
+    .lp-form .form-control:focus,
+    .lp-form .form-select:focus {
+        border-color: #86b7fe;
+        box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.1);
+    }
+
+    /* ── Panel de resultado de previsualización ───────── */
+    .lp-result {
+        margin-top: 1.25rem;
+    }
+
+    .lp-result-card {
+        border-radius: 10px;
+        border: 1px solid #e9ecef;
+        box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
+        overflow: hidden;
+    }
+
+    .lp-result-header {
+        background: #f8f9fa;
+        border-bottom: 1px solid #e9ecef;
+        font-size: 0.875rem;
+        padding: 0.75rem 1.25rem;
+    }
+</style>
 
 {% endblock content %}
-
-
-
-
-

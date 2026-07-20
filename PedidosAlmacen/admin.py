@@ -3,7 +3,7 @@ from typing import Any, Iterable
 from django.contrib import admin, messages
 from django.shortcuts import redirect
 from django.urls import path
-from .models import Pedido, PedidoItem, DepositoPermitido
+from .models import Pedido, PedidoItem, DepositoPermitido, ConfiguracionPedidos
 from .dbisam import PedidosDBISAM
 
 
@@ -92,3 +92,15 @@ class DepositoPermitidoAdmin(admin.ModelAdmin):
             f'Sincronización completa: {creados} creados, {actualizados} actualizados.',
         )
         return redirect('..')
+
+
+@admin.register(ConfiguracionPedidos)
+class ConfiguracionPedidosAdmin(admin.ModelAdmin):
+    """Singleton: una sola fila, sin altas adicionales ni borrado."""
+    list_display = ('deposito_transito', 'fecha_actualizacion')
+
+    def has_add_permission(self, request):
+        return not ConfiguracionPedidos.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False

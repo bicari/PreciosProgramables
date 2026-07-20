@@ -1,0 +1,40 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<div class="container mt-4" style="max-width:600px;">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="fas fa-layer-group"></i> Nuevo Nivel
+            {% if rack_fijo %}en <strong>{{ rack_fijo.codigo }}</strong>{% endif %}
+        </h2>
+        <a href="{% if rack_fijo %}{% url 'ubicaciones-racks-detalle' rack_fijo.pk %}{% else %}{% url 'ubicaciones-racks-lista' %}{% endif %}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left"></i> Volver
+        </a>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show">
+            {{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="card">
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+                {% if rack_fijo %}<input type="hidden" name="rack" value="{{ rack_fijo.pk }}">{% endif %}
+                {% for field in form %}
+                    {% if not rack_fijo or field.name != 'rack' %}
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">{{ field.label }}</label>
+                        {{ field }}
+                        {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    </div>
+                    {% endif %}
+                {% endfor %}
+                <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Guardar Nivel</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock content %}

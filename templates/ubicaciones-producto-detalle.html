@@ -1,0 +1,56 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="fas fa-search-location"></i> ¿Dónde está <strong>{{ codigo }}</strong>?</h2>
+        <a href="javascript:history.back()" class="btn btn-outline-secondary"><i class="fas fa-arrow-left"></i> Volver</a>
+    </div>
+
+    {% if descripcion %}
+    <p class="text-muted mb-1">{{ descripcion }}</p>
+    {% endif %}
+    <p class="mb-3">
+        Existencia total en Almacén Principal (DBISAM):
+        {% if existencia > 0 %}
+            <span class="badge bg-success fs-6">{{ existencia|floatformat:0 }}</span>
+        {% else %}
+            <span class="badge bg-danger fs-6">0</span>
+        {% endif %}
+        <small class="text-muted ms-2">(esta cifra no se segmenta por slot; es el total SINVDEP depósito 1)</small>
+    </p>
+
+    {% if asignaciones %}
+    <div class="row g-3">
+        {% for pu in asignaciones %}
+        <div class="col-md-4">
+            <div class="card h-100 border
+                {% if pu.ubicacion.nivel.tipo == 'PICKING' %}border-info{% else %}border-secondary{% endif %}">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <strong>{{ pu.ubicacion.codigo_completo }}</strong>
+                    <span class="badge {% if pu.ubicacion.nivel.tipo == 'PICKING' %}bg-info text-dark{% else %}bg-secondary{% endif %}">
+                        {{ pu.ubicacion.nivel.get_tipo_display }}
+                    </span>
+                </div>
+                <div class="card-body">
+                    <small class="text-muted">Rack:</small> {{ pu.ubicacion.rack.codigo }}<br>
+                    <small class="text-muted">Nivel:</small> {{ pu.ubicacion.nivel.codigo }}<br>
+                    <small class="text-muted">Ubicación:</small> {{ pu.ubicacion.codigo }}<br>
+                    <small class="text-muted">Asignado:</small> {{ pu.fecha_asignacion|date:"d/m/Y" }}
+                </div>
+                <div class="card-footer bg-transparent">
+                    <a href="{% url 'ubicaciones-ubicaciones-detalle' pu.ubicacion.pk %}" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-eye"></i> Ver ubicación
+                    </a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="alert alert-warning">
+        <i class="fas fa-info-circle"></i>
+        El producto <strong>{{ codigo }}</strong> no tiene ubicaciones internas asignadas.
+    </div>
+    {% endif %}
+</div>
+{% endblock content %}

@@ -1,0 +1,218 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="fas fa-exclamation-triangle me-2 text-warning"></i>Reporte de Incidencias</h2>
+        <a href="{% url 'pedidos-reporte' %}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left"></i> Volver al Reporte
+        </a>
+    </div>
+
+    <!-- Filtros -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h6 class="mb-0"><i class="fas fa-filter me-1"></i>Filtros</h6>
+        </div>
+        <div class="card-body">
+            <form method="get" class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Fecha inicio</label>
+                    <input type="date" name="fecha_inicio" class="form-control" value="{{ fecha_inicio }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Fecha fin</label>
+                    <input type="date" name="fecha_fin" class="form-control" value="{{ fecha_fin }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Tipo de incidencia</label>
+                    <select name="tipo" class="form-select">
+                        <option value="">Todos los tipos</option>
+                        {% for valor, etiqueta in tipos_incidencia %}
+                        <option value="{{ valor }}" {% if tipo_filtro == valor %}selected{% endif %}>{{ etiqueta }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-search"></i> Aplicar
+                    </button>
+                    <a href="{% url 'pedidos-reporte-incidencias' %}" class="btn btn-outline-secondary">
+                        <i class="fas fa-times"></i>
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- KPIs -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card text-center border-warning h-100">
+                <div class="card-body">
+                    <div class="fs-1 fw-bold text-warning">{{ total }}</div>
+                    <div class="text-muted small">Total Incidencias</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-danger h-100">
+                <div class="card-body">
+                    <div class="fs-1 fw-bold text-danger">{{ total_erroneos }}</div>
+                    <div class="text-muted small">Cambio de SKU</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-primary h-100">
+                <div class="card-body">
+                    <div class="fs-1 fw-bold text-primary">{{ total_no_contemplados }}</div>
+                    <div class="text-muted small">SKU No Contemplado</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-secondary h-100">
+                <div class="card-body">
+                    <div class="fs-1 fw-bold text-secondary">{{ total_cantidad_menor }}</div>
+                    <div class="text-muted small">Cantidad Menor a lo Despachado</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabla detalle -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="fas fa-list me-1"></i>Detalle de Incidencias</h6>
+            <span class="badge bg-secondary">{{ total }} registro{{ total|pluralize }}</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-sm mb-0 align-middle">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Pedido</th>
+                            <th>Despacho</th>
+                            <th>Fecha</th>
+                            <th>Tipo</th>
+                            <th>Producto Original</th>
+                            <th>Producto Real / Nuevo</th>
+                            <th class="text-center">Cant.</th>
+                            <th>Solicitante</th>
+                            <th>Autorizado por</th>
+                            <th class="text-center">Foto</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for inc in incidencias %}
+                        <tr>
+                            <!-- Pedido -->
+                            <td>
+                                <a href="{% url 'pedidos-detalle' inc.despacho.pedido.numero_pedido %}"
+                                   class="fw-bold text-decoration-none">#{{ inc.despacho.pedido.numero_pedido }}</a>
+                                {% if inc.despacho.pedido.categoria_nombre %}
+                                <br><small class="text-muted">{{ inc.despacho.pedido.categoria_nombre }}</small>
+                                {% elif inc.despacho.pedido.categoria %}
+                                <br><small class="text-muted">{{ inc.despacho.pedido.categoria }}</small>
+                                {% endif %}
+                            </td>
+
+                            <!-- Despacho -->
+                            <td class="text-muted">#{{ inc.despacho.numero_despacho }}</td>
+
+                            <!-- Fecha -->
+                            <td class="text-nowrap">
+                                {% if inc.despacho.fecha_despacho %}
+                                    {{ inc.despacho.fecha_despacho|date:"d/m/Y" }}<br>
+                                    <small class="text-muted">{{ inc.despacho.fecha_despacho|date:"H:i" }}</small>
+                                {% else %}—{% endif %}
+                            </td>
+
+                            <!-- Tipo de incidencia -->
+                            <td>
+                                {% if inc.tipo_incidencia == 'PRODUCTO_ERRONEO' %}
+                                    <span class="badge bg-danger"><i class="fas fa-exchange-alt me-1"></i>Cambio SKU</span>
+                                {% elif inc.tipo_incidencia == 'SKU_NO_CONTEMPLADO' %}
+                                    <span class="badge bg-primary"><i class="fas fa-plus-circle me-1"></i>Prod. Nuevo</span>
+                                {% elif inc.tipo_incidencia == 'CANTIDAD_MENOR' %}
+                                    <span class="badge bg-secondary"><i class="fas fa-arrow-down me-1"></i>Cant. Menor</span>
+                                {% elif inc.tipo_incidencia == 'CANTIDAD_MAYOR' %}
+                                    <span class="badge bg-warning text-dark"><i class="fas fa-arrow-up me-1"></i>Cant. Mayor</span>
+                                {% endif %}
+                            </td>
+
+                            <!-- Producto original -->
+                            <td>
+                                {% if inc.pedido_item %}
+                                    <span class="fw-semibold {% if inc.tipo_incidencia == 'PRODUCTO_ERRONEO' %}text-danger{% endif %}">{{ inc.pedido_item.codigo }}</span><br>
+                                    <small>{{ inc.pedido_item.descripcion }}</small>
+                                {% elif inc.tipo_incidencia == 'SKU_NO_CONTEMPLADO' %}
+                                    <span class="text-muted fst-italic">No estaba en el pedido</span>
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+
+                            <!-- Producto real / nuevo -->
+                            <td>
+                                {% if inc.tipo_incidencia == 'PRODUCTO_ERRONEO' %}
+                                    <span class="fw-semibold text-success">{{ inc.codigo_real|default:"—" }}</span><br>
+                                    <small>{{ inc.descripcion_real|default:"" }}</small>
+                                {% elif inc.tipo_incidencia == 'SKU_NO_CONTEMPLADO' %}
+                                    <span class="fw-semibold text-primary">{{ inc.codigo_real|default:"—" }}</span><br>
+                                    <small>{{ inc.descripcion_real|default:"" }}</small>
+                                {% elif inc.tipo_incidencia == 'CANTIDAD_MENOR' %}
+                                    <span class="text-muted small">
+                                        Despachado: <strong>{{ inc.cantidad_despachada }}</strong> —
+                                        Recibido: <strong>{{ inc.cantidad_recibida }}</strong>
+                                    </span>
+                                {% elif inc.tipo_incidencia == 'CANTIDAD_MAYOR' %}
+                                    <span class="text-muted small">
+                                        Despachado: <strong>{{ inc.cantidad_despachada }}</strong> —
+                                        Recibido: <strong>{{ inc.cantidad_recibida }}</strong>
+                                    </span>
+                                {% endif %}
+                            </td>
+
+                            <!-- Cantidad -->
+                            <td class="text-center fw-bold">{{ inc.cantidad_despachada }}</td>
+
+                            <!-- Solicitante -->
+                            <td>{{ inc.despacho.pedido.solicitante.username|capfirst }}</td>
+
+                            <!-- Autorizado por -->
+                            <td>
+                                {% if inc.autorizado_por %}
+                                    <span class="text-success"><i class="fas fa-check-circle me-1"></i>{{ inc.autorizado_por.username|capfirst }}</span>
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+
+                            <!-- Foto -->
+                            <td class="text-center">
+                                {% if inc.foto_incidencia %}
+                                <a href="{{ inc.foto_incidencia.url }}" target="_blank" title="Ver foto completa">
+                                    <img src="{{ inc.foto_incidencia.url }}" alt="Foto incidencia"
+                                         style="max-width:60px; max-height:60px; object-fit:cover; border-radius:4px; border:1px solid #dee2e6;">
+                                </a>
+                                {% else %}
+                                <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="10" class="text-center text-muted py-4">
+                                <i class="fas fa-check-circle text-success fa-2x mb-2 d-block"></i>
+                                No se encontraron incidencias en el período seleccionado.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock content %}

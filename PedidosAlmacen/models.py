@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from users.models import User
 
@@ -32,6 +33,11 @@ class Pedido(models.Model):
     categoria = models.CharField(max_length=70, blank=True, default='')
     categoria_nombre = models.CharField(max_length=150, blank=True, default='')
     deposito_codigo = models.IntegerField(null=True, blank=True)
+    deposito_transito = models.IntegerField(
+        null=True, blank=True,
+        help_text="Depósito de tránsito usado en el despacho de este pedido "
+                  "(snapshot de la configuración al despachar).",
+    )
     picker = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='pedidos_picking',
@@ -155,3 +161,35 @@ class DepositoPermitido(models.Model):
 
     def __str__(self) -> str:
         return f"{self.codigo} - {self.nombre}"
+
+
+class ConfiguracionPedidos(models.Model):
+    """Configuración operativa singleton del módulo de pedidos (una sola fila)."""
+    deposito_transito = models.IntegerField(
+        help_text="Código de depósito de tránsito en a2 (SDEPOSITOS.FDP_CODIGO)."
+    )
+    fecha_actualizacion = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Configuracion deposito tránsito a2'
+        verbose_name_plural = 'Configuración de pedidos'
+
+    def save(self, *args, **kwargs):
+        self.pk = 1  # fuerza singleton
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        # Validación suave contra el espejo de SDEPOSITOS: si aún no se ha
+        # sincronizado ningún depósito, no bloquea.
+        if DepositoPermitido.objects.exists() and \
+                not DepositoPermitido.objects.filter(codigo=self.deposito_transito).exists():
+            raise ValidationError({
+                'deposito_transito':
+                    f'El depósito {self.deposito_transito} no existe en los '
+                    f'depósitos sincronizados desde a2.'
+            })
+
+    @classmethod
+    def load(cls) -> 'ConfiguracionPedidos':
+        obj, _ = cls.objects.get_or_create(pk=1, defaults={'deposito_transito': 10})
+        return obj

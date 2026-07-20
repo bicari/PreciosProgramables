@@ -1,3 +1,4 @@
+import logging
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.enums import TA_RIGHT, TA_LEFT
 from reportlab.lib import colors
@@ -8,6 +9,9 @@ from reportlab.platypus import (
 from io import BytesIO
 from datetime import datetime
 from reportlab.platypus import Flowable
+
+logger = logging.getLogger(__name__)
+
 
 class EmpujarAlFondo(Flowable):
     """
@@ -173,8 +177,8 @@ def generar_factura(filename, pedido: dict[list[dict]], logo_path=None, prelimin
                             Paragraph(productos_sin_oc.get('codigo', ''), estilo_celda),
                             Paragraph(productos_sin_oc.get('referencia', ''), estilo_celda),
                             Paragraph(productos_sin_oc.get('ref_proveedor', ''), estilo_celda),     
-                            Paragraph(productos_sin_oc["descripcion"], estilo_celda),
-                            Paragraph(productos_sin_oc["puesto"], estilo_celda), "", 
+                            Paragraph(productos_sin_oc.get('descripcion', ''), estilo_celda),
+                            Paragraph(productos_sin_oc.get('puesto', ''), estilo_celda), "",
                             formatear_numeros(productos_sin_oc["cantidad"]), 
                             costo,
                             total
@@ -264,7 +268,8 @@ def generar_factura(filename, pedido: dict[list[dict]], logo_path=None, prelimin
             buffer.close()
             return pdf_bytes    
     except Exception as e:
-        print(f"Error al generar la factura: {e}")
+        logger.exception('generar_factura failed')
+        raise
 
 def generar_reporte_notas(notas: list[dict], fecha_desde: str, fecha_hasta: str):
     buffer = BytesIO()

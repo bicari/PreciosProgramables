@@ -1,0 +1,23 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<div class="container mt-4" style="max-width:500px;">
+    <div class="card border-danger">
+        <div class="card-header bg-danger text-white">
+            <h5 class="mb-0"><i class="fas fa-exclamation-triangle"></i> Confirmar desactivación</h5>
+        </div>
+        <div class="card-body">
+            <p>¿Estás seguro de que deseas desactivar el {{ tipo }} <strong>{{ nombre }}</strong>?</p>
+            <p class="text-muted small">Esta acción no elimina el registro; lo marca como inactivo y no aparecerá en búsquedas.</p>
+            <form method="post">
+                {% csrf_token %}
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-danger">
+                        <i class="fas fa-ban"></i> Sí, desactivar
+                    </button>
+                    <a href="javascript:history.back()" class="btn btn-outline-secondary">Cancelar</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock content %}

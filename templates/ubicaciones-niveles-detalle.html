@@ -1,0 +1,104 @@
+{% extends "dashboard.html" %}
+{% block content %}
+{% load static %}
+<link rel="stylesheet" href="{% static 'vendor/datatables/css/dataTables.bootstrap5.min.css' %}">
+<script src="{% static 'vendor/jquery/jquery-3.6.0.min.js' %}"></script>
+<script src="{% static 'vendor/datatables/js/jquery.dataTables.min.js' %}"></script>
+<script src="{% static 'vendor/datatables/js/dataTables.bootstrap5.min.js' %}"></script>
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3 page-header-mobile">
+        <h2><i class="fas fa-layer-group"></i> Nivel: {{ nivel }}</h2>
+        <div class="d-flex gap-2 flex-wrap btn-group-header">
+            <a href="{% url 'ubicaciones-niveles-editar' nivel.pk %}" class="btn btn-outline-secondary"><i class="fas fa-edit"></i> Editar</a>
+            {% if nivel.activo %}
+            <a href="{% url 'ubicaciones-niveles-desactivar' nivel.pk %}" class="btn btn-outline-danger"><i class="fas fa-ban"></i> Desactivar</a>
+            {% endif %}
+            <a href="{% url 'ubicaciones-racks-detalle' nivel.rack.pk %}" class="btn btn-outline-secondary"><i class="fas fa-arrow-left"></i> Rack</a>
+        </div>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show">
+            {{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Información</h5>
+                    <table class="table table-sm table-borderless mb-0">
+                        <tr><th>Rack</th><td><a href="{% url 'ubicaciones-racks-detalle' nivel.rack.pk %}">{{ nivel.rack.codigo }}</a></td></tr>
+                        <tr><th>Código</th><td><strong>{{ nivel.codigo }}</strong></td></tr>
+                        <tr><th>Tipo</th><td>
+                            {% if nivel.tipo == 'PICKING' %}
+                                <span class="badge bg-info text-dark">Picking</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Almacenaje</span>
+                            {% endif %}
+                        </td></tr>
+                        <tr><th>Descripción</th><td>{{ nivel.descripcion|default:"—" }}</td></tr>
+                        <tr><th>Estado</th><td>
+                            {% if nivel.activo %}<span class="badge bg-success">Activo</span>
+                            {% else %}<span class="badge bg-secondary">Inactivo</span>{% endif %}
+                        </td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h4>Ubicaciones</h4>
+        {% if nivel.activo %}
+        <a href="{% url 'ubicaciones-ubicaciones-crear' %}?nivel={{ nivel.pk }}" class="btn btn-primary">
+            <i class="fas fa-plus"></i> Nueva Ubicación
+        </a>
+        {% endif %}
+    </div>
+
+    <div class="table-responsive">
+    <table id="tablaNivelUbicaciones" class="table table-striped table-hover" style="width:100%">
+        <thead>
+            <tr><th>Código</th><th>Descripción</th><th>Productos</th><th>Estado</th><th>Acciones</th></tr>
+        </thead>
+        <tbody>
+            {% for ubic in ubicaciones %}
+            <tr>
+                <td><strong>{{ ubic.codigo }}</strong></td>
+                <td>{{ ubic.descripcion|default:"—" }}</td>
+                <td><span class="badge bg-light text-dark border">{{ ubic.productos.count }}</span></td>
+                <td>
+                    {% if ubic.activo %}<span class="badge bg-success">Activo</span>
+                    {% else %}<span class="badge bg-secondary">Inactivo</span>{% endif %}
+                </td>
+                <td>
+                    <a href="{% url 'ubicaciones-ubicaciones-detalle' ubic.pk %}" class="btn btn-sm btn-outline-primary"><i class="fas fa-eye"></i></a>
+                    <a href="{% url 'ubicaciones-ubicaciones-editar' ubic.pk %}" class="btn btn-sm btn-outline-secondary"><i class="fas fa-edit"></i></a>
+                    <a href="{% url 'ubicaciones-asignar' ubic.pk %}" class="btn btn-sm btn-outline-success" title="Asignar producto"><i class="fas fa-plus"></i></a>
+                    {% if ubic.activo %}
+                    <a href="{% url 'ubicaciones-ubicaciones-desactivar' ubic.pk %}" class="btn btn-sm btn-outline-danger"><i class="fas fa-ban"></i></a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5" class="text-center text-muted">No hay ubicaciones en este nivel.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<script>
+$(document).ready(function() {
+    $('#tablaNivelUbicaciones').DataTable({
+        language: { url: "/static/vendor/datatables/i18n/es-ES.json" },
+        paging: false, searching: false, ordering: true, info: false,
+    });
+});
+</script>
+{% endblock content %}

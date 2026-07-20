@@ -234,12 +234,42 @@ document.body.addEventListener("htmx:error", function (event) {
 });
 
 document.getElementById("menu-toggle").addEventListener("click", function() {
-            const menu = document.querySelector(".nav-side-menu");
-            const content = document.querySelector(".main-content");
+    const menu = document.querySelector(".nav-side-menu");
+    const content = document.querySelector(".main-content");
+    const overlay = document.getElementById('sidebar-overlay');
 
-            menu.classList.toggle("collapsed");
-            content.classList.toggle("expanded");
-        });
+    if (window.innerWidth < 768) {
+        // En móvil: toggle como overlay (gestionado desde dashboard.html)
+        if (menu.classList.contains('mobile-open')) {
+            menu.classList.remove('mobile-open');
+            if (overlay) overlay.classList.remove('active');
+        } else {
+            menu.classList.add('mobile-open');
+            if (overlay) overlay.classList.add('active');
+        }
+    } else {
+        const isCollapsed = menu.classList.contains('collapsed');
+        const menuList = menu.querySelector('.menu-list');
+        // Cerrar submenús abiertos antes de cambiar estado
+        menu.querySelectorAll('.menu-toggle').forEach(cb => { cb.checked = false; });
+        if (isCollapsed) {
+            menu.style.overflow = 'hidden';
+            if (menuList) menuList.style.overflow = '';
+            menu.classList.remove('collapsed');
+            content.classList.remove('expanded');
+            setTimeout(() => { menu.style.overflow = ''; }, 310);
+        } else {
+            menu.style.overflow = 'hidden';
+            menu.classList.add('collapsed');
+            content.classList.add('expanded');
+            // .menu-list tiene overflow-y:auto que también corta el flyout
+            setTimeout(() => {
+                menu.style.overflow = 'visible';
+                if (menuList) menuList.style.overflow = 'visible';
+            }, 310);
+        }
+    }
+});
       
 
 document.getElementById("procesar-modal").addEventListener("click", (event)=>{
@@ -308,9 +338,9 @@ function recolectarDatos() {
   const [rif, proveedor]  =  document.getElementById('card-proveedor').innerText.trim().split('-')
   const comentario = document.getElementById('message-text').value.trim();
   const direccion_proveedor = document.getElementById('direccion-proveedor').innerText.trim();
-  //const numeroOrdenesOc   =
+  const fecha_vencimiento = document.getElementById('fecha-vencimiento').value;
   console.info(ordenes)
-  return { ordenes, productoSinOc, proveedor, rif, comentario, direccion_proveedor};
+  return { ordenes, productoSinOc, proveedor, rif, comentario, direccion_proveedor, fecha_vencimiento};
 }
 function getCookie(name) {
   let cookieValue = null;
@@ -393,9 +423,16 @@ document.getElementById('form-recepcion').addEventListener('submit', function (e
       botonProcesar.disabled = false;
       const alertDiv = document.querySelector('.alert-danger');
       alertDiv.classList.remove('d-none');
-      alertDiv.innerHTML = data.error;
+      if (data.error) {
+        alertDiv.innerHTML = data.error;
+      } else if (data.errors) {
+        const mensajes = Object.entries(data.errors).map(([campo, msgs]) => `${campo}: ${[].concat(msgs).join(', ')}`).join(' | ');
+        alertDiv.innerHTML = mensajes;
+      } else {
+        alertDiv.innerHTML = 'Error al procesar la nota.';
+      }
 
-    }  
+    }
   });
 });
 
@@ -419,14 +456,69 @@ function agregarProveedor(event){
   document.getElementById('search-orden').focus()
 }
 
+let _preliminarPdfBase64 = null;
+
 const botonProcesar = document.getElementById('procesar-recepcion');
 
 botonProcesar.addEventListener('click', function(event) {
-    console.log("Botón presionado, procesando...");
-    const comentario = document.getElementById('message-text')
-    const comentarioCelda = document.querySelector('.comentario-orden').textContent
-    comentario.innerText= comentarioCelda
-    
-    
-    
+    // Comentario vacío por defecto
+    document.getElementById('message-text').value = '';
+
+    // Fecha vencimiento = mañana por defecto
+    const manana = new Date();
+    manana.setDate(manana.getDate() + 1);
+    document.getElementById('fecha-vencimiento').value = manana.toISOString().slice(0, 10);
+
+    // Obtener total_neto y PDF preliminar desde el servidor
+    const datos = recolectarDatos();
+    fetch('/preliminar-recepcion/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify(datos)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === true) {
+            _preliminarPdfBase64 = data.document;
+            const totalFormateado = parseFloat(data.total_neto).toLocaleString('es-VE', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            document.getElementById('total').value = totalFormateado;
+        }
+    })
+    .catch(err => console.error('Error al obtener preliminar:', err));
+});
+
+document.getElementById('btn-preliminar').addEventListener('click', function() {
+    const base64 = _preliminarPdfBase64;
+    if (!base64) {
+        alert('Espere a que se cargue el preliminar.');
+        return;
+    }
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+});
+
+// ── Prevención global de doble envío ─────────────────────────────────────────
+// Bloquea el reenvío por doble clic en todos los formularios que usen el flujo
+// nativo (GET/POST). Los formularios que gestionan su propio envío via fetch
+// deben marcarse con data-ajax="true" para quedar excluidos.
+document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    if (form.dataset.ajax === 'true') return;
+    if (form.dataset.submitted === 'true') { e.preventDefault(); return; }
+    form.dataset.submitted = 'true';
+    var btns = form.querySelectorAll('button[type="submit"], input[type="submit"]');
+    setTimeout(function () {
+        btns.forEach(function (b) { b.disabled = true; });
+    }, 0);
 });

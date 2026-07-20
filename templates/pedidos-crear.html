@@ -274,7 +274,80 @@
 #skeleton-busqueda.htmx-request.htmx-indicator {
     display: table !important;
 }
+
+/* ── Stepper de cantidad ── */
+.qty-stepper {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0,0,0,.06);
+}
+.qty-stepper .btn-qty {
+    width: 34px;
+    height: 36px;
+    border: none;
+    background: #f8f9fa;
+    font-size: 1.05rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .12s, color .12s;
+    flex-shrink: 0;
+    color: #495057;
+    user-select: none;
+}
+.qty-stepper .btn-qty:hover  { background: #e9ecef; color: #0d6efd; }
+.qty-stepper .btn-qty:active { background: #dee2e6; }
+.qty-stepper .qty-val {
+    width: 52px;
+    text-align: center;
+    border: none;
+    border-left: 1px solid #dee2e6;
+    border-right: 1px solid #dee2e6;
+    font-weight: 600;
+    font-size: 1rem;
+    padding: 4px 2px;
+    background: #fff;
+    -moz-appearance: textfield;
+}
+.qty-stepper .qty-val::-webkit-inner-spin-button,
+.qty-stepper .qty-val::-webkit-outer-spin-button { display: none; }
+.qty-stepper .qty-val:focus { outline: none; background: #f0f4ff; }
+.qty-stepper .qty-val.border-danger {
+    background: #fff5f5;
+    color: #dc3545;
+}
+
+/* Variante pequeña para resultados de búsqueda */
+.qty-stepper-sm .btn-qty { width: 28px; height: 30px; font-size: .9rem; }
+.qty-stepper-sm .qty-val { width: 38px; font-size: .9rem; }
+
+/* Flash al agregar item a la lista */
+@keyframes rowFlash {
+    0%   { background-color: #d1fadf; }
+    100% { background-color: transparent; }
+}
+.row-flash { animation: rowFlash 1s ease-out forwards; }
 </style>
+
+{% if items_json_inicial %}
+<script>
+window._rehidratarPedido = {
+    items: {{ items_json_inicial|safe }},
+    stock: {{ stock_info_json|safe }},
+    categoria: "{{ categoria_inicial|escapejs }}",
+    categoriaNombre: "{{ categoria_nombre_inicial|escapejs }}",
+    condicion: "{{ condicion_inicial|escapejs }}",
+    deposito: "{{ deposito_inicial|escapejs }}",
+    depositoNombre: "{{ deposito_nombre_inicial|escapejs }}"
+};
+</script>
+{% endif %}
 
 <script>
 let itemsPedido = [];
@@ -348,15 +421,28 @@ function bloquearCategoria() {
     }
 }
 
-function agregarItem(codigo, descripcion, referencia, puesto, ref_proveedor) {
+function agregarItem(codigo, descripcion, referencia, puesto, ref_proveedor, cantidad) {
+    cantidad = Math.max(1, parseInt(cantidad) || 1);
     const existe = itemsPedido.find(i => i.codigo === codigo);
+    let targetIdx;
     if (existe) {
-        existe.cantidad++;
+        existe.cantidad += cantidad;
+        targetIdx = itemsPedido.indexOf(existe);
         renderItems();
-        return;
+    } else {
+        itemsPedido.push({ codigo, descripcion, referencia: referencia || '', puesto: puesto || '', ref_proveedor: ref_proveedor || '', cantidad });
+        targetIdx = itemsPedido.length - 1;
+        renderItems();
     }
-    itemsPedido.push({ codigo, descripcion, referencia: referencia || '', puesto: puesto || '', ref_proveedor: ref_proveedor || '', cantidad: 1 });
-    renderItems();
+    setTimeout(function() {
+        const fila = document.querySelector('#items-body tr[data-index="' + targetIdx + '"]');
+        if (fila) {
+            fila.classList.remove('row-flash');
+            void fila.offsetWidth;
+            fila.classList.add('row-flash');
+            fila.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }, 30);
 }
 
 function eliminarItem(index) {
@@ -364,12 +450,47 @@ function eliminarItem(index) {
     renderItems();
 }
 
-function actualizarCantidad(index, valor) {
+function incrementarCantidad(index) {
+    itemsPedido[index].cantidad++;
+    const input = document.getElementById('qty-' + index);
+    if (input) input.value = itemsPedido[index].cantidad;
+    _checkStockYActualizar(index);
+}
+
+function decrementarCantidad(index) {
+    if (itemsPedido[index].cantidad <= 1) return;
+    itemsPedido[index].cantidad--;
+    const input = document.getElementById('qty-' + index);
+    if (input) input.value = itemsPedido[index].cantidad;
+    _checkStockYActualizar(index);
+}
+
+function actualizarCantidadDirecta(index, valor) {
     const cantidad = parseInt(valor);
-    if (cantidad > 0) {
+    if (!isNaN(cantidad) && cantidad >= 1) {
         itemsPedido[index].cantidad = cantidad;
+    } else {
+        const input = document.getElementById('qty-' + index);
+        if (input) input.value = itemsPedido[index].cantidad;
     }
-    actualizarJSON();
+    _checkStockYActualizar(index);
+}
+
+function _checkStockYActualizar(index) {
+    const item = itemsPedido[index];
+    let cambioEstado = false;
+    if (item.stockDisponible !== undefined) {
+        const nuevoError = item.cantidad > item.stockDisponible;
+        cambioEstado = nuevoError !== !!item.stockError;
+        item.stockError = nuevoError;
+    }
+    if (cambioEstado) {
+        renderItems();
+    } else {
+        actualizarJSON();
+        const hayErrores = itemsPedido.some(i => i.stockError);
+        document.getElementById('btn-enviar').disabled = hayErrores;
+    }
 }
 
 function renderItems() {
@@ -389,23 +510,31 @@ function renderItems() {
     }
 
     sinItems.style.display = 'none';
-    btnEnviar.disabled = false;
     totalBadge.textContent = itemsPedido.length + ' items';
 
+    const hayErroresStock = itemsPedido.some(i => i.stockError);
+    btnEnviar.disabled = hayErroresStock;
+
     tbody.innerHTML = itemsPedido.map((item, i) => `
-        <tr>
+        <tr class="${item.stockError ? 'table-danger' : ''}" data-index="${i}">
             <td data-label="Código">${item.codigo}</td>
             <td data-label="Descripción">${item.descripcion}</td>
             <td data-label="Referencia"><small class="text-muted">${item.referencia}</small></td>
             <td data-label="Puesto"><small class="text-muted">${item.puesto}</small></td>
             <td data-label="Ref. Prov."><small class="text-muted">${item.ref_proveedor}</small></td>
             <td data-label="Cantidad">
-                <input type="number" class="form-control form-control-sm" style="width:90px"
-                    value="${item.cantidad}" min="1"
-                    onchange="actualizarCantidad(${i}, this.value)">
+                <div class="qty-stepper">
+                    <button type="button" class="btn-qty" onclick="decrementarCantidad(${i})" tabindex="-1">−</button>
+                    <input type="number" class="qty-val${item.stockError ? ' border-danger' : ''}" value="${item.cantidad}" min="1" id="qty-${i}"
+                        onchange="actualizarCantidadDirecta(${i}, this.value)" onfocus="this.select()">
+                    <button type="button" class="btn-qty" onclick="incrementarCantidad(${i})" tabindex="-1">+</button>
+                </div>
+                <div class="text-danger small mt-1" id="stock-err-${i}"${item.stockError ? '' : ' style="display:none"'}>
+                    <i class="fas fa-exclamation-triangle"></i> Máx: ${item.stockDisponible ?? ''}
+                </div>
             </td>
             <td>
-                <button type="button" class="btn btn-sm btn-outline-danger" onclick="eliminarItem(${i})">
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="eliminarItem(${i})" title="Eliminar">
                     <i class="fas fa-trash"></i>
                 </button>
             </td>
@@ -450,6 +579,29 @@ document.getElementById('btn-aceptar-confirm').addEventListener('click', functio
     btn.disabled = true;
     document.getElementById('overlay-carga').style.display = 'flex';
     document.getElementById('form-pedido').submit();
+});
+
+// Rehidratar carrito tras error de stock (preserva items, marca los inválidos)
+document.addEventListener('DOMContentLoaded', function() {
+    const datos = window._rehidratarPedido;
+    if (!datos || !datos.items.length) return;
+
+    const catSel = document.getElementById('selector-categoria');
+    catSel.value = datos.categoria;
+    seleccionarCategoria(catSel);
+
+    document.getElementById('selector-condicion').value = datos.condicion;
+    document.getElementById('selector-deposito').value = datos.deposito;
+    validarFormulario();
+
+    itemsPedido = datos.items.map(function(item) {
+        const disponible = datos.stock[item.codigo] !== undefined ? datos.stock[item.codigo] : 0;
+        return Object.assign({}, item, {
+            stockDisponible: disponible,
+            stockError: item.cantidad > disponible
+        });
+    });
+    renderItems();
 });
 </script>
 {% endblock content %}

@@ -9,6 +9,10 @@ Valida únicamente el paso de RECEPCIÓN. El paso de despacho (almacén→tráns
 ya se audita en Postgres mediante Despacho.traslado_a2_registrado, sin
 necesitar consultar DBISAM.
 
+La verificación usa el depósito de tránsito actualmente configurado en
+ConfiguracionPedidos; pedidos históricos despachados con otro depósito de
+tránsito pueden aparecer como falsos positivos.
+
 Uso:
     python manage.py validar_traslados_recepcion
     python manage.py validar_traslados_recepcion --dias 30
@@ -21,7 +25,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from PedidosAlmacen.dbisam import PedidosDBISAM
-from PedidosAlmacen.models import Pedido
+from PedidosAlmacen.models import ConfiguracionPedidos, Pedido
 
 
 class Command(BaseCommand):
@@ -55,8 +59,11 @@ class Command(BaseCommand):
             return
 
         numeros = [c[0] for c in candidatos]
+        # La verificación asume el depósito de tránsito actualmente configurado;
+        # pedidos históricos despachados con otro tránsito pueden dar falso positivo.
+        deposito_transito = ConfiguracionPedidos.load().deposito_transito
         try:
-            existentes = PedidosDBISAM().traslados_recepcion_existentes(numeros)
+            existentes = PedidosDBISAM().traslados_recepcion_existentes(numeros, deposito_transito)
         except Exception as e:
             self.stderr.write(self.style.ERROR(f"Error al consultar a2: {e}"))
             return

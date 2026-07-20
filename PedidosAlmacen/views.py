@@ -882,6 +882,38 @@ def recibir_despacho(request, pk, despacho_id):
             productos_extra_parsed = []
             tiene_sku_extra = False
 
+        # ── Bloquear extras cuyo SKU ya existe en el pedido o viene repetido ─
+        if tiene_sku_extra:
+            codigos_pedido = {
+                c.strip().upper() for c in pedido.items.values_list('codigo', flat=True)
+            }
+            ya_en_pedido, repetidos, vistos = [], [], set()
+            for extra in productos_extra_parsed:
+                codigo = str(extra.get('codigo', '')).strip()
+                if not codigo:
+                    continue
+                codigo_norm = codigo.upper()
+                if codigo_norm in codigos_pedido:
+                    ya_en_pedido.append(codigo)
+                elif codigo_norm in vistos:
+                    repetidos.append(codigo)
+                vistos.add(codigo_norm)
+            if ya_en_pedido:
+                messages.error(
+                    request,
+                    f'No se puede agregar como producto nuevo: {", ".join(ya_en_pedido)} '
+                    'ya existe en el pedido. Registra la cantidad de más en la línea '
+                    'correspondiente del despacho.'
+                )
+                return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
+            if repetidos:
+                messages.error(
+                    request,
+                    f'Producto repetido en la lista de adicionales: {", ".join(repetidos)}. '
+                    'Agrega el código una sola vez con la cantidad total.'
+                )
+                return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
+
         auth_user = None
         if tiene_producto_erroneo or tiene_sku_extra:
             auth_user_id = request.session.get('despacho_auth_user_id')

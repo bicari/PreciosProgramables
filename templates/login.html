@@ -31,9 +31,9 @@ body{
             <div class="col-12 col-sm-10 col-md-8 col-lg-10 text-center", id="login-header">
                 <h1 id="login-title"> Inicio de sesión</h1>
                 <p>Ingresa tus credenciales por favor</p>
-                {%if error%}
-                <p style="color: red">{{error}}</p>
-                {%endif%}
+                {% if messages %}
+                {% for m in messages %}<p style="color: red">{{ m }}</p>{% endfor %}
+            {% endif %}
             </div>
             <div class="col-12 col-sm-10 col-md-8 col-lg-10 mb-4">
                 <form method="post" action="">
@@ -51,3 +51,15 @@ body{
         </div>
     </div>
 </body>
+<script>
+(function () {
+    var form = document.querySelector('form');
+    if (!form) return;
+    form.addEventListener('submit', function (e) {
+        if (form.dataset.submitted === 'true') { e.preventDefault(); return; }
+        form.dataset.submitted = 'true';
+        var btn = form.querySelector('button[type="submit"]');
+        if (btn) setTimeout(function () { btn.disabled = true; }, 0);
+    });
+})();
+</script>

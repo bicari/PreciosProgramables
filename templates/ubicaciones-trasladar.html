@@ -1,0 +1,44 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<div class="container mt-4" style="max-width:700px;">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="fas fa-exchange-alt"></i> Trasladar Producto</h2>
+        <a href="{% url 'ubicaciones-movimientos' %}" class="btn btn-outline-secondary">
+            <i class="fas fa-history"></i> Histórico
+        </a>
+    </div>
+
+    <p class="text-muted">Mueve la asignación de un producto de una ubicación a otra.</p>
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show">
+            {{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="card">
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+                {% for field in form %}
+                <div class="mb-3">
+                    <label class="form-label fw-bold">{{ field.label }}</label>
+                    {{ field }}
+                    {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                {% endfor %}
+                {% if form.non_field_errors %}
+                <div class="alert alert-danger">
+                    {% for error in form.non_field_errors %}{{ error }}{% endfor %}
+                </div>
+                {% endif %}
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-exchange-alt"></i> Trasladar
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock content %}

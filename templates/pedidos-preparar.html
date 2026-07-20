@@ -1,0 +1,142 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h2 class="mb-0">Preparar Pedido #{{ pedido.numero_pedido }}</h2>
+        <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left"></i> <span class="d-none d-sm-inline">Volver</span>
+        </a>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    {% if pedido.estado == 'EN_PREPARACION' %}
+    <div class="alert alert-warning">
+        <i class="fas fa-boxes"></i>
+        <strong>En Preparación</strong> — Puede actualizar las cantidades preparadas y volver a confirmar.
+    </div>
+    {% endif %}
+
+    <div class="alert alert-info">
+        <i class="fas fa-info-circle"></i>
+        Solicitado por: <strong>{{ pedido.solicitante.username|capfirst }}</strong> |
+        Ingrese la cantidad que ha recolectado de cada item. Al confirmar, el pedido quedará listo para despacho.
+    </div>
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="card">
+            <div class="card-body p-0 p-md-3">
+                <div class="table-responsive">
+                <table class="table table-mobile-card mb-0">
+                    <thead>
+                        <tr>
+                            <th>Codigo</th>
+                            <th>Descripcion</th>
+                            <th>Referencia</th>
+                            <th>Puesto</th>
+                            <th>Ref. Proveedor</th>
+                            <th>Solicitado</th>
+                            <th>Stock</th>
+                            <th>Cantidad Preparada</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for data in items_con_stock %}
+                        <tr>
+                            <td data-label="Código">{{ data.item.codigo }}</td>
+                            <td data-label="Descripción">{{ data.item.descripcion }}</td>
+                            <td data-label="Referencia"><small class="text-muted">{{ data.item.referencia|default:"-" }}</small></td>
+                            <td data-label="Puesto"><small class="text-muted">{{ data.item.puesto|default:"-" }}</small></td>
+                            <td data-label="Ref. Prov."><small class="text-muted">{{ data.item.ref_proveedor|default:"-" }}</small></td>
+                            <td data-label="Solicitado"><strong>{{ data.cantidad_pendiente }}</strong></td>
+                            <td data-label="Stock">
+                                {% if data.stock > 0 %}
+                                    <span class="text-success fw-bold">{{ data.stock }}</span>
+                                {% else %}
+                                    <span class="text-danger fw-bold">{{ data.stock }}</span>
+                                {% endif %}
+                            </td>
+                            <td data-label="Cantidad Preparada">
+                                <input type="number" class="form-control form-control-sm" style="width:110px"
+                                    name="cantidad_{{ data.item.id }}"
+                                    value="{{ data.cantidad_inicial }}"
+                                    min="0" max="{{ data.cantidad_pendiente }}">
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-3 d-flex gap-2 flex-wrap">
+            <button type="button" class="btn btn-warning flex-grow-1 flex-sm-grow-0" id="btn-confirmar">
+                <i class="fas fa-check-circle"></i> Marcar como Preparado
+            </button>
+            <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-secondary">Cancelar</a>
+        </div>
+    </form>
+</div>
+
+<!-- Overlay confirmacion preparado -->
+<div id="overlay-confirmar" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9998; align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:16px; padding:40px 50px; text-align:center; box-shadow:0 8px 32px rgba(0,0,0,0.25); max-width:420px; width:90%;">
+        <div style="font-size:2.5rem; margin-bottom:12px;">📦</div>
+        <p class="fw-bold fs-5 mb-1 text-dark">¿Confirmar preparación del pedido?</p>
+        <p class="text-muted mb-4" style="font-size:0.9rem;">El pedido pasará a estado <strong>En Preparación</strong> y estará disponible para despacho por el almacén.</p>
+        <div class="d-flex gap-3 justify-content-center">
+            <button type="button" class="btn btn-secondary px-4" id="btn-cancelar">Cancelar</button>
+            <button type="button" class="btn btn-warning px-4" id="btn-aceptar">
+                <i class="fas fa-check-circle"></i> Confirmar
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Overlay de carga -->
+<div id="overlay-carga" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9999; align-items:center; justify-content:center; flex-direction:column;">
+    <div style="background:#fff; border-radius:16px; padding:40px 50px; text-align:center; box-shadow:0 8px 32px rgba(0,0,0,0.25);">
+        <div style="width:64px; height:64px; margin:0 auto 20px; position:relative;">
+            <svg viewBox="0 0 64 64" style="width:64px;height:64px;">
+                <circle cx="32" cy="32" r="28" fill="none" stroke="#e9ecef" stroke-width="6"/>
+                <circle cx="32" cy="32" r="28" fill="none" stroke="#ffc107" stroke-width="6"
+                    stroke-linecap="round"
+                    stroke-dasharray="44 132"
+                    transform="rotate(-90 32 32)">
+                    <animateTransform attributeName="transform" type="rotate"
+                        from="-90 32 32" to="270 32 32"
+                        dur="0.9s" repeatCount="indefinite"/>
+                </circle>
+            </svg>
+        </div>
+        <p class="fw-bold fs-5 mb-1 text-dark">Guardando preparación...</p>
+        <p class="text-muted mb-0" style="font-size:0.9rem;">Por favor espere, no cierre esta ventana</p>
+    </div>
+</div>
+
+<script>
+document.getElementById('btn-confirmar').addEventListener('click', function() {
+    document.getElementById('overlay-confirmar').style.display = 'flex';
+});
+
+document.getElementById('btn-cancelar').addEventListener('click', function() {
+    document.getElementById('overlay-confirmar').style.display = 'none';
+});
+
+document.getElementById('btn-aceptar').addEventListener('click', function() {
+    document.getElementById('overlay-confirmar').style.display = 'none';
+    document.getElementById('btn-confirmar').disabled = true;
+    document.getElementById('overlay-carga').style.display = 'flex';
+    document.querySelector('form').submit();
+});
+</script>
+{% endblock content %}

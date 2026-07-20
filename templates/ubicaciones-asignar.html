@@ -1,0 +1,80 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="fas fa-plus-circle"></i> Asignar Producto</h2>
+        <a href="{% url 'ubicaciones-ubicaciones-detalle' ubicacion.pk %}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left"></i> Volver
+        </a>
+    </div>
+
+    <div class="alert alert-info">
+        Asignando producto a: <strong>{{ ubicacion.codigo_completo }}</strong>
+        <span class="badge ms-2 {% if ubicacion.nivel.tipo == 'PICKING' %}bg-info text-dark{% else %}bg-secondary{% endif %}">
+            {{ ubicacion.nivel.get_tipo_display }}
+        </span>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show">
+            {{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="card mb-4">
+        <div class="card-header">Buscar producto en DBISAM</div>
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+                <div class="input-group mb-3">
+                    <input type="text" name="codigo_producto" class="form-control"
+                        placeholder="Código o descripción del producto" value="{{ query }}">
+                    <button type="submit" name="buscar" class="btn btn-outline-primary">
+                        <i class="fas fa-search"></i> Buscar
+                    </button>
+                </div>
+            </form>
+
+            {% if resultados_busqueda %}
+            <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead>
+                    <tr><th>Código</th><th>Descripción</th><th>Referencia</th><th>Puesto DBISAM</th><th>Existencia</th><th></th></tr>
+                </thead>
+                <tbody>
+                    {% for prod in resultados_busqueda %}
+                    <tr>
+                        <td>{{ prod.codigo }}</td>
+                        <td>{{ prod.descripcion }}</td>
+                        <td>{{ prod.referencia }}</td>
+                        <td>{{ prod.puesto|default:"—" }}</td>
+                        <td>
+                            {% if prod.existencia > 0 %}
+                                <span class="badge bg-success">{{ prod.existencia|floatformat:0 }}</span>
+                            {% else %}
+                                <span class="badge bg-danger">0</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <form method="post">
+                                {% csrf_token %}
+                                <input type="hidden" name="codigo_asignar" value="{{ prod.codigo }}">
+                                <button type="submit" name="asignar" class="btn btn-sm btn-success">
+                                    <i class="fas fa-check"></i> Asignar
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            {% elif query %}
+            <p class="text-muted">No se encontraron productos para "{{ query }}".</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock content %}

@@ -1,0 +1,687 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h2 class="mb-0">Recibir Despacho #{{ despacho.numero_despacho }}</h2>
+        <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-outline-secondary">
+            <i class="fas fa-arrow-left"></i> <span class="d-none d-sm-inline">Pedido #{{ pedido.numero_pedido }}</span>
+        </a>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="alert alert-info mb-3">
+        <i class="fas fa-info-circle"></i>
+        Despacho del <strong>{{ despacho.fecha_despacho|date:"d/m/Y H:i" }}</strong>
+        {% if despacho.despachador %} por <strong>{{ despacho.despachador.username|capfirst }}</strong>{% endif %}.
+        Ingrese la cantidad <strong>real recibida</strong> de cada ítem. Puede recibir una cantidad diferente a la despachada, incluyendo cantidades superiores. Use el botón <i class="fas fa-exclamation-triangle text-warning"></i> para registrar incidencias.
+    </div>
+
+    <form method="post" id="form-recepcion" data-ajax="true" enctype="multipart/form-data">
+        {% csrf_token %}
+        <input type="hidden" name="productos_extra" id="productos_extra" value="[]">
+
+        <!-- ── Tabla de items ───────────────────────────────────────── -->
+        <div class="card mb-3">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                <table class="table table-hover table-mobile-card mb-0" id="tabla-items">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Código</th>
+                            <th>Descripción</th>
+                            {% if ver_despachado %}<th class="text-center">Despachado</th>{% endif %}
+                            <th class="text-center">Recibido</th>
+                            <th>Observación</th>
+                            <th class="text-center">Incidencia</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for di in despacho_items %}
+                        <!-- Fila principal -->
+                        <tr id="fila-{{ di.id }}">
+                            <td class="align-middle" data-label="Código" id="cod-display-{{ di.id }}">{{ di.pedido_item.codigo }}</td>
+                            <td class="align-middle" data-label="Descripción" id="desc-display-{{ di.id }}">{{ di.pedido_item.descripcion }}</td>
+                            {% if ver_despachado %}
+                            <td class="text-center align-middle" data-label="Despachado"><strong>{{ di.cantidad_despachada }}</strong></td>
+                            {% endif %}
+                            <td class="align-middle" data-label="Recibido">
+                                <input type="number" class="form-control form-control-sm text-center"
+                                    name="recibido_{{ di.id }}"
+                                    id="recibido_{{ di.id }}"
+                                    value="0"
+                                    min="0"
+                                    data-despachado="{{ di.cantidad_despachada }}"
+                                    style="width:110px">
+                            </td>
+                            <td class="align-middle" data-label="Observación">
+                                <input type="text" class="form-control form-control-sm"
+                                    name="observacion_{{ di.id }}"
+                                    placeholder="Observación (opcional)">
+                            </td>
+                            <td class="text-center align-middle" data-label="Incidencia">
+                                <input type="hidden" name="tipo_incidencia_{{ di.id }}" id="tipo_inc_{{ di.id }}" value="">
+                                <button type="button"
+                                    class="btn btn-sm btn-outline-warning btn-incidencia"
+                                    data-di="{{ di.id }}"
+                                    title="Registrar incidencia">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        <!-- Fila expandible: producto erróneo -->
+                        <tr id="panel-erroneo-{{ di.id }}" class="d-none bg-warning bg-opacity-10 fila-expandible">
+                            <td colspan="{% if ver_despachado %}6{% else %}5{% endif %}" class="p-3">
+                                <div class="d-flex align-items-center gap-2 flex-wrap">
+                                    <span class="badge bg-warning text-dark"><i class="fas fa-exchange-alt"></i> Cambio de SKU</span>
+                                    <div class="d-flex gap-2 flex-grow-1 flex-wrap">
+                                        <input type="text" class="form-control form-control-sm"
+                                            name="codigo_real_{{ di.id }}"
+                                            id="codigo_real_{{ di.id }}"
+                                            placeholder="Código real recibido"
+                                            style="max-width:160px; min-width:120px">
+                                        <input type="text" class="form-control form-control-sm"
+                                            name="descripcion_real_{{ di.id }}"
+                                            id="descripcion_real_{{ di.id }}"
+                                            placeholder="Descripción del producto real recibido">
+                                    </div>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary btn-cancelar-erroneo" data-di="{{ di.id }}">
+                                        <i class="fas fa-times"></i> Cancelar
+                                    </button>
+                                </div>
+                                <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                    <i class="fas fa-camera text-warning"></i>
+                                    <label class="fw-semibold mb-0">Foto del producto recibido (obligatorio):</label>
+                                    <input type="file" name="foto_{{ di.id }}"
+                                        accept="image/*" capture="environment"
+                                        class="form-control form-control-sm foto-incidencia-erroneo" style="max-width:280px"
+                                        data-di="{{ di.id }}">
+                                </div>
+                                <small class="text-muted mt-1 d-block">
+                                    <i class="fas fa-info-circle"></i>
+                                    El item original quedará en estado <strong>Incidencia</strong>.
+                                    Autorizado por: <span id="auth-label-{{ di.id }}" class="text-success fw-bold"></span>
+                                </small>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Productos adicionales (SKU no contemplado) ───────────── -->
+        <div class="card mb-3" id="card-extras" style="display:none">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-plus-circle text-primary"></i> Productos adicionales no contemplados en el pedido</span>
+                <span class="badge bg-primary" id="badge-extras-count">0</span>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0" id="tabla-extras">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Código</th>
+                            <th>Descripción</th>
+                            <th class="text-center" style="width:100px">Cantidad</th>
+                            <th style="width:50px"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-extras"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ── Foto para SKU no contemplados ─────────────────────────── -->
+        <div class="card mb-3 border-primary" id="panel-foto-extras" style="display:none">
+            <div class="card-body d-flex align-items-center gap-3 flex-wrap">
+                <i class="fas fa-camera text-primary fa-lg"></i>
+                <div>
+                    <label class="fw-bold mb-0 text-primary">Foto de los productos adicionales (obligatorio):</label>
+                    <small class="d-block text-muted">Se requiere una foto de evidencia de los productos no contemplados recibidos.</small>
+                </div>
+                <input type="file" name="foto_extras" id="foto_extras"
+                    accept="image/*" capture="environment"
+                    class="form-control form-control-sm" style="max-width:300px">
+            </div>
+        </div>
+
+        <!-- ── Estado de incidencias autorizadas ────────────────────── -->
+        <div id="panel-incidencias-ok" class="alert alert-success d-none mb-3">
+            <i class="fas fa-check-circle"></i>
+            Incidencias autorizadas por <strong id="label-autorizante"></strong>.
+            Al confirmar la recepción se registrarán correctamente.
+        </div>
+
+        <!-- ── Botones de acción ────────────────────────────────────── -->
+        <div class="d-flex gap-2 mt-3 flex-wrap">
+            <button type="submit" class="btn btn-info flex-grow-1 flex-sm-grow-0" id="btn-recibir">
+                <i class="fas fa-check"></i> Confirmar Recepción
+            </button>
+            <a href="{% url 'pedidos-detalle' pedido.numero_pedido %}" class="btn btn-secondary">Cancelar</a>
+        </div>
+    </form>
+</div>
+
+<!-- ── Modal de Incidencias (multi-paso) ────────────────────────────── -->
+<div class="modal fade" id="modalIncidencia" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modal-titulo">Registrar Incidencia</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" id="modal-btn-cerrar"></button>
+            </div>
+            <div class="modal-body">
+
+                <!-- Paso 1: Autorización -->
+                <div id="modal-step-auth">
+                    <div class="alert alert-warning d-flex align-items-center gap-2 mb-3">
+                        <i class="fas fa-shield-alt fa-lg"></i>
+                        <div>Se requiere autorización de <strong>supervisor o administrador</strong> para registrar incidencias.</div>
+                    </div>
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Usuario autorizante</label>
+                            <input type="text" class="form-control" id="modal-auth-username" autocomplete="off" placeholder="Usuario">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Contraseña</label>
+                            <input type="password" class="form-control" id="modal-auth-password" placeholder="Contraseña">
+                        </div>
+                        <div class="col-md-4">
+                            <button type="button" class="btn btn-warning w-100" id="modal-btn-verificar">
+                                <i class="fas fa-key"></i> Verificar
+                            </button>
+                        </div>
+                    </div>
+                    <div id="modal-auth-status" class="mt-2"></div>
+                </div>
+
+                <!-- Paso 2: Elegir tipo de incidencia -->
+                <div id="modal-step-choice" class="d-none text-center py-2">
+                    <p class="fw-bold fs-5 mb-4">¿Qué tipo de incidencia desea registrar?</p>
+                    <div class="d-flex gap-4 justify-content-center flex-wrap">
+                        <button type="button" class="btn btn-outline-warning btn-lg px-4 py-3" id="modal-btn-cambiar-sku" style="min-width:200px">
+                            <i class="fas fa-exchange-alt d-block mb-2" style="font-size:2rem"></i>
+                            <strong>Cambiar SKU</strong><br>
+                            <small class="fw-normal text-muted">El producto recibido es diferente al despachado</small>
+                        </button>
+                        <button type="button" class="btn btn-outline-primary btn-lg px-4 py-3" id="modal-btn-agregar-nuevo" style="min-width:200px">
+                            <i class="fas fa-plus-circle d-block mb-2" style="font-size:2rem"></i>
+                            <strong>Agregar producto nuevo</strong><br>
+                            <small class="fw-normal text-muted">Producto recibido no estaba en el pedido</small>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Paso 3: Búsqueda de producto -->
+                <div id="modal-step-buscar" class="d-none">
+                    <div class="d-flex gap-2 mb-3">
+                        <select class="form-select form-select-sm flex-shrink-0" id="modal-buscar-tipo" style="width:160px">
+                            <option value="codigo">Por Código</option>
+                            <option value="descripcion">Por Descripción</option>
+                        </select>
+                        <input type="text" class="form-control form-control-sm" id="modal-buscar-query"
+                            placeholder="Ingrese código o descripción a buscar...">
+                        <button type="button" class="btn btn-primary btn-sm flex-shrink-0" id="modal-btn-buscar">
+                            <i class="fas fa-search"></i> Buscar
+                        </button>
+                    </div>
+                    <div id="modal-buscar-resultados" style="max-height:280px; overflow-y:auto; border:1px solid #dee2e6; border-radius:6px; padding:8px; min-height:60px;">
+                        <p class="text-muted text-center my-2 mb-0"><small>Ingrese un término para buscar productos de la categoría <strong id="label-categoria-buscar"></strong>.</small></p>
+                    </div>
+                    <!-- Sección cantidad (solo para "Agregar nuevo") -->
+                    <div id="modal-cantidad-section" class="d-none mt-3 p-3 bg-light rounded border">
+                        <div class="d-flex align-items-center gap-3 flex-wrap">
+                            <div class="flex-grow-1">
+                                <small class="text-muted">Producto seleccionado:</small><br>
+                                <strong id="modal-producto-label"></strong>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <label class="form-label mb-0 fw-semibold">Cantidad:</label>
+                                <input type="number" class="form-control form-control-sm" id="modal-cantidad-agregar"
+                                    value="1" min="1" style="width:80px">
+                            </div>
+                            <button type="button" class="btn btn-success btn-sm" id="modal-btn-confirmar-agregar">
+                                <i class="fas fa-check"></i> Confirmar y agregar
+                            </button>
+                        </div>
+                        <div id="modal-agregar-error" class="text-danger small mt-2 d-none"></div>
+                    </div>
+                </div>
+
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="modal-btn-volver" style="display:none">
+                    <i class="fas fa-arrow-left"></i> Volver
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Overlay confirmación ────────────────────────────────────────── -->
+<div id="overlay-confirmar" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9998; align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:16px; padding:40px 50px; text-align:center; box-shadow:0 8px 32px rgba(0,0,0,0.25); max-width:460px; width:90%;">
+        <div style="font-size:2.5rem; margin-bottom:12px;">📦</div>
+        <p class="fw-bold fs-5 mb-1 text-dark">¿Confirmar recepción del Despacho #{{ despacho.numero_despacho }}?</p>
+        <p class="text-muted mb-4" style="font-size:0.9rem;" id="msg-confirmacion">Se registrarán las cantidades recibidas.</p>
+        <div class="d-flex gap-3 justify-content-center">
+            <button type="button" class="btn btn-secondary px-4" id="btn-cancelar-confirm">Cancelar</button>
+            <button type="button" class="btn btn-info px-4" id="btn-aceptar-confirm">
+                <i class="fas fa-check"></i> Confirmar
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Overlay carga ────────────────────────────────────────────────── -->
+<div id="overlay-carga" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9999; align-items:center; justify-content:center; flex-direction:column;">
+    <div style="background:#fff; border-radius:16px; padding:40px 50px; text-align:center; box-shadow:0 8px 32px rgba(0,0,0,0.25);">
+        <div style="width:64px; height:64px; margin:0 auto 20px;">
+            <svg viewBox="0 0 64 64" style="width:64px;height:64px;">
+                <circle cx="32" cy="32" r="28" fill="none" stroke="#e9ecef" stroke-width="6"/>
+                <circle cx="32" cy="32" r="28" fill="none" stroke="#0d6efd" stroke-width="6"
+                    stroke-linecap="round" stroke-dasharray="44 132" transform="rotate(-90 32 32)">
+                    <animateTransform attributeName="transform" type="rotate"
+                        from="-90 32 32" to="270 32 32" dur="0.9s" repeatCount="indefinite"/>
+                </circle>
+            </svg>
+        </div>
+        <p class="fw-bold fs-5 mb-1 text-dark">Procesando recepción...</p>
+        <p class="text-muted mb-0" style="font-size:0.9rem;">Por favor espere, no cierre esta ventana</p>
+    </div>
+</div>
+
+<script>
+const URL_VERIFICAR = "{% url 'pedidos-verificar-autorizacion' %}";
+const URL_BUSCAR    = "{% url 'pedidos-buscar-producto' %}";
+const CATEGORIA_PEDIDO = "{{ pedido.categoria|escapejs }}";
+const CATEGORIA_NOMBRE = "{{ pedido.categoria_nombre|escapejs }}";
+const CODIGOS_PEDIDO = [{% for it in pedido.items.all %}"{{ it.codigo|escapejs }}",{% endfor %}].map(c => c.trim().toUpperCase());
+const CSRF = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+// ── Estado global ─────────────────────────────────────────────────────
+let autorizacionOk  = false;
+let autorizanteNombre = '';
+let currentDiId     = null;  // di.id que abrió el modal (null = acción global)
+let currentAction   = null;  // 'cambiar' | 'agregar'
+let selectedProduct = null;  // {codigo, descripcion}
+let extrasRows      = [];
+
+// ── Helpers de modal ──────────────────────────────────────────────────
+function getModal() {
+    const el = document.getElementById('modalIncidencia');
+    return bootstrap.Modal.getInstance(el) || new bootstrap.Modal(el);
+}
+
+function showStep(step) {
+    document.getElementById('modal-step-auth').classList.add('d-none');
+    document.getElementById('modal-step-choice').classList.add('d-none');
+    document.getElementById('modal-step-buscar').classList.add('d-none');
+    document.getElementById('modal-btn-volver').style.display = 'none';
+
+    if (step === 'auth') {
+        document.getElementById('modal-titulo').textContent = 'Autorización requerida';
+        document.getElementById('modal-step-auth').classList.remove('d-none');
+    } else if (step === 'choice') {
+        document.getElementById('modal-titulo').textContent = 'Tipo de incidencia';
+        document.getElementById('modal-step-choice').classList.remove('d-none');
+    } else if (step === 'buscar') {
+        const titulo = currentAction === 'cambiar'
+            ? 'Cambiar SKU — Buscar producto real recibido'
+            : 'Agregar producto nuevo';
+        document.getElementById('modal-titulo').textContent = titulo;
+        document.getElementById('modal-btn-volver').style.display = '';
+        document.getElementById('modal-step-buscar').classList.remove('d-none');
+        document.getElementById('modal-buscar-query').value = '';
+        document.getElementById('modal-buscar-resultados').innerHTML =
+            `<p class="text-muted text-center my-2 mb-0"><small>Ingrese un término para buscar productos de la categoría <strong>${CATEGORIA_NOMBRE || CATEGORIA_PEDIDO || 'del pedido'}</strong>.</small></p>`;
+        document.getElementById('modal-cantidad-section').classList.add('d-none');
+        document.getElementById('label-categoria-buscar').textContent = CATEGORIA_NOMBRE ? `${CATEGORIA_PEDIDO} — ${CATEGORIA_NOMBRE}` : (CATEGORIA_PEDIDO || '—');
+        selectedProduct = null;
+        setTimeout(() => document.getElementById('modal-buscar-query').focus(), 100);
+    }
+}
+
+// ── Abrir modal por botón de incidencia ───────────────────────────────
+document.querySelectorAll('.btn-incidencia').forEach(btn => {
+    btn.addEventListener('click', function () {
+        currentDiId   = this.dataset.di;
+        currentAction = null;
+        selectedProduct = null;
+
+        if (autorizacionOk) {
+            showStep('choice');
+        } else {
+            document.getElementById('modal-auth-username').value = '';
+            document.getElementById('modal-auth-password').value = '';
+            document.getElementById('modal-auth-status').innerHTML = '';
+            showStep('auth');
+        }
+        getModal().show();
+    });
+});
+
+// ── Paso 1: Verificar autorización ───────────────────────────────────
+document.getElementById('modal-btn-verificar').addEventListener('click', function () {
+    const username = document.getElementById('modal-auth-username').value.trim();
+    const password = document.getElementById('modal-auth-password').value;
+    const status   = document.getElementById('modal-auth-status');
+
+    if (!username || !password) {
+        status.innerHTML = '<span class="text-danger"><i class="fas fa-times-circle"></i> Complete usuario y contraseña.</span>';
+        return;
+    }
+
+    this.disabled = true;
+    this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Verificando...';
+
+    fetch(URL_VERIFICAR, {
+        method: 'POST',
+        headers: {'X-CSRFToken': CSRF, 'Content-Type': 'application/x-www-form-urlencoded'},
+        body: `csrfmiddlewaretoken=${encodeURIComponent(CSRF)}&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`
+    })
+    .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+    })
+    .then(data => {
+        if (data.ok) {
+            autorizacionOk    = true;
+            autorizanteNombre = data.nombre;
+            actualizarPanelAutorizados();
+            showStep('choice');
+        } else {
+            status.innerHTML = `<span class="text-danger"><i class="fas fa-times-circle"></i> ${data.error}</span>`;
+        }
+    })
+    .catch(err => {
+        status.innerHTML = `<span class="text-danger"><i class="fas fa-times-circle"></i> Error al verificar (${err.message}). Recargue la página e intente de nuevo.</span>`;
+    })
+    .finally(() => {
+        this.disabled = false;
+        this.innerHTML = '<i class="fas fa-key"></i> Verificar';
+    });
+});
+
+// Verificar también con Enter en los campos de auth
+['modal-auth-username', 'modal-auth-password'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') document.getElementById('modal-btn-verificar').click();
+    });
+});
+
+// ── Paso 2: Elección ─────────────────────────────────────────────────
+document.getElementById('modal-btn-cambiar-sku').addEventListener('click', function () {
+    currentAction = 'cambiar';
+    showStep('buscar');
+});
+
+document.getElementById('modal-btn-agregar-nuevo').addEventListener('click', function () {
+    currentAction = 'agregar';
+    showStep('buscar');
+});
+
+document.getElementById('modal-btn-volver').addEventListener('click', function () {
+    showStep('choice');
+});
+
+// ── Paso 3: Búsqueda ─────────────────────────────────────────────────
+document.getElementById('modal-btn-buscar').addEventListener('click', realizarBusqueda);
+document.getElementById('modal-buscar-query').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') realizarBusqueda();
+});
+
+function realizarBusqueda() {
+    const q    = document.getElementById('modal-buscar-query').value.trim();
+    const tipo = document.getElementById('modal-buscar-tipo').value;
+    const cont = document.getElementById('modal-buscar-resultados');
+
+    if (q.length < 2) {
+        cont.innerHTML = '<p class="text-warning text-center my-2 mb-0"><small><i class="fas fa-info-circle"></i> Ingrese al menos 2 caracteres.</small></p>';
+        return;
+    }
+
+    cont.innerHTML = '<p class="text-muted text-center my-2 mb-0"><span class="spinner-border spinner-border-sm"></span> Buscando...</p>';
+
+    const url = `${URL_BUSCAR}?q=${encodeURIComponent(q)}&tipo=${tipo}&categoria=${encodeURIComponent(CATEGORIA_PEDIDO)}`;
+    fetch(url)
+    .then(r => r.text())
+    .then(html => {
+        cont.innerHTML = html;
+        // Adaptar botones "Agregar" al contexto del modal
+        cont.querySelectorAll('.btn-success').forEach(btn => {
+            btn.className = 'btn btn-sm btn-primary';
+            btn.innerHTML = currentAction === 'cambiar'
+                ? '<i class="fas fa-check"></i> Seleccionar'
+                : '<i class="fas fa-plus"></i> Seleccionar';
+        });
+    })
+    .catch(() => {
+        cont.innerHTML = '<p class="text-danger text-center my-2 mb-0"><i class="fas fa-times-circle"></i> Error al buscar productos.</p>';
+    });
+}
+
+// Esta función es invocada por el template pedidos-buscar-producto.html
+function agregarItem(codigo, descripcion, referencia, puesto, ref_proveedor) {
+    selectedProduct = {codigo, descripcion, referencia, puesto, ref_proveedor};
+
+    if (currentAction === 'cambiar') {
+        // Rellenar los campos del panel-erroneo para este item
+        document.getElementById(`codigo_real_${currentDiId}`).value      = codigo;
+        document.getElementById(`descripcion_real_${currentDiId}`).value  = descripcion;
+        document.getElementById(`tipo_inc_${currentDiId}`).value          = 'PRODUCTO_ERRONEO';
+        document.getElementById(`recibido_${currentDiId}`).value          = 0;
+
+        const authLabel = document.getElementById(`auth-label-${currentDiId}`);
+        if (authLabel) authLabel.textContent = autorizanteNombre;
+
+        // Mostrar panel erróneo y ocultar botón incidencia
+        document.getElementById(`panel-erroneo-${currentDiId}`).classList.remove('d-none');
+        document.querySelector(`.btn-incidencia[data-di="${currentDiId}"]`).classList.add('d-none');
+
+        getModal().hide();
+        actualizarPanelAutorizados();
+
+    } else if (currentAction === 'agregar') {
+        // Mostrar sección de cantidad para confirmar
+        document.getElementById('modal-producto-label').textContent = `${codigo} — ${descripcion}`;
+        document.getElementById('modal-cantidad-agregar').value = 1;
+        document.getElementById('modal-cantidad-section').classList.remove('d-none');
+        document.getElementById('modal-agregar-error').classList.add('d-none');
+        document.getElementById('modal-cantidad-agregar').focus();
+    }
+}
+
+// ── Confirmar agregar extra ───────────────────────────────────────────
+document.getElementById('modal-btn-confirmar-agregar').addEventListener('click', confirmarAgregarExtra);
+document.getElementById('modal-cantidad-agregar').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') confirmarAgregarExtra();
+});
+
+function confirmarAgregarExtra() {
+    if (!selectedProduct) return;
+    const cantidad = parseInt(document.getElementById('modal-cantidad-agregar').value) || 1;
+    if (cantidad < 1) return;
+
+    const errorEl = document.getElementById('modal-agregar-error');
+    const codigoNorm = String(selectedProduct.codigo).trim().toUpperCase();
+    if (CODIGOS_PEDIDO.includes(codigoNorm)) {
+        errorEl.textContent = `El producto ${selectedProduct.codigo} ya existe en el pedido. Registra la cantidad de más en su línea del despacho.`;
+        errorEl.classList.remove('d-none');
+        return;
+    }
+    if (extrasRows.some(r => String(r.codigo).trim().toUpperCase() === codigoNorm)) {
+        errorEl.textContent = `El producto ${selectedProduct.codigo} ya está en la lista de adicionales.`;
+        errorEl.classList.remove('d-none');
+        return;
+    }
+    errorEl.classList.add('d-none');
+
+    extrasRows.push({codigo: selectedProduct.codigo, descripcion: selectedProduct.descripcion, cantidad});
+    renderExtras();
+    getModal().hide();
+    actualizarPanelAutorizados();
+}
+
+// ── Cancelar producto erróneo ─────────────────────────────────────────
+document.querySelectorAll('.btn-cancelar-erroneo').forEach(btn => {
+    btn.addEventListener('click', function () {
+        const diId = this.dataset.di;
+        document.getElementById(`panel-erroneo-${diId}`).classList.add('d-none');
+        document.getElementById(`tipo_inc_${diId}`).value            = '';
+        document.getElementById(`codigo_real_${diId}`).value         = '';
+        document.getElementById(`descripcion_real_${diId}`).value    = '';
+        const authLabel = document.getElementById(`auth-label-${diId}`);
+        if (authLabel) authLabel.textContent = '';
+        document.querySelector(`.btn-incidencia[data-di="${diId}"]`).classList.remove('d-none');
+        actualizarPanelAutorizados();
+    });
+});
+
+// ── Render extras ─────────────────────────────────────────────────────
+function renderExtras() {
+    const tbody    = document.getElementById('tbody-extras');
+    const cardExt  = document.getElementById('card-extras');
+    const badge    = document.getElementById('badge-extras-count');
+    tbody.innerHTML = '';
+
+    const panelFotoExtras = document.getElementById('panel-foto-extras');
+    if (extrasRows.length === 0) {
+        cardExt.style.display = 'none';
+        if (panelFotoExtras) panelFotoExtras.style.display = 'none';
+    } else {
+        cardExt.style.display = '';
+        if (panelFotoExtras) panelFotoExtras.style.display = '';
+        badge.textContent = extrasRows.length;
+        extrasRows.forEach((row, idx) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><input type="text" class="form-control form-control-sm" value="${escHtml(row.codigo)}"
+                    onchange="extrasRows[${idx}].codigo = this.value; sincronizarExtras()"></td>
+                <td><input type="text" class="form-control form-control-sm" value="${escHtml(row.descripcion)}"
+                    onchange="extrasRows[${idx}].descripcion = this.value; sincronizarExtras()"></td>
+                <td><input type="number" class="form-control form-control-sm text-center" value="${row.cantidad}" min="1"
+                    onchange="extrasRows[${idx}].cantidad = parseInt(this.value)||1; sincronizarExtras()"></td>
+                <td class="text-center">
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="eliminarExtra(${idx})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>`;
+            tbody.appendChild(tr);
+        });
+    }
+    sincronizarExtras();
+}
+
+function sincronizarExtras() {
+    document.getElementById('productos_extra').value = JSON.stringify(extrasRows);
+}
+
+function eliminarExtra(idx) {
+    extrasRows.splice(idx, 1);
+    renderExtras();
+    actualizarPanelAutorizados();
+}
+
+function escHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Panel de estado de incidencias autorizadas ────────────────────────
+function tieneEspeciales() {
+    for (const inp of document.querySelectorAll('input[id^="tipo_inc_"]')) {
+        if (inp.value === 'PRODUCTO_ERRONEO') return true;
+    }
+    return extrasRows.length > 0;
+}
+
+function actualizarPanelAutorizados() {
+    const panel = document.getElementById('panel-incidencias-ok');
+    if (tieneEspeciales() && autorizacionOk) {
+        panel.classList.remove('d-none');
+        document.getElementById('label-autorizante').textContent = autorizanteNombre;
+    } else {
+        panel.classList.add('d-none');
+    }
+}
+
+// ── Envío del formulario ──────────────────────────────────────────────
+document.getElementById('form-recepcion').addEventListener('submit', function (e) {
+    const btn = document.getElementById('btn-recibir');
+    if (btn.dataset.enviado === 'true') return;
+    e.preventDefault();
+
+    if (tieneEspeciales() && !autorizacionOk) {
+        alert('Se requiere autorización de supervisor para registrar incidencias. Use el botón de incidencia de cada item.');
+        return;
+    }
+
+    // Validar que se haya ingresado al menos 1 unidad recibida
+    let totalRecibido = 0;
+    document.querySelectorAll('input[id^="recibido_"]').forEach(inp => {
+        const diId = inp.id.replace('recibido_', '');
+        const tipoInc = document.getElementById(`tipo_inc_${diId}`)?.value || '';
+        if (tipoInc !== 'PRODUCTO_ERRONEO') {
+            totalRecibido += parseInt(inp.value) || 0;
+        }
+    });
+    totalRecibido += extrasRows.reduce((s, r) => s + (parseInt(r.cantidad) || 0), 0);
+    if (totalRecibido === 0) {
+        alert('Debe ingresar al menos una cantidad mayor a 0 para confirmar la recepción.');
+        return;
+    }
+
+    // Validar fotos obligatorias
+    const fotosFaltantes = [];
+    document.querySelectorAll('input[id^="tipo_inc_"]').forEach(inp => {
+        const diId = inp.id.replace('tipo_inc_', '');
+        if (inp.value === 'PRODUCTO_ERRONEO') {
+            const foto = document.querySelector(`input[name="foto_${diId}"]`);
+            if (!foto || !foto.files || !foto.files.length) {
+                fotosFaltantes.push(`ítem #${diId} (Cambio SKU)`);
+            }
+        }
+    });
+    if (extrasRows.length > 0) {
+        const fotoE = document.getElementById('foto_extras');
+        if (!fotoE || !fotoE.files || !fotoE.files.length) {
+            fotosFaltantes.push('productos adicionales');
+        }
+    }
+    if (fotosFaltantes.length > 0) {
+        alert('Se requiere foto de evidencia para: ' + fotosFaltantes.join(', '));
+        return;
+    }
+
+    const hayInc = tieneEspeciales();
+    document.getElementById('msg-confirmacion').textContent = hayInc
+        ? `Se registrarán las cantidades recibidas incluyendo las incidencias autorizadas por ${autorizanteNombre}.`
+        : 'Se registrarán las cantidades recibidas y se notificará al despachador.';
+
+    document.getElementById('overlay-confirmar').style.display = 'flex';
+});
+
+document.getElementById('btn-cancelar-confirm').addEventListener('click', function () {
+    document.getElementById('overlay-confirmar').style.display = 'none';
+});
+
+document.getElementById('btn-aceptar-confirm').addEventListener('click', function () {
+    document.getElementById('overlay-confirmar').style.display = 'none';
+    const btn = document.getElementById('btn-recibir');
+    btn.dataset.enviado = 'true';
+    btn.disabled = true;
+    document.getElementById('overlay-carga').style.display = 'flex';
+    document.getElementById('form-recepcion').submit();
+});
+</script>
+{% endblock content %}

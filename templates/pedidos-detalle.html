@@ -357,6 +357,23 @@
                     <div id="pd-alert-{{ despacho.numero_despacho }}"
                          class="pd-pistoleo-alert d-none mt-2">
                     </div>
+                    <div id="pd-panel-{{ despacho.numero_despacho }}" class="pd-producto-panel d-none mt-2">
+                        <div class="pd-panel-status"></div>
+                        <button type="button" class="pd-panel-close" aria-label="Cancelar">&times;</button>
+                        <div class="pd-panel-codigo"><code></code></div>
+                        <div class="pd-panel-desc"></div>
+                        <div class="pd-panel-meta"></div>
+                        <div class="pd-panel-actions">
+                            <div class="pd-qty-stepper">
+                                <button type="button" class="pd-qty-btn" data-step="-1" aria-label="Restar uno">&minus;</button>
+                                <input type="number" class="pd-qty-input" min="0" inputmode="numeric" aria-label="Cantidad a despachar">
+                                <button type="button" class="pd-qty-btn" data-step="1" aria-label="Sumar uno">+</button>
+                            </div>
+                            <button type="button" class="btn btn-success pd-panel-confirmar">
+                                <i class="fas fa-check me-1"></i><span>Confirmar y marcar</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 {% endif %}
                 <div class="pd-despacho-filter">
@@ -391,7 +408,10 @@
                         <tr data-di-id="{{ di.id }}"
                             data-codigo="{{ di.pedido_item.codigo|lower }}"
                             data-referencia="{{ di.pedido_item.referencia|lower }}"
-                            data-ref-proveedor="{{ di.pedido_item.ref_proveedor|lower }}">
+                            data-ref-proveedor="{{ di.pedido_item.ref_proveedor|lower }}"
+                            data-codigo-display="{{ di.pedido_item.codigo }}"
+                            data-descripcion="{{ di.pedido_item.descripcion }}"
+                            data-solicitado="{{ di.pedido_item.cantidad_solicitada }}">
                             <td data-label="Código"><code class="pd-code">{{ di.pedido_item.codigo }}</code></td>
                             <td data-label="Descripción">{{ di.pedido_item.descripcion }}</td>
                             {% if despacho.estado == 'PENDIENTE_APROBACION' and es_supervisor %}
@@ -916,70 +936,378 @@
     flex-shrink: 0;
     line-height: 1;
 }
+
+/* ── Panel de producto encontrado ────────────────── */
+.pd-producto-panel {
+    position: relative;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-left: 4px solid #146c43;
+    border-radius: 8px;
+    padding: 0.75rem 2.25rem 0.75rem 1rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    animation: pd-panel-in 0.18s ease-out;
+}
+
+.pd-producto-panel.pd-panel-ya-verificado {
+    border-left-color: #ffc107;
+}
+
+.pd-panel-status {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #146c43;
+    background: #d1e7dd;
+    border-radius: 20px;
+    padding: 0.2em 0.75em;
+    margin-bottom: 0.35rem;
+}
+
+.pd-panel-ya-verificado .pd-panel-status {
+    color: #664d03;
+    background: #fff3cd;
+}
+
+.pd-panel-close {
+    position: absolute;
+    top: 0.35rem;
+    right: 0.5rem;
+    border: 0;
+    background: transparent;
+    font-size: 1.25rem;
+    line-height: 1;
+    color: #6c757d;
+    padding: 0.25rem 0.4rem;
+}
+
+.pd-panel-close:hover {
+    color: #212529;
+}
+
+.pd-panel-codigo code {
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #212529;
+    background: transparent;
+    padding: 0;
+}
+
+.pd-panel-desc {
+    font-size: 0.9rem;
+    color: #343a40;
+    margin-top: 0.1rem;
+}
+
+.pd-panel-meta {
+    font-size: 0.78rem;
+    color: #6c757d;
+    margin-top: 0.15rem;
+}
+
+.pd-panel-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.6rem;
+}
+
+.pd-qty-stepper {
+    display: flex;
+    align-items: stretch;
+}
+
+.pd-qty-btn {
+    min-width: 44px;
+    min-height: 44px;
+    border: 1px solid #dee2e6;
+    background: #f8f9fa;
+    color: #212529;
+    font-size: 1.25rem;
+    line-height: 1;
+}
+
+.pd-qty-btn:first-child {
+    border-radius: 8px 0 0 8px;
+}
+
+.pd-qty-btn:last-child {
+    border-radius: 0 8px 8px 0;
+}
+
+.pd-qty-btn:active {
+    background: #e9ecef;
+}
+
+.pd-qty-input {
+    width: 70px;
+    text-align: center;
+    font-size: 1.2rem;
+    font-weight: 600;
+    border: 1px solid #dee2e6;
+    border-left: 0;
+    border-right: 0;
+    -moz-appearance: textfield;
+}
+
+.pd-qty-input::-webkit-inner-spin-button,
+.pd-qty-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.pd-qty-input:focus {
+    outline: 2px solid #146c43;
+    outline-offset: -2px;
+}
+
+.pd-qty-input.is-invalid {
+    border-color: #dc3545;
+    outline-color: #dc3545;
+}
+
+.pd-fila-candidata {
+    background-color: #fff3cd !important;
+    transition: background-color 0.25s ease;
+}
+
+.pd-fila-recien-movida {
+    animation: pd-fila-in 0.6s ease-out;
+}
+
+.pd-pistoleo-alert-shake {
+    animation: pd-shake 0.3s ease-in-out;
+}
+
+@keyframes pd-panel-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pd-fila-in {
+    from { background-color: #75b798; }
+    to   { background-color: #d1e7dd; }
+}
+
+@keyframes pd-shake {
+    0%, 100% { transform: translateX(0); }
+    25%      { transform: translateX(-4px); }
+    75%      { transform: translateX(4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pd-producto-panel,
+    .pd-fila-recien-movida,
+    .pd-pistoleo-alert-shake {
+        animation: none !important;
+    }
+}
+
+@media (max-width: 767px) {
+    .pd-panel-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .pd-qty-stepper {
+        justify-content: center;
+    }
+    .pd-qty-input {
+        flex: 1;
+        width: auto;
+    }
+    .pd-panel-confirmar {
+        width: 100%;
+        min-height: 44px;
+    }
+}
 </style>
 
 <script>
-function iniciarPistoleo(inputId, tableId, alertZoneId, counterId) {
-    var input = document.getElementById(inputId);
-    if (!input) return;
+function iniciarPistoleo(numero) {
+    var scanner   = document.getElementById('pd-pistoleo-' + numero);
+    var tabla     = document.getElementById('tabla-despacho-' + numero);
+    var alertZone = document.getElementById('pd-alert-' + numero);
+    var counterEl = document.getElementById('pd-counter-' + numero);
+    var panel     = document.getElementById('pd-panel-' + numero);
+    if (!scanner || !tabla || !panel) return;
 
-    input.addEventListener('keydown', function(e) {
-        if (e.key !== 'Enter') return;
-        e.preventDefault();
+    var statusEl   = panel.querySelector('.pd-panel-status');
+    var codigoEl   = panel.querySelector('.pd-panel-codigo code');
+    var descEl     = panel.querySelector('.pd-panel-desc');
+    var metaEl     = panel.querySelector('.pd-panel-meta');
+    var qtyInput   = panel.querySelector('.pd-qty-input');
+    var confirmBtn = panel.querySelector('.pd-panel-confirmar');
 
-        var query = this.value.trim().toLowerCase();
-        if (!query) {
-            this.value = '';
-            return;
-        }
+    var filaActual = null;
 
-        var tabla = document.getElementById(tableId);
-        if (!tabla) return;
+    function inputCantidadDe(fila) {
+        return fila.querySelector('input[name^="cantidad_"]');
+    }
 
+    function buscarFila(query) {
         var filas = tabla.querySelectorAll('tbody tr');
-        var encontrado = false;
-
-        filas.forEach(function(fila) {
+        for (var i = 0; i < filas.length; i++) {
+            var fila = filas[i];
             var codigo     = (fila.dataset.codigo       || '').trim();
             var referencia = (fila.dataset.referencia   || '').trim();
             var refProv    = (fila.dataset.refProveedor || '').trim();
-
             if (codigo === query || referencia === query || refProv === query) {
-                encontrado = true;
-                if (fila.classList.contains('pd-fila-verificada')) return;
-
-                fila.classList.add('pd-fila-verificada');
-
-                var checkIcon = fila.querySelector('.pd-check-icon');
-                if (checkIcon) checkIcon.classList.remove('d-none');
-
-                var counterEl = document.getElementById(counterId);
-                if (counterEl) {
-                    var current = parseInt(counterEl.dataset.count || '0', 10) + 1;
-                    var total   = parseInt(counterEl.dataset.total || '0', 10);
-                    counterEl.dataset.count = current;
-                    counterEl.textContent   = current + ' / ' + total + ' verificados';
-                    if (current >= total && total > 0) {
-                        counterEl.classList.add('pd-counter-completo');
-                    }
-                }
-            }
-        });
-
-        if (!encontrado) {
-            var alertZone = document.getElementById(alertZoneId);
-            if (alertZone) {
-                alertZone.textContent = '"' + this.value.trim() + '" no pertenece a este despacho';
-                alertZone.classList.remove('d-none');
-                setTimeout(function() {
-                    alertZone.classList.add('d-none');
-                    alertZone.textContent = '';
-                }, 3000);
+                return fila;
             }
         }
+        return null;
+    }
 
+    function actualizarContador() {
+        if (!counterEl) return;
+        var current = parseInt(counterEl.dataset.count || '0', 10) + 1;
+        var total   = parseInt(counterEl.dataset.total || '0', 10);
+        counterEl.dataset.count = current;
+        counterEl.textContent   = current + ' / ' + total + ' verificados';
+        if (current >= total && total > 0) {
+            counterEl.classList.add('pd-counter-completo');
+        }
+    }
+
+    function mostrarAlerta(codigo) {
+        if (!alertZone) return;
+        alertZone.innerHTML = '<i class="fas fa-triangle-exclamation me-1"></i>"' + codigo + '" no pertenece a este despacho';
+        alertZone.classList.remove('d-none');
+        alertZone.classList.remove('pd-pistoleo-alert-shake');
+        void alertZone.offsetWidth;
+        alertZone.classList.add('pd-pistoleo-alert-shake');
+        setTimeout(function() {
+            alertZone.classList.add('d-none');
+            alertZone.textContent = '';
+        }, 3000);
+    }
+
+    function abrirPanel(fila) {
+        if (filaActual && filaActual !== fila) {
+            filaActual.classList.remove('pd-fila-candidata');
+        }
+        filaActual = fila;
+
+        var yaVerificada = fila.classList.contains('pd-fila-verificada');
+        panel.classList.toggle('pd-panel-ya-verificado', yaVerificada);
+        statusEl.textContent = yaVerificada ? 'Ya verificado — puede corregir la cantidad' : 'Producto encontrado';
+        confirmBtn.querySelector('span').textContent = yaVerificada ? 'Actualizar cantidad' : 'Confirmar y marcar';
+
+        codigoEl.textContent = fila.dataset.codigoDisplay || '';
+        descEl.textContent   = fila.dataset.descripcion || '';
+        var partes = [];
+        if (fila.dataset.referencia) partes.push('Ref: ' + fila.dataset.referencia.toUpperCase());
+        partes.push('Solicitado: ' + (fila.dataset.solicitado || '0'));
+        var inputFila = inputCantidadDe(fila);
+        partes.push('Preparado: ' + (inputFila ? inputFila.value : '0'));
+        metaEl.textContent = partes.join(' · ');
+
+        qtyInput.classList.remove('is-invalid');
+        qtyInput.value = inputFila ? inputFila.value : '0';
+
+        if (!yaVerificada) {
+            fila.classList.add('pd-fila-candidata');
+        }
+
+        panel.classList.remove('d-none');
+        panel.style.animation = 'none';
+        void panel.offsetWidth;
+        panel.style.animation = '';
+
+        qtyInput.focus();
+        qtyInput.select();
+    }
+
+    function cerrarPanel() {
+        if (filaActual) filaActual.classList.remove('pd-fila-candidata');
+        filaActual = null;
+        panel.classList.add('d-none');
+        scanner.focus();
+    }
+
+    function confirmarPanel() {
+        if (!filaActual) return;
+
+        var cantidad = parseInt(qtyInput.value, 10);
+        if (isNaN(cantidad) || cantidad < 0) {
+            qtyInput.classList.add('is-invalid');
+            qtyInput.focus();
+            qtyInput.select();
+            return;
+        }
+
+        var inputFila = inputCantidadDe(filaActual);
+        if (inputFila) inputFila.value = cantidad;
+
+        var yaVerificada = filaActual.classList.contains('pd-fila-verificada');
+        filaActual.classList.remove('pd-fila-candidata');
+
+        if (!yaVerificada) {
+            filaActual.classList.add('pd-fila-verificada');
+            var checkIcon = filaActual.querySelector('.pd-check-icon');
+            if (checkIcon) checkIcon.classList.remove('d-none');
+            actualizarContador();
+
+            var tbody = tabla.querySelector('tbody');
+            tbody.appendChild(filaActual);
+            filaActual.classList.add('pd-fila-recien-movida');
+            filaActual.addEventListener('animationend', function() {
+                this.classList.remove('pd-fila-recien-movida');
+            }, { once: true });
+        }
+
+        filaActual = null;
+        panel.classList.add('d-none');
+        scanner.value = '';
+        scanner.focus();
+    }
+
+    scanner.addEventListener('keydown', function(e) {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+
+        var raw = this.value.trim();
+        var query = raw.toLowerCase();
         this.value = '';
+        if (!query) return;
+
+        var fila = buscarFila(query);
+        if (fila) {
+            abrirPanel(fila);
+        } else {
+            mostrarAlerta(raw);
+        }
     });
+
+    panel.querySelectorAll('.pd-qty-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var step = parseInt(this.dataset.step, 10);
+            var actual = parseInt(qtyInput.value, 10);
+            if (isNaN(actual)) actual = 0;
+            qtyInput.value = Math.max(0, actual + step);
+            qtyInput.classList.remove('is-invalid');
+        });
+    });
+
+    qtyInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            confirmarPanel();
+        }
+    });
+
+    panel.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            cerrarPanel();
+        }
+    });
+
+    confirmBtn.addEventListener('click', confirmarPanel);
+    panel.querySelector('.pd-panel-close').addEventListener('click', cerrarPanel);
 }
 
 function filtrarDespacho(inputEl, tableId) {
@@ -996,7 +1324,15 @@ function filtrarDespacho(inputEl, tableId) {
 document.querySelectorAll('.btn-confirmar-despacho').forEach(function(btn) {
     btn.addEventListener('click', function() {
         const numero = this.dataset.numero;
-        if (!confirm('¿Confirmar y enviar el despacho #' + numero + '? Las cantidades mostradas serán las que se despacharán.')) return;
+        const counter = document.getElementById('pd-counter-' + numero);
+        let msg = '¿Confirmar y enviar el despacho #' + numero + '? Las cantidades mostradas serán las que se despacharán.';
+        if (counter) {
+            const faltan = parseInt(counter.dataset.total || '0', 10) - parseInt(counter.dataset.count || '0', 10);
+            if (faltan > 0) {
+                msg = 'Faltan ' + faltan + ' ítem(s) por verificar en el despacho #' + numero + '.\n\n¿Confirmar de todas formas?';
+            }
+        }
+        if (!confirm(msg)) return;
         this.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Confirmando...';
         this.disabled = true;
         this.closest('form').submit();
@@ -1014,12 +1350,7 @@ document.querySelectorAll('.btn-reintentar-traslado').forEach(function(btn) {
 });
 
 {% for despacho in despachos %}{% if despacho.estado == 'PENDIENTE_APROBACION' and es_supervisor %}
-iniciarPistoleo(
-    'pd-pistoleo-{{ despacho.numero_despacho }}',
-    'tabla-despacho-{{ despacho.numero_despacho }}',
-    'pd-alert-{{ despacho.numero_despacho }}',
-    'pd-counter-{{ despacho.numero_despacho }}'
-);
+iniciarPistoleo('{{ despacho.numero_despacho }}');
 {% endif %}{% endfor %}
 </script>
 {% endblock content %}
