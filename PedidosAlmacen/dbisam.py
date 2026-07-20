@@ -1,5 +1,6 @@
 import pyodbc
 import logging
+import re
 from datetime import datetime
 from django.conf import settings
 
@@ -397,6 +398,55 @@ class PedidosDBISAM:
                                                   AND FTI_DOCUMENTO IN ({docs_str})""").fetchall()
                         encontrados.update(int(row.FTI_DOCUMENTO) for row in rows)
             return encontrados
+        except Exception as e:
+            raise pyodbc.DatabaseError(str(e))
+
+    def validar_traslado_resolucion(self, nro_documento: str) -> dict:
+        """
+        Valida que un documento exista como traslado en a2 y devuelve sus SKUs.
+
+        Busca en SOPERACIONINV el documento con FTI_TIPO = 1 (traslado). Si el
+        número es puramente numérico también prueba la variante con padding de
+        8 ceros (formato usado por los traslados generados por la app). Si
+        existe, consulta SDETALLEINV por FDI_OPERACION_AUTOINCREMENT y devuelve
+        el conjunto de códigos de producto del detalle.
+
+        Args:
+            nro_documento: Número de documento tal como lo escribió el usuario.
+
+        Returns:
+            {'existe': bool, 'codigos_traslado': set[str]} — códigos sin
+            espacios de relleno.
+
+        Raises:
+            ValueError: Si el documento no cumple el formato permitido.
+            pyodbc.DatabaseError: Si falla la conexión o la consulta.
+        """
+        doc = str(nro_documento).strip()
+        if not re.fullmatch(r'[A-Za-z0-9/-]{1,20}', doc):
+            raise ValueError(f'Número de documento inválido: {nro_documento!r}')
+
+        variantes = {doc}
+        if doc.isdigit():
+            variantes.add(doc.rjust(8, '0'))
+        docs_str = ','.join(f"'{v}'" for v in sorted(variantes))
+
+        try:
+            with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    rows = cursor.execute(
+                        f"SELECT FTI_AUTOINCREMENT FROM SOPERACIONINV "
+                        f"WHERE FTI_DOCUMENTO IN ({docs_str}) AND FTI_TIPO = 1"
+                    ).fetchall()
+                    if not rows:
+                        return {'existe': False, 'codigos_traslado': set()}
+                    ids_str = ','.join(str(int(r[0])) for r in rows)
+                    detalle = cursor.execute(
+                        f"SELECT DISTINCT FDI_CODIGO FROM SDETALLEINV "
+                        f"WHERE FDI_OPERACION_AUTOINCREMENT IN ({ids_str})"
+                    ).fetchall()
+                    codigos = {str(r[0]).strip() for r in detalle if r[0]}
+                    return {'existe': True, 'codigos_traslado': codigos}
         except Exception as e:
             raise pyodbc.DatabaseError(str(e))
 

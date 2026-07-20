@@ -1483,3 +1483,40 @@ class ResolucionIncidenciaModelTest(TestCase):
             resolucion__isnull=True,
         )
         self.assertEqual(list(pendientes), [self.di])
+
+
+class ValidarTrasladoResolucionTest(TestCase):
+    def _db_con_cursor(self):
+        db = PedidosDBISAM()
+        ctx = patch.object(db, 'connect')
+        mock_connect = ctx.start()
+        self.addCleanup(ctx.stop)
+        cursor = (mock_connect.return_value.__enter__.return_value
+                  .cursor.return_value.__enter__.return_value)
+        return db, cursor
+
+    def test_documento_invalido_lanza_valueerror(self):
+        db = PedidosDBISAM()
+        with self.assertRaises(ValueError):
+            db.validar_traslado_resolucion("00'; DROP TABLE X--")
+
+    def test_documento_inexistente(self):
+        db, cursor = self._db_con_cursor()
+        cursor.execute.return_value.fetchall.side_effect = [[]]
+        resultado = db.validar_traslado_resolucion('00000099')
+        self.assertFalse(resultado['existe'])
+        self.assertEqual(resultado['codigos_traslado'], set())
+
+    def test_documento_existente_devuelve_codigos(self):
+        db, cursor = self._db_con_cursor()
+        cursor.execute.return_value.fetchall.side_effect = [
+            [(501,)],                       # SOPERACIONINV → FTI_AUTOINCREMENT
+            [('SKU1 ',), ('SKU2',)],        # SDETALLEINV → FDI_CODIGO (con espacios)
+        ]
+        resultado = db.validar_traslado_resolucion('99')
+        self.assertTrue(resultado['existe'])
+        self.assertEqual(resultado['codigos_traslado'], {'SKU1', 'SKU2'})
+        # La consulta debe incluir la variante con padding de 8 ceros
+        primera_query = cursor.execute.call_args_list[0][0][0]
+        self.assertIn("'00000099'", primera_query)
+        self.assertIn('FTI_TIPO = 1', primera_query)
