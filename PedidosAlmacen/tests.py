@@ -1855,3 +1855,54 @@ class AnularResolucionTest(TestCase):
             .values_list('tipo_evento', flat=True)
         )
         self.assertEqual(eventos, ['RESOLUCION', 'ANULACION', 'RESOLUCION'])
+
+
+class ResolverIncidenciasUITest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem, ResolucionIncidencia
+        self.sup = User.objects.create_superuser(username='sup_ui', password='x')
+        self.pedido = Pedido.objects.create(solicitante=self.sup, estado='PARCIAL')
+        item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='P1',
+            cantidad_solicitada=5, estado='INCIDENCIA',
+        )
+        self.despacho = Despacho.objects.create(pedido=self.pedido, estado='PARCIAL')
+        self.di = DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=item,
+            cantidad_despachada=5, tipo_incidencia='CANTIDAD_MENOR',
+        )
+        self.res = ResolucionIncidencia.objects.create(
+            tipo='TRASLADO', documento_traslado='00000099', resuelto_por=self.sup,
+        )
+        self.client.force_login(self.sup)
+
+    def test_pendientes_tiene_form_y_checkboxes(self):
+        resp = self.client.get('/pedidos/incidencias/resolver/')
+        self.assertContains(resp, '/pedidos/incidencias/resolver/confirmar/')
+        self.assertContains(resp, f'name="item_ids" value="{self.di.id}"')
+        self.assertContains(resp, 'btn-validar')
+
+    def test_resueltas_tiene_boton_anular(self):
+        from .models import PedidoItem, DespachoItem
+        item2 = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU2', descripcion='P2',
+            cantidad_solicitada=1, estado='INCIDENCIA_RESUELTA',
+        )
+        DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=item2,
+            cantidad_despachada=1, tipo_incidencia='CANTIDAD_MAYOR',
+            resolucion=self.res,
+        )
+        resp = self.client.get('/pedidos/incidencias/resolver/?vista=resueltas')
+        self.assertContains(resp, f'/pedidos/incidencias/resolver/anular/{self.res.id}/')
+        self.assertContains(resp, '00000099')
+
+    def test_detalle_pedido_muestra_badge_resuelta(self):
+        from .models import PedidoItem
+        PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU3', descripcion='P3',
+            cantidad_solicitada=1, estado='INCIDENCIA_RESUELTA',
+        )
+        resp = self.client.get(f'/pedidos/{self.pedido.numero_pedido}/')
+        self.assertContains(resp, 'Inc. Resuelta')
