@@ -17,6 +17,7 @@ def get_rol(user):
         return 'picker'
     if user.groups.filter(name=GROUP_TIENDA).exists():
         return 'operario'
+    # 'Pedidos Receptor' cae en 'operario' a propósito: no opera por la API móvil.
     return 'operario'
 
 

@@ -84,7 +84,7 @@
                 </li>
                 {%endif%}
 
-                {% if request.user|has_any_group:"Pedidos Tienda,Pedidos Almacen,Pedidos Supervisor" %}
+                {% if request.user|has_any_group:"Pedidos Tienda,Pedidos Almacen,Pedidos Supervisor,Pedidos Receptor" %}
                 <li class="menu-item">
                     <input type="checkbox" id="menu-pedidos" class="menu-toggle">
                     <label for="menu-pedidos" class="menu-label">

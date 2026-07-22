@@ -75,6 +75,7 @@ GROUP_TIENDA = 'Pedidos Tienda'
 GROUP_ALMACEN = 'Pedidos Almacen'
 GROUP_SUPERVISOR = 'Pedidos Supervisor'
 GROUP_PICKER = 'Pedidos Picker'
+GROUP_RECEPTOR = 'Pedidos Receptor'
 
 
 def is_pedidos_tienda(user):
@@ -94,7 +95,7 @@ def is_pedidos_picker(user):
 
 
 def is_pedidos_any(user):
-    grupos = [GROUP_TIENDA, GROUP_ALMACEN, GROUP_SUPERVISOR, GROUP_PICKER]
+    grupos = [GROUP_TIENDA, GROUP_ALMACEN, GROUP_SUPERVISOR, GROUP_PICKER, GROUP_RECEPTOR]
     return user.groups.filter(name__in=grupos).exists() or user.is_superuser
 
 
@@ -109,10 +110,46 @@ def _solo_picker(user):
 
 
 def is_pedidos_receptor(user):
-    """Puede recibir despachos: Tienda pura (sin Almacen), Supervisor, superuser."""
+    """Puede recibir despachos: grupo Pedidos Receptor, Supervisor o superuser."""
     if user.is_superuser or is_pedidos_supervisor(user):
         return True
-    return is_pedidos_tienda(user) and not is_pedidos_almacen(user)
+    return user.groups.filter(name=GROUP_RECEPTOR).exists()
+
+
+def _es_receptor_grupo(user) -> bool:
+    """True si el usuario pertenece al grupo Pedidos Receptor (sin incluir Supervisor ni superuser)."""
+    return user.groups.filter(name=GROUP_RECEPTOR).exists()
+
+
+def _codigos_depositos_receptor(user) -> list[int]:
+    """Códigos de depósito asignados al usuario para recepción."""
+    return list(user.depositos_recepcion.values_list('codigo', flat=True))
+
+
+def puede_recibir_pedido(user, pedido) -> bool:
+    """True si el usuario puede recibir despachos de este pedido.
+
+    Supervisor y superuser reciben cualquiera; un receptor solo si el
+    depósito destino del pedido está entre sus depósitos asignados.
+    """
+    if user.is_superuser or is_pedidos_supervisor(user):
+        return True
+    if _es_receptor_grupo(user):
+        return pedido.deposito_codigo in _codigos_depositos_receptor(user)
+    return False
+
+
+def _puede_ver_pedido(user, pedido) -> bool:
+    """Acceso al detalle: True si algún rol del usuario alcanza este pedido."""
+    if user.is_superuser or is_pedidos_supervisor(user) or is_pedidos_almacen(user):
+        return True
+    if is_pedidos_tienda(user) and pedido.solicitante == user:
+        return True
+    if is_pedidos_picker(user) and pedido.picker == user:
+        return True
+    if _es_receptor_grupo(user) and pedido.deposito_codigo in _codigos_depositos_receptor(user):
+        return True
+    return False
 
 
 # Variantes de impresión de un pedido. 'estado' None = sin filtro (todos los items).
@@ -158,7 +195,13 @@ def lista_pedidos(request):
             picker=request.user, estado__in=['ASIGNADO', 'PICKING', 'EN_PREPARACION'],
         ).select_related('solicitante', 'despachador', 'picker').order_by('fecha_asignacion', 'fecha_creacion')
     else:
-        pedidos = Pedido.objects.filter(solicitante=request.user).select_related('solicitante', 'despachador', 'picker').order_by('-fecha_creacion')
+        condiciones = Q()
+        if is_pedidos_tienda(request.user):
+            condiciones |= Q(solicitante=request.user)
+        if _es_receptor_grupo(request.user):
+            condiciones |= Q(deposito_codigo__in=_codigos_depositos_receptor(request.user))
+        pedidos = Pedido.objects.filter(condiciones) if condiciones else Pedido.objects.none()
+        pedidos = pedidos.select_related('solicitante', 'despachador', 'picker').order_by('-fecha_creacion')
 
     estado_filter = request.GET.get('estado', '')
     if estado_filter:
@@ -311,11 +354,7 @@ def crear_pedido(request):
 def detalle_pedido(request, pk):
     pedido = get_object_or_404(Pedido.objects.select_related('solicitante', 'despachador', 'picker'), numero_pedido=pk)
 
-    if _solo_tienda(request.user) and pedido.solicitante != request.user:
-        messages.error(request, 'No tienes permiso para ver este pedido')
-        return redirect('pedidos-lista')
-
-    if _solo_picker(request.user) and pedido.picker != request.user:
+    if not _puede_ver_pedido(request.user, pedido):
         messages.error(request, 'No tienes permiso para ver este pedido')
         return redirect('pedidos-lista')
 
@@ -345,7 +384,7 @@ def detalle_pedido(request, pk):
         'ver_despachado': es_supervisor,
         'es_supervisor': es_supervisor,
         'es_despachador': es_despachador,
-        'puede_recibir': is_pedidos_receptor(request.user),
+        'puede_recibir': puede_recibir_pedido(request.user, pedido),
         'ver_cantidad_despacho': es_despachador or request.user.is_superuser,
         'puede_imprimir_despacho': request.user.is_superuser or is_pedidos_almacen(request.user) or is_pedidos_supervisor(request.user),
         'es_superuser': request.user.is_superuser,
@@ -879,7 +918,7 @@ def verificar_autorizacion_despacho(request):
 def recibir_despacho(request, pk, despacho_id):
     pedido = get_object_or_404(Pedido, numero_pedido=pk)
 
-    if _solo_tienda(request.user) and pedido.solicitante != request.user:
+    if not puede_recibir_pedido(request.user, pedido):
         messages.error(request, 'No tienes permiso para recibir este pedido')
         return redirect('pedidos-lista')
 
@@ -1930,11 +1969,13 @@ def contar_pendientes(request):
         count = Pedido.objects.filter(estado='PENDIENTE').count()
     elif _solo_picker(request.user):
         count = Pedido.objects.filter(picker=request.user, estado__in=['ASIGNADO', 'PICKING']).count()
-    elif is_pedidos_tienda(request.user):
-        count = Despacho.objects.filter(
-            pedido__solicitante=request.user,
-            estado='ENVIADO',
-        ).count()
+    elif is_pedidos_tienda(request.user) or _es_receptor_grupo(request.user):
+        condiciones = Q()
+        if is_pedidos_tienda(request.user):
+            condiciones |= Q(pedido__solicitante=request.user)
+        if _es_receptor_grupo(request.user):
+            condiciones |= Q(pedido__deposito_codigo__in=_codigos_depositos_receptor(request.user))
+        count = Despacho.objects.filter(condiciones, estado='ENVIADO').count()
     else:
         count = 0
     return HttpResponse(f'<span class="badge bg-danger rounded-pill">{count}</span>' if count > 0 else '')
