@@ -190,7 +190,7 @@ def lista_pedidos(request):
         pedidos = Pedido.objects.select_related('solicitante', 'despachador', 'picker').order_by('-fecha_creacion')
     elif is_pedidos_almacen(request.user):
         pedidos = Pedido.objects.select_related('solicitante', 'despachador', 'picker').exclude(estado='CERRADO').order_by('-fecha_creacion')
-    elif _solo_picker(request.user):
+    elif _solo_picker(request.user) and not _es_receptor_grupo(request.user):
         pedidos = Pedido.objects.filter(
             picker=request.user, estado__in=['ASIGNADO', 'PICKING', 'EN_PREPARACION'],
         ).select_related('solicitante', 'despachador', 'picker').order_by('fecha_asignacion', 'fecha_creacion')
@@ -198,6 +198,8 @@ def lista_pedidos(request):
         condiciones = Q()
         if is_pedidos_tienda(request.user):
             condiciones |= Q(solicitante=request.user)
+        if _solo_picker(request.user):
+            condiciones |= Q(picker=request.user, estado__in=['ASIGNADO', 'PICKING', 'EN_PREPARACION'])
         if _es_receptor_grupo(request.user):
             condiciones |= Q(deposito_codigo__in=_codigos_depositos_receptor(request.user))
         pedidos = Pedido.objects.filter(condiciones) if condiciones else Pedido.objects.none()
@@ -223,7 +225,7 @@ def lista_pedidos(request):
         'estado_filter': estado_filter,
         'estados': Pedido.ESTADO_CHOICES,
         'es_tienda': _solo_tienda(request.user),
-        'es_picker': _solo_picker(request.user),
+        'es_picker': _solo_picker(request.user) and not _es_receptor_grupo(request.user),
         'es_supervisor': is_pedidos_supervisor(request.user),
         'pickers_disponibles': lista_pickers_disponibles,
         'puede_recibir': is_pedidos_receptor(request.user),
@@ -1947,7 +1949,7 @@ def contar_pendientes(request):
         )
     elif is_pedidos_almacen(request.user):
         count = Pedido.objects.filter(estado='PENDIENTE').count()
-    elif _solo_picker(request.user):
+    elif _solo_picker(request.user) and not _es_receptor_grupo(request.user) and not is_pedidos_tienda(request.user):
         count = Pedido.objects.filter(picker=request.user, estado__in=['ASIGNADO', 'PICKING']).count()
     elif is_pedidos_tienda(request.user) or _es_receptor_grupo(request.user):
         condiciones = Q()
@@ -1956,6 +1958,8 @@ def contar_pendientes(request):
         if _es_receptor_grupo(request.user):
             condiciones |= Q(pedido__deposito_codigo__in=_codigos_depositos_receptor(request.user))
         count = Despacho.objects.filter(condiciones, estado='ENVIADO').count()
+        if _solo_picker(request.user):
+            count += Pedido.objects.filter(picker=request.user, estado__in=['ASIGNADO', 'PICKING']).count()
     else:
         count = 0
     return HttpResponse(f'<span class="badge bg-danger rounded-pill">{count}</span>' if count > 0 else '')
