@@ -2182,3 +2182,76 @@ class VisibilidadReceptorTest(TestCase):
         self.client.force_login(self.receptor)
         resp = self.client.get('/pedidos/pendientes-count/')
         self.assertIn('>1<', resp.content.decode())
+
+
+class PickerReceptorComboTest(TestCase):
+    """Un usuario Picker + Receptor debe ver la unión: su cola de picking y
+    los pedidos de sus depósitos asignados (la rama de picker puro no debe
+    capturarlo y ocultarle la recepción)."""
+
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from django.urls import reverse
+        from .models import Pedido, Despacho, DepositoPermitido
+        self.reverse = reverse
+
+        g_picker, _ = Group.objects.get_or_create(name='Pedidos Picker')
+        g_receptor, _ = Group.objects.get_or_create(name='Pedidos Receptor')
+        g_tienda, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+
+        self.combo = User.objects.create_user(username='pck_rcp', password='x')
+        self.combo.groups.add(g_picker, g_receptor)
+        self.solicitante = User.objects.create_user(username='tnd_combo', password='x')
+        self.solicitante.groups.add(g_tienda)
+
+        dep2 = DepositoPermitido.objects.create(codigo=2, nombre='Tienda Dos')
+        dep2.receptores.add(self.combo)
+
+        # Pedido de su depósito con despacho por recibir (no lo pickea él).
+        self.pedido_recibir = Pedido.objects.create(
+            solicitante=self.solicitante, estado='DESPACHADO', deposito_codigo=2,
+        )
+        Despacho.objects.create(pedido=self.pedido_recibir, estado='ENVIADO')
+
+        # Pedido asignado a él para picking (de otro depósito).
+        self.pedido_picking = Pedido.objects.create(
+            solicitante=self.solicitante, estado='PICKING', deposito_codigo=9,
+            picker=self.combo,
+        )
+
+        # Pedido ajeno: ni su depósito ni su picking.
+        self.pedido_ajeno = Pedido.objects.create(
+            solicitante=self.solicitante, estado='DESPACHADO', deposito_codigo=9,
+        )
+
+    def test_lista_muestra_union_picking_y_recepcion(self):
+        self.client.force_login(self.combo)
+        resp = self.client.get(self.reverse('pedidos-lista'))
+        self.assertEqual(resp.status_code, 200)
+        pedidos = list(resp.context['pedidos'])
+        self.assertIn(self.pedido_recibir, pedidos)
+        self.assertIn(self.pedido_picking, pedidos)
+        self.assertNotIn(self.pedido_ajeno, pedidos)
+        self.assertTrue(resp.context['puede_recibir'])
+        # Ve la tabla completa (columnas de depósito/solicitante), no la vista de picker puro.
+        self.assertFalse(resp.context['es_picker'])
+
+    def test_picker_puro_conserva_su_vista(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        picker = User.objects.create_user(username='pck_puro', password='x')
+        picker.groups.add(Group.objects.get(name='Pedidos Picker'))
+        self.pedido_picking.picker = picker
+        self.pedido_picking.save()
+        self.client.force_login(picker)
+        resp = self.client.get(self.reverse('pedidos-lista'))
+        pedidos = list(resp.context['pedidos'])
+        self.assertEqual(pedidos, [self.pedido_picking])
+        self.assertTrue(resp.context['es_picker'])
+
+    def test_contar_pendientes_suma_picking_y_despachos(self):
+        self.client.force_login(self.combo)
+        resp = self.client.get('/pedidos/pendientes-count/')
+        # 1 despacho ENVIADO de su depósito + 1 pedido en PICKING asignado a él.
+        self.assertIn('>2<', resp.content.decode())
