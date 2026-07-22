@@ -539,6 +539,113 @@ class AnularDespachoReversionTest(TestCase):
         self.assertEqual(self.item.cantidad_despachada, 10)
 
 
+class AnularDespachoLiberaPickerTest(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from django.urls import reverse
+        from django.utils import timezone
+        from users.models import User
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem
+        self.reverse = reverse
+        self.sup = User.objects.create_superuser(username='sup_lib', password='x')
+        g_picker, _ = Group.objects.get_or_create(name='Pedidos Picker')
+        self.picker = User.objects.create_user(username='picker_lib', password='x')
+        self.picker.groups.add(g_picker)
+        self.pedido = Pedido.objects.create(
+            solicitante=self.sup, estado='DESPACHADO',
+            picker=self.picker, fecha_asignacion=timezone.now(),
+        )
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='A', descripcion='a',
+            cantidad_solicitada=10, cantidad_despachada=10,
+            cantidad_back_order=0, estado='DESPACHADO',
+        )
+        self.despacho = Despacho.objects.create(pedido=self.pedido, estado='ENVIADO')
+        DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=self.item, cantidad_despachada=10,
+        )
+
+    def _anular(self, despacho=None):
+        despacho = despacho or self.despacho
+        self.client.force_login(self.sup)
+        return self.client.post(
+            self.reverse('despachos-anular', args=[despacho.numero_despacho]),
+            {'motivo': 'error'},
+        )
+
+    def _crear_segundo_despacho(self):
+        """Segundo item cubierto por un segundo despacho ENVIADO."""
+        from .models import PedidoItem, Despacho, DespachoItem
+        self.item2 = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='B', descripcion='b',
+            cantidad_solicitada=5, cantidad_despachada=5,
+            cantidad_back_order=0, estado='DESPACHADO',
+        )
+        self.despacho2 = Despacho.objects.create(pedido=self.pedido, estado='ENVIADO')
+        DespachoItem.objects.create(
+            despacho=self.despacho2, pedido_item=self.item2, cantidad_despachada=5,
+        )
+
+    def test_anular_libera_picker_y_fecha(self):
+        self._anular()
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'PENDIENTE')
+        self.assertIsNone(self.pedido.picker)
+        self.assertIsNone(self.pedido.fecha_asignacion)
+
+    def test_pedido_liberado_es_reasignable(self):
+        self._anular()
+        url = self.reverse('pedidos-asignar-picker', args=[self.pedido.numero_pedido])
+        resp = self.client.post(url, {'picker_id': self.picker.pk})
+        self.assertEqual(resp.status_code, 302)
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'ASIGNADO')
+        self.assertEqual(self.pedido.picker, self.picker)
+
+    def test_multi_despacho_items_revertidos_quedan_back_order(self):
+        self._crear_segundo_despacho()
+        self._anular(self.despacho2)
+        self.pedido.refresh_from_db()
+        self.item.refresh_from_db()
+        self.item2.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'PARCIAL')
+        self.assertIsNone(self.pedido.picker)
+        self.assertEqual(self.item.estado, 'DESPACHADO')       # despacho intacto
+        self.assertEqual(self.item2.estado, 'BACK_ORDER')      # revertido, no PENDIENTE
+        self.assertEqual(self.item2.cantidad_back_order, 5)
+        # El gate de asignar_picker (PARCIAL + BACK_ORDER) debe aceptar la reasignación
+        url = self.reverse('pedidos-asignar-picker', args=[self.pedido.numero_pedido])
+        self.client.post(url, {'picker_id': self.picker.pk})
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'ASIGNADO')
+
+    def test_pedido_completamente_despachado_conserva_picker(self):
+        from .models import Despacho, DespachoItem
+        # Despacho sin contribución a items del pedido (item de incidencia sin pedido_item)
+        despacho2 = Despacho.objects.create(pedido=self.pedido, estado='ENVIADO')
+        DespachoItem.objects.create(
+            despacho=despacho2, pedido_item=None, cantidad_despachada=5,
+        )
+        self._anular(despacho2)
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'DESPACHADO')
+        self.assertEqual(self.pedido.picker, self.picker)
+
+    def test_doble_anulacion_rechazada(self):
+        self._anular()
+        resp = self.client.post(
+            self.reverse('despachos-anular', args=[self.despacho.numero_despacho]),
+            {'motivo': 'segunda'},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.despacho.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertEqual(self.despacho.motivo_anulacion, 'error')
+        # La reversión no se aplica dos veces
+        self.assertEqual(self.item.cantidad_despachada, 0)
+        self.assertEqual(self.item.cantidad_back_order, 10)
+
+
 class ReporteExcluyeAnuladosTest(TestCase):
     def setUp(self):
         from users.models import User

@@ -777,19 +777,22 @@ def anular_despacho(request, despacho_id):
     despacho = get_object_or_404(Despacho, numero_despacho=despacho_id)
     if request.method != 'POST':
         return redirect('pedidos-detalle', pk=despacho.pedido_id)
-    if despacho.estado == 'ANULADO':
-        messages.warning(request, 'Este despacho ya está anulado')
-        return redirect('pedidos-detalle', pk=despacho.pedido_id)
-    if despacho.estado in ('RECIBIDO', 'PARCIAL'):
-        messages.error(request, 'No se puede anular un despacho que ya fue recibido')
-        return redirect('pedidos-detalle', pk=despacho.pedido_id)
     motivo = request.POST.get('motivo', '').strip()
     if not motivo:
         messages.error(request, 'Debes indicar un motivo para anular el despacho')
         return redirect('pedidos-detalle', pk=despacho.pedido_id)
 
-    pedido = despacho.pedido
+    pedido_liberado = False
     with transaction.atomic():
+        despacho = Despacho.objects.select_for_update().get(numero_despacho=despacho_id)
+        if despacho.estado == 'ANULADO':
+            messages.warning(request, 'Este despacho ya está anulado')
+            return redirect('pedidos-detalle', pk=despacho.pedido_id)
+        if despacho.estado in ('RECIBIDO', 'PARCIAL'):
+            messages.error(request, 'No se puede anular un despacho que ya fue recibido')
+            return redirect('pedidos-detalle', pk=despacho.pedido_id)
+        pedido = Pedido.objects.select_for_update().get(pk=despacho.pedido_id)
+
         # Revertir la contribución de este despacho al pedido original.
         for di in despacho.items.select_related('pedido_item'):
             pi = di.pedido_item
@@ -829,13 +832,30 @@ def anular_despacho(request, despacho_id):
                 pedido.estado = 'DESPACHADO'
             else:
                 pedido.estado = 'PARCIAL'
+            if pedido.estado == 'PARCIAL':
+                # Los items revertidos deben quedar en BACK_ORDER: el gate de
+                # asignar_picker y la UI solo reasignan PARCIAL con BACK_ORDER.
+                pedido.items.filter(estado='PENDIENTE').update(estado='BACK_ORDER')
+            if pedido.estado in ('PENDIENTE', 'PARCIAL'):
+                # Liberar al picker para que el pedido pueda reasignarse y
+                # volver al ciclo de picking (patrón desasignar_picker).
+                pedido.picker = None
+                pedido.fecha_asignacion = None
+                pedido_liberado = True
             pedido.save()
 
     logger.info(
         'Despacho #%s anulado por %s. Motivo: %s',
         despacho.numero_despacho, request.user.username, motivo,
     )
-    messages.success(request, f'Despacho #{despacho.numero_despacho} anulado')
+    if pedido_liberado:
+        messages.success(
+            request,
+            f'Despacho #{despacho.numero_despacho} anulado — '
+            f'pedido #{pedido.numero_pedido} liberado para asignar picker',
+        )
+    else:
+        messages.success(request, f'Despacho #{despacho.numero_despacho} anulado')
     return redirect('pedidos-detalle', pk=pedido.numero_pedido)
 
 
