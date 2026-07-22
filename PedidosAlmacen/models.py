@@ -155,11 +155,18 @@ class DepositoPermitido(models.Model):
     """Depósito de a2 habilitado para selección al crear un pedido.
 
     Se sincroniza desde SDEPOSITOS y el admin marca cuáles quedan activos.
+    Además define el alcance de recepción: los usuarios en ``receptores``
+    pueden recibir despachos destinados a este depósito (independiente de
+    ``activo``, que solo gobierna la selección al crear pedidos).
     """
     codigo = models.IntegerField(unique=True)      # FDP_CODIGO de SDEPOSITOS
     nombre = models.CharField(max_length=150)      # FDP_DESCRIPCION
     activo = models.BooleanField(default=False)
     fecha_sync = models.DateTimeField(auto_now=True)
+    receptores = models.ManyToManyField(
+        User, blank=True, related_name='depositos_recepcion',
+        help_text='Usuarios autorizados a recibir despachos destinados a este depósito.',
+    )
 
     class Meta:
         ordering = ['nombre']

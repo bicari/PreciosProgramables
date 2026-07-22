@@ -1906,3 +1906,172 @@ class ResolverIncidenciasUITest(TestCase):
         )
         resp = self.client.get(f'/pedidos/{self.pedido.numero_pedido}/')
         self.assertContains(resp, 'Inc. Resuelta')
+
+
+class RecepcionPorRolReceptorTest(TestCase):
+    """Recepción de despachos con el rol Pedidos Receptor: la tienda ya no
+    recibe; el receptor solo recibe despachos de pedidos destinados a sus
+    depósitos asignados; el supervisor recibe cualquiera."""
+
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from django.urls import reverse
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem, DepositoPermitido
+        self.reverse = reverse
+        self.DepositoPermitido = DepositoPermitido
+
+        self.g_tienda, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.g_receptor, _ = Group.objects.get_or_create(name='Pedidos Receptor')
+        self.g_supervisor, _ = Group.objects.get_or_create(name='Pedidos Supervisor')
+
+        self.tienda = User.objects.create_user(username='tnd_rec', password='x')
+        self.tienda.groups.add(self.g_tienda)
+        self.receptor = User.objects.create_user(username='rcp_rec', password='x')
+        self.receptor.groups.add(self.g_receptor)
+        self.supervisor = User.objects.create_user(username='sup_rec', password='x')
+        self.supervisor.groups.add(self.g_supervisor)
+
+        self.dep2 = DepositoPermitido.objects.create(codigo=2, nombre='Tienda Dos')
+        self.dep9 = DepositoPermitido.objects.create(codigo=9, nombre='Tienda Nueve')
+
+        self.pedido = Pedido.objects.create(
+            solicitante=self.tienda, estado='DESPACHADO', deposito_codigo=2,
+            condicion='URGENTE',
+        )
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=5, cantidad_despachada=5, estado='DESPACHADO',
+        )
+        self.despacho = Despacho.objects.create(pedido=self.pedido, estado='ENVIADO')
+        self.di = DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=self.item, cantidad_despachada=5,
+        )
+        self.url = reverse(
+            'pedidos-recibir-despacho',
+            args=[self.pedido.numero_pedido, self.despacho.numero_despacho],
+        )
+
+    def _post(self):
+        return self.client.post(self.url, {
+            f'recibido_{self.di.id}': '5',
+            f'observacion_{self.di.id}': '',
+            f'tipo_incidencia_{self.di.id}': '',
+            'productos_extra': '[]',
+        })
+
+    def test_tienda_ya_no_puede_recibir(self):
+        self.client.force_login(self.tienda)
+        resp = self._post()
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn('dashboard', resp.url)  # rechazo del decorador
+        self.despacho.refresh_from_db()
+        self.assertEqual(self.despacho.estado, 'ENVIADO')
+
+    def test_receptor_con_deposito_recibe(self):
+        self.dep2.receptores.add(self.receptor)
+        self.client.force_login(self.receptor)
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.insertar_traslado_recepcion.return_value = None
+            resp = self._post()
+        self.assertEqual(resp.status_code, 302)
+        self.despacho.refresh_from_db()
+        self.assertEqual(self.despacho.estado, 'RECIBIDO')
+        self.assertEqual(self.despacho.receptor, self.receptor)
+
+    def test_receptor_sin_deposito_no_recibe(self):
+        self.dep9.receptores.add(self.receptor)  # depósito distinto al del pedido
+        self.client.force_login(self.receptor)
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            resp = self._post()
+            mock_db.assert_not_called()
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, self.reverse('pedidos-lista'))
+        self.despacho.refresh_from_db()
+        self.assertEqual(self.despacho.estado, 'ENVIADO')
+
+    def test_supervisor_recibe_cualquier_deposito(self):
+        self.client.force_login(self.supervisor)
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.insertar_traslado_recepcion.return_value = None
+            resp = self._post()
+        self.assertEqual(resp.status_code, 302)
+        self.despacho.refresh_from_db()
+        self.assertEqual(self.despacho.estado, 'RECIBIDO')
+
+    def test_grupo_receptor_creado_por_migracion(self):
+        from django.contrib.auth.models import Group
+        self.assertTrue(Group.objects.filter(name='Pedidos Receptor').exists())
+
+
+class VisibilidadReceptorTest(TestCase):
+    """Visibilidad de lista, detalle y badge de pendientes para el rol receptor."""
+
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from django.urls import reverse
+        from .models import Pedido, Despacho, DepositoPermitido
+        self.reverse = reverse
+
+        g_tienda, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        g_receptor, _ = Group.objects.get_or_create(name='Pedidos Receptor')
+
+        self.tienda = User.objects.create_user(username='tnd_vis', password='x')
+        self.tienda.groups.add(g_tienda)
+        self.otra_tienda = User.objects.create_user(username='tnd_vis2', password='x')
+        self.otra_tienda.groups.add(g_tienda)
+        self.receptor = User.objects.create_user(username='rcp_vis', password='x')
+        self.receptor.groups.add(g_receptor)
+
+        dep2 = DepositoPermitido.objects.create(codigo=2, nombre='Tienda Dos')
+        dep2.receptores.add(self.receptor)
+
+        self.pedido_dep2 = Pedido.objects.create(
+            solicitante=self.tienda, estado='DESPACHADO', deposito_codigo=2,
+        )
+        self.pedido_dep9 = Pedido.objects.create(
+            solicitante=self.otra_tienda, estado='DESPACHADO', deposito_codigo=9,
+        )
+        self.despacho_dep2 = Despacho.objects.create(pedido=self.pedido_dep2, estado='ENVIADO')
+        self.despacho_dep9 = Despacho.objects.create(pedido=self.pedido_dep9, estado='ENVIADO')
+
+    def test_lista_filtra_por_depositos(self):
+        self.client.force_login(self.receptor)
+        resp = self.client.get(self.reverse('pedidos-lista'))
+        self.assertEqual(resp.status_code, 200)
+        pedidos = list(resp.context['pedidos'])
+        self.assertIn(self.pedido_dep2, pedidos)
+        self.assertNotIn(self.pedido_dep9, pedidos)
+        self.assertTrue(resp.context['puede_recibir'])
+
+    def test_lista_receptor_ve_cualquier_estado_de_su_deposito(self):
+        from .models import Pedido
+        pendiente = Pedido.objects.create(
+            solicitante=self.tienda, estado='PENDIENTE', deposito_codigo=2,
+        )
+        self.client.force_login(self.receptor)
+        resp = self.client.get(self.reverse('pedidos-lista'))
+        self.assertIn(pendiente, list(resp.context['pedidos']))
+
+    def test_detalle_accesible_solo_su_deposito(self):
+        self.client.force_login(self.receptor)
+        resp_ok = self.client.get(self.reverse('pedidos-detalle', args=[self.pedido_dep2.numero_pedido]))
+        self.assertEqual(resp_ok.status_code, 200)
+        self.assertTrue(resp_ok.context['puede_recibir'])
+        resp_no = self.client.get(self.reverse('pedidos-detalle', args=[self.pedido_dep9.numero_pedido]))
+        self.assertEqual(resp_no.status_code, 302)
+        self.assertEqual(resp_no.url, self.reverse('pedidos-lista'))
+
+    def test_tienda_sigue_viendo_solo_los_suyos(self):
+        self.client.force_login(self.tienda)
+        resp = self.client.get(self.reverse('pedidos-lista'))
+        pedidos = list(resp.context['pedidos'])
+        self.assertIn(self.pedido_dep2, pedidos)
+        self.assertNotIn(self.pedido_dep9, pedidos)
+        self.assertFalse(resp.context['puede_recibir'])
+
+    def test_contar_pendientes_receptor(self):
+        self.client.force_login(self.receptor)
+        resp = self.client.get('/pedidos/pendientes-count/')
+        self.assertIn('>1<', resp.content.decode())

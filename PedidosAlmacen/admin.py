@@ -61,7 +61,15 @@ class DepositoPermitidoAdmin(admin.ModelAdmin):
     list_filter = ('activo',)
     search_fields = ('codigo', 'nombre')
     ordering = ('nombre',)
+    filter_horizontal = ('receptores',)
     change_list_template = 'admin/depositopermitido_changelist.html'
+
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        """Limita el selector de receptores a usuarios activos."""
+        if db_field.name == 'receptores':
+            from users.models import User
+            kwargs['queryset'] = User.objects.filter(status=True).order_by('username')
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
 
     def get_urls(self):
         """Añade la URL del botón 'Sincronizar depósitos desde a2'."""
