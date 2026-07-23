@@ -43,6 +43,10 @@ class Pedido(models.Model):
         related_name='pedidos_picking',
     )
     fecha_asignacion = models.DateTimeField(null=True, blank=True)
+    # Estado vivo del ciclo de picking vigente; se limpia al desasignar.
+    # El historial durable vive en el snapshot de Despacho.
+    fecha_inicio_picking = models.DateTimeField(null=True, blank=True)
+    fecha_fin_picking = models.DateTimeField(null=True, blank=True)
     motivo_anulacion = models.TextField(blank=True, default='')
     anulado_por = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
@@ -96,6 +100,10 @@ class Despacho(models.Model):
     numero_despacho = models.AutoField(primary_key=True)
     despachador = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='despachos_realizados')
     picker = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='despachos_pickeados')
+    # Snapshot del ciclo de picking al crear el despacho (igual que picker):
+    # sobrevive a reasignaciones y anulaciones.
+    fecha_inicio_picking = models.DateTimeField(null=True, blank=True)
+    fecha_fin_picking = models.DateTimeField(null=True, blank=True)
     receptor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='despachos_recibidos')
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='PREPARANDO')
     observaciones = models.TextField(blank=True)

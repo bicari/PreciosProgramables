@@ -1,0 +1,199 @@
+{% extends "dashboard.html" %}
+{% load permisos_tags %}
+{% block content %}
+{% load static %}
+
+<!-- HEADER OSCURO -->
+<div class="pd-header">
+    <div class="pd-header-left">
+        <div>
+            <span class="pd-header-eyebrow">Almacén</span>
+            <div class="pd-header-title-row">
+                <h1 class="pd-header-num">Estadísticas por Picker</h1>
+            </div>
+        </div>
+    </div>
+    <div class="pd-header-actions">
+        <a href="{% url 'pedidos-reporte-pickers-pdf' %}?fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&picker={{ picker_filtro }}"
+           class="btn btn-sm btn-danger">
+            <i class="fas fa-file-pdf"></i> <span class="d-none d-sm-inline">Exportar PDF</span>
+        </a>
+        <a href="{% url 'pedidos-reporte' %}?fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}" class="btn btn-sm btn-outline-light">
+            <i class="fas fa-arrow-left"></i> <span class="d-none d-sm-inline">Volver</span>
+        </a>
+    </div>
+</div>
+
+<!-- FILTROS -->
+<div class="pr-filter-card mb-4">
+    <div class="pr-filter-header">
+        <span class="pr-filter-label"><i class="fas fa-filter me-1"></i>Filtros</span>
+    </div>
+    <form method="get" class="pr-filter-body">
+        <div class="pr-filter-fields">
+            <div class="pr-filter-field">
+                <label class="pr-field-label">Fecha inicio</label>
+                <input type="date" name="fecha_inicio" class="form-control form-control-sm" value="{{ fecha_inicio }}">
+            </div>
+            <div class="pr-filter-field">
+                <label class="pr-field-label">Fecha fin</label>
+                <input type="date" name="fecha_fin" class="form-control form-control-sm" value="{{ fecha_fin }}">
+            </div>
+            <div class="pr-filter-field">
+                <label class="pr-field-label">Picker</label>
+                <select name="picker" class="form-select form-select-sm">
+                    <option value="">Todos</option>
+                    {% for p in pickers_disponibles %}
+                    <option value="{{ p.id }}" {% if picker_filtro == p.id|stringformat:"s" %}selected{% endif %}>
+                        {{ p.username }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="pr-filter-actions">
+            <button type="submit" class="btn btn-sm btn-primary">
+                <i class="fas fa-search"></i> Aplicar
+            </button>
+            <a href="{% url 'pedidos-reporte-pickers' %}" class="btn btn-sm btn-outline-secondary" title="Limpiar filtros">
+                <i class="fas fa-times"></i>
+            </a>
+        </div>
+    </form>
+</div>
+
+<!-- KPIs — banda de cifras -->
+<div class="pr-kpi-strip mb-4">
+    <div class="pr-kpi">
+        <div class="pr-kpi-num">{{ totales.despachos }}</div>
+        <div class="pr-kpi-label">Despachos</div>
+    </div>
+    <div class="pr-kpi-divider"></div>
+    <div class="pr-kpi">
+        <div class="pr-kpi-num pr-kpi-num--blue">{{ totales.pedidos }}</div>
+        <div class="pr-kpi-label">Pedidos</div>
+    </div>
+    <div class="pr-kpi-divider"></div>
+    <div class="pr-kpi">
+        <div class="pr-kpi-num pr-kpi-num--green">{{ totales.unidades }}</div>
+        <div class="pr-kpi-label">Uds. Pickeadas</div>
+    </div>
+    <div class="pr-kpi-divider"></div>
+    <div class="pr-kpi">
+        <div class="pr-kpi-num">{{ totales.lineas }}</div>
+        <div class="pr-kpi-label">Líneas</div>
+    </div>
+    <div class="pr-kpi-divider"></div>
+    <div class="pr-kpi">
+        <div class="pr-kpi-num {% if totales.anulados %}pr-kpi-num--red{% endif %}">{{ totales.anulados }}</div>
+        <div class="pr-kpi-label">Desp. Anulados</div>
+    </div>
+</div>
+
+<!-- TABLA POR PICKER -->
+<div class="pl-table-card">
+    <div class="pr-dist-header">
+        <span class="pr-dist-title"><i class="fas fa-people-carry-box me-1"></i>Detalle por Picker</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm pl-tabla mb-0">
+            <thead>
+                <tr>
+                    <th>Picker</th>
+                    <th class="text-end">Despachos</th>
+                    <th class="text-end">Pedidos</th>
+                    <th class="text-end">Líneas</th>
+                    <th class="text-end">Productos</th>
+                    <th class="text-end">Uds. Pickeadas</th>
+                    <th class="text-end">Anulados</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in stats %}
+                <tr>
+                    <td><span class="fw-bold">{{ s.picker__username }}</span></td>
+                    <td class="text-end">{{ s.total_despachos }}</td>
+                    <td class="text-end">{{ s.total_pedidos }}</td>
+                    <td class="text-end">{{ s.total_lineas }}</td>
+                    <td class="text-end">{{ s.total_productos }}</td>
+                    <td class="text-end fw-bold">{{ s.total_unidades }}</td>
+                    <td class="text-end {% if s.despachos_anulados %}text-danger fw-bold{% else %}text-muted{% endif %}">{{ s.despachos_anulados }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7" class="text-center text-muted py-3">Sin datos para el período seleccionado</td></tr>
+                {% endfor %}
+            </tbody>
+            {% if stats %}
+            <tfoot>
+                <tr class="pk-total-row">
+                    <td class="fw-bold">Totales</td>
+                    <td class="text-end fw-bold">{{ totales.despachos }}</td>
+                    <td class="text-end fw-bold">{{ totales.pedidos }}</td>
+                    <td class="text-end fw-bold">{{ totales.lineas }}</td>
+                    <td></td>
+                    <td class="text-end fw-bold">{{ totales.unidades }}</td>
+                    <td class="text-end fw-bold {% if totales.anulados %}text-danger{% endif %}">{{ totales.anulados }}</td>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="pk-notas text-muted mt-3">
+    <div><i class="fas fa-circle-info me-1"></i>Un pedido atendido por varios pickers cuenta para cada uno; el total de pedidos no duplica.</div>
+    <div>Las métricas excluyen despachos anulados (columna aparte) y solo incluyen usuarios del grupo Pedidos Picker.</div>
+    <div>Los SKU no contemplados cuentan en líneas y unidades, pero no en productos distintos.</div>
+</div>
+
+<style>
+/* ── pd-header (compartido) ── */
+.pd-header          { background:#2e353d; color:#fff; border-radius:12px; padding:1.1rem 1.5rem; display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1.25rem; box-shadow:0 2px 12px rgba(0,0,0,0.12); }
+.pd-header-left     { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
+.pd-header-eyebrow  { display:block; font-size:0.62rem; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:rgba(255,255,255,0.45); margin-bottom:0.1rem; }
+.pd-header-title-row{ display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; }
+.pd-header-num      { font-size:1.5rem; font-weight:700; margin:0; letter-spacing:-0.01em; line-height:1; }
+.pd-header-actions  { display:flex; gap:0.5rem; flex-wrap:wrap; }
+
+/* ── Filtros ── */
+.pr-filter-card     { background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,0.06); overflow:hidden; }
+.pr-filter-header   { padding:0.6rem 1.25rem; border-bottom:1px solid #e9ecef; background:#f8f9fa; }
+.pr-filter-label    { font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#6c757d; }
+.pr-filter-body     { padding:1rem 1.25rem; display:flex; align-items:flex-end; gap:1rem; flex-wrap:wrap; }
+.pr-filter-fields   { display:flex; gap:0.75rem; flex-wrap:wrap; flex:1; }
+.pr-filter-field    { display:flex; flex-direction:column; gap:0.25rem; min-width:130px; flex:1; }
+.pr-field-label     { font-size:0.72rem; font-weight:600; color:#495057; margin:0; }
+.pr-filter-actions  { display:flex; gap:0.5rem; align-items:flex-end; flex-shrink:0; }
+
+/* ── KPI strip ── */
+.pr-kpi-strip       { background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,0.06); display:flex; align-items:stretch; flex-wrap:wrap; overflow:hidden; }
+.pr-kpi             { flex:1; padding:1.25rem 1.5rem; text-align:center; min-width:130px; }
+.pr-kpi-divider     { width:1px; background:#e9ecef; flex-shrink:0; margin:0.75rem 0; }
+.pr-kpi-num         { font-family:'Consolas','Courier New',monospace; font-size:2.1rem; font-weight:700; line-height:1; color:#2e353d; margin-bottom:0.3rem; }
+.pr-kpi-num--green  { color:#198754; }
+.pr-kpi-num--blue   { color:#0d6efd; }
+.pr-kpi-num--amber  { color:#d39e00; }
+.pr-kpi-num--red    { color:#dc3545; }
+.pr-kpi-label       { font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#adb5bd; }
+
+/* ── Tabla ── */
+.pl-table-card      { background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,0.06); overflow:hidden; margin-bottom:0; }
+.pr-dist-header     { padding:0.6rem 1rem; border-bottom:1px solid #e9ecef; background:#f8f9fa; }
+.pr-dist-title      { font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#495057; }
+.pl-tabla thead th  { font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#6c757d; background:#f8f9fa !important; border-bottom:2px solid #e9ecef !important; padding:0.5rem 0.75rem; white-space:nowrap; }
+.pl-tabla tbody td  { font-size:0.875rem; vertical-align:middle; padding:0.5rem 0.75rem; border-bottom:1px solid #f4f6f8; }
+.pl-tabla tbody tr:last-child td { border-bottom:none; }
+.pl-tabla tbody tr:hover td { background:#f8f9fc; }
+.pk-total-row td    { background:#f8f9fa; border-top:2px solid #e9ecef; font-size:0.875rem; padding:0.5rem 0.75rem; }
+.pk-notas           { font-size:0.75rem; line-height:1.6; }
+
+/* ── Responsive ── */
+@media (max-width:767px) {
+    .pd-header-num  { font-size:1.25rem; }
+    .pd-header      { padding:0.9rem 1rem; }
+    .pr-kpi-num     { font-size:1.5rem; }
+    .pr-kpi         { padding:0.9rem 1rem; min-width:100px; }
+    .pr-kpi-divider { display:none; }
+}
+</style>
+{% endblock content %}

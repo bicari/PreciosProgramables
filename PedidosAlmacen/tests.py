@@ -2304,3 +2304,358 @@ class NotificacionesDesactivadasTest(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn('Despachado', mail.outbox[0].subject)
         self.assertIn('tienda@test.local', mail.outbox[0].to)
+
+
+class TimestampsPickingTest(TestCase):
+    """Las transiciones de picking persisten fecha_inicio_picking / fecha_fin_picking en Pedido."""
+
+    def setUp(self):
+        from django.utils import timezone
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        self.timezone = timezone
+        self.sup = User.objects.create_superuser(username='sup_tsp', password='x')
+        self.pedido = Pedido.objects.create(
+            solicitante=self.sup, estado='ASIGNADO',
+            picker=self.sup, fecha_asignacion=timezone.now(),
+        )
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='P1',
+            cantidad_solicitada=5, estado='PENDIENTE',
+        )
+        self.client.force_login(self.sup)
+
+    def _url_preparar(self):
+        return f'/pedidos/{self.pedido.numero_pedido}/preparar/'
+
+    def test_get_preparar_inicia_picking_y_setea_inicio(self):
+        self.pedido.fecha_fin_picking = self.timezone.now()  # residuo de un ciclo previo
+        self.pedido.save()
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.return_value = {'SKU1': 10}
+            self.client.get(self._url_preparar())
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'PICKING')
+        self.assertIsNotNone(self.pedido.fecha_inicio_picking)
+        self.assertIsNone(self.pedido.fecha_fin_picking)
+
+    def test_post_preparar_desde_picking_setea_fin(self):
+        self.pedido.estado = 'PICKING'
+        self.pedido.fecha_inicio_picking = self.timezone.now()
+        self.pedido.save()
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.return_value = {'SKU1': 10}
+            self.client.post(self._url_preparar(), {f'cantidad_{self.item.id}': '3'})
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'EN_PREPARACION')
+        self.assertIsNotNone(self.pedido.fecha_fin_picking)
+
+    def test_post_preparar_desde_en_preparacion_no_pisa_fin(self):
+        marca = self.timezone.now() - self.timezone.timedelta(hours=2)
+        self.pedido.estado = 'EN_PREPARACION'
+        self.pedido.fecha_fin_picking = marca
+        self.pedido.save()
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.return_value = {'SKU1': 10}
+            self.client.post(self._url_preparar(), {f'cantidad_{self.item.id}': '3'})
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.fecha_fin_picking, marca)
+
+    def test_api_iniciar_setea_inicio(self):
+        from rest_framework.test import APIClient
+        api = APIClient()
+        api.force_authenticate(user=self.sup)
+        resp = api.post(
+            f'/api/pedidos/{self.pedido.numero_pedido}/preparar/',
+            data={'accion': 'iniciar'}, format='json',
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'PICKING')
+        self.assertIsNotNone(self.pedido.fecha_inicio_picking)
+        self.assertIsNone(self.pedido.fecha_fin_picking)
+
+    def test_api_finalizar_setea_fin(self):
+        from rest_framework.test import APIClient
+        self.pedido.estado = 'PICKING'
+        self.pedido.fecha_inicio_picking = self.timezone.now()
+        self.pedido.save()
+        api = APIClient()
+        api.force_authenticate(user=self.sup)
+        resp = api.post(
+            f'/api/pedidos/{self.pedido.numero_pedido}/preparar/',
+            data={'accion': 'finalizar', 'cantidades': {str(self.item.id): 3}},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'EN_PREPARACION')
+        self.assertIsNotNone(self.pedido.fecha_fin_picking)
+
+    def test_desasignar_picker_limpia_timestamps(self):
+        self.pedido.estado = 'PICKING'
+        self.pedido.fecha_inicio_picking = self.timezone.now()
+        self.pedido.fecha_fin_picking = self.timezone.now()
+        self.pedido.save()
+        self.client.post(f'/pedidos/{self.pedido.numero_pedido}/desasignar-picker/')
+        self.pedido.refresh_from_db()
+        self.assertIsNone(self.pedido.picker)
+        self.assertIsNone(self.pedido.fecha_inicio_picking)
+        self.assertIsNone(self.pedido.fecha_fin_picking)
+
+
+class SnapshotPickingDespachoTest(TestCase):
+    """Al crear un despacho se copian picker y timestamps de picking como snapshot inmutable."""
+
+    def setUp(self):
+        from django.utils import timezone
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        self.timezone = timezone
+        self.sup = User.objects.create_superuser(username='sup_snap', password='x')
+        self.inicio = timezone.now() - timezone.timedelta(hours=1)
+        self.fin = timezone.now() - timezone.timedelta(minutes=30)
+        self.pedido = Pedido.objects.create(
+            solicitante=self.sup, estado='EN_PREPARACION', picker=self.sup,
+            fecha_inicio_picking=self.inicio, fecha_fin_picking=self.fin,
+        )
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='P1',
+            cantidad_solicitada=5, estado='PENDIENTE',
+        )
+
+    def test_despacho_web_copia_snapshot(self):
+        from .models import Despacho
+        self.client.force_login(self.sup)
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.return_value = {'SKU1': 10}
+            self.client.post(
+                f'/pedidos/{self.pedido.numero_pedido}/despachar/',
+                {'accion': 'despachar', f'cantidad_{self.item.id}': '5'},
+            )
+        despacho = Despacho.objects.get(pedido=self.pedido)
+        self.assertEqual(despacho.picker, self.sup)
+        self.assertEqual(despacho.fecha_inicio_picking, self.inicio)
+        self.assertEqual(despacho.fecha_fin_picking, self.fin)
+
+    def test_despacho_api_copia_snapshot_y_setea_fecha_despacho(self):
+        from rest_framework.test import APIClient
+        from .models import Despacho
+        api = APIClient()
+        api.force_authenticate(user=self.sup)
+        payload = {
+            'pedido_id': self.pedido.numero_pedido,
+            'items': [{'pedido_item_id': self.item.id, 'cantidad_despachada': 5}],
+        }
+        with patch('PedidosAlmacen.api_views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.return_value = {'SKU1': 10}
+            resp = api.post('/api/despachos/crear/', data=payload, format='json')
+        self.assertEqual(resp.status_code, 201)
+        despacho = Despacho.objects.get(pedido=self.pedido)
+        self.assertEqual(despacho.fecha_inicio_picking, self.inicio)
+        self.assertEqual(despacho.fecha_fin_picking, self.fin)
+        # Regresión: la API dejaba fecha_despacho en null
+        self.assertIsNotNone(despacho.fecha_despacho)
+
+
+class ReportePickersViewTest(TestCase):
+    """Estadísticas por picker desde Despacho/DespachoItem, solo grupo Pedidos Picker."""
+
+    URL = '/pedidos/reporte/pickers/'
+
+    def setUp(self):
+        from datetime import datetime
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem
+        self.sup = User.objects.create_superuser(username='sup_rpk', password='x')
+        g_picker, _ = Group.objects.get_or_create(name='Pedidos Picker')
+        self.p1 = User.objects.create_user(username='picker1', password='x')
+        self.p2 = User.objects.create_user(username='picker2', password='x')
+        self.p1.groups.add(g_picker)
+        self.p2.groups.add(g_picker)
+        # Usuario con despachos pero fuera del grupo: no debe aparecer
+        self.ex = User.objects.create_user(username='expicker', password='x')
+
+        self.pedido1 = Pedido.objects.create(solicitante=self.sup, estado='PARCIAL')
+        self.pedido2 = Pedido.objects.create(solicitante=self.sup, estado='DESPACHADO')
+        self.it_sku1 = PedidoItem.objects.create(
+            pedido=self.pedido1, codigo='SKU1', descripcion='P1', cantidad_solicitada=10)
+        self.it_sku2 = PedidoItem.objects.create(
+            pedido=self.pedido1, codigo='SKU2', descripcion='P2', cantidad_solicitada=5)
+        self.it_sku1_p2 = PedidoItem.objects.create(
+            pedido=self.pedido2, codigo='SKU1', descripcion='P1', cantidad_solicitada=2)
+        self.it_sku3 = PedidoItem.objects.create(
+            pedido=self.pedido1, codigo='SKU3', descripcion='P3', cantidad_solicitada=4)
+
+        # p1: dos despachos válidos (10/07 y 15/07)
+        d1 = Despacho.objects.create(
+            pedido=self.pedido1, picker=self.p1, estado='ENVIADO',
+            fecha_despacho=datetime(2026, 7, 10, 10, 0))
+        DespachoItem.objects.create(despacho=d1, pedido_item=self.it_sku1, cantidad_despachada=5)
+        DespachoItem.objects.create(despacho=d1, pedido_item=self.it_sku2, cantidad_despachada=3)
+        # Línea SKU_NO_CONTEMPLADO: sin pedido_item, cuenta en líneas/unidades pero no en productos
+        DespachoItem.objects.create(
+            despacho=d1, pedido_item=None, cantidad_despachada=2,
+            tipo_incidencia='SKU_NO_CONTEMPLADO', codigo_real='SKU9')
+        d2 = Despacho.objects.create(
+            pedido=self.pedido2, picker=self.p1, estado='RECIBIDO',
+            fecha_despacho=datetime(2026, 7, 15, 10, 0))
+        DespachoItem.objects.create(despacho=d2, pedido_item=self.it_sku1_p2, cantidad_despachada=2)
+        # p2: solo un despacho ANULADO (12/07)
+        d3 = Despacho.objects.create(
+            pedido=self.pedido1, picker=self.p2, estado='ANULADO',
+            fecha_despacho=datetime(2026, 7, 12, 10, 0))
+        DespachoItem.objects.create(despacho=d3, pedido_item=self.it_sku3, cantidad_despachada=4)
+        # ex (fuera del grupo): no debe contarse
+        d4 = Despacho.objects.create(
+            pedido=self.pedido1, picker=self.ex, estado='ENVIADO',
+            fecha_despacho=datetime(2026, 7, 11, 10, 0))
+        DespachoItem.objects.create(despacho=d4, pedido_item=self.it_sku1, cantidad_despachada=7)
+
+        self.client.force_login(self.sup)
+
+    def _stats_por_picker(self, resp):
+        return {s['picker__username']: s for s in resp.context['stats']}
+
+    def test_metricas_por_picker(self):
+        resp = self.client.get(self.URL)
+        self.assertEqual(resp.status_code, 200)
+        stats = self._stats_por_picker(resp)
+        self.assertNotIn('expicker', stats)
+
+        p1 = stats['picker1']
+        self.assertEqual(p1['total_despachos'], 2)
+        self.assertEqual(p1['total_pedidos'], 2)
+        self.assertEqual(p1['total_unidades'], 12)   # 5+3+2 (sku extra) + 2
+        self.assertEqual(p1['total_lineas'], 4)
+        self.assertEqual(p1['total_productos'], 2)   # SKU1, SKU2 (el extra no cuenta)
+        self.assertEqual(p1['despachos_anulados'], 0)
+
+        p2 = stats['picker2']
+        self.assertEqual(p2['total_despachos'], 0)
+        self.assertEqual(p2['total_unidades'], 0)
+        self.assertEqual(p2['despachos_anulados'], 1)
+
+    def test_totales_excluyen_anulados_y_no_pickers(self):
+        resp = self.client.get(self.URL)
+        totales = resp.context['totales']
+        self.assertEqual(totales['despachos'], 2)
+        self.assertEqual(totales['pedidos'], 2)
+        self.assertEqual(totales['unidades'], 12)
+        self.assertEqual(totales['anulados'], 1)
+
+    def test_filtro_rango_fechas(self):
+        resp = self.client.get(self.URL, {'fecha_inicio': '2026-07-14', 'fecha_fin': '2026-07-16'})
+        stats = self._stats_por_picker(resp)
+        self.assertEqual(list(stats.keys()), ['picker1'])
+        self.assertEqual(stats['picker1']['total_despachos'], 1)
+        self.assertEqual(stats['picker1']['total_unidades'], 2)
+
+    def test_filtro_por_picker(self):
+        resp = self.client.get(self.URL, {'picker': str(self.p2.id)})
+        stats = self._stats_por_picker(resp)
+        self.assertEqual(list(stats.keys()), ['picker2'])
+
+    def test_template_y_contenido(self):
+        resp = self.client.get(self.URL)
+        self.assertTemplateUsed(resp, 'pedidos-reporte-pickers.html')
+        self.assertContains(resp, 'picker1')
+
+
+class ReportePickersFallbackFechaTest(TestCase):
+    """Despachos legacy con fecha_despacho null usan la fecha del pedido (Coalesce)."""
+
+    URL = '/pedidos/reporte/pickers/'
+
+    def setUp(self):
+        from datetime import datetime
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem
+        self.sup = User.objects.create_superuser(username='sup_rpf', password='x')
+        g_picker, _ = Group.objects.get_or_create(name='Pedidos Picker')
+        self.p1 = User.objects.create_user(username='picker_leg', password='x')
+        self.p1.groups.add(g_picker)
+        pedido = Pedido.objects.create(
+            solicitante=self.sup, estado='DESPACHADO',
+            fecha_despacho=datetime(2026, 7, 5, 9, 0))
+        item = PedidoItem.objects.create(
+            pedido=pedido, codigo='SKU1', descripcion='P1', cantidad_solicitada=3)
+        d = Despacho.objects.create(pedido=pedido, picker=self.p1, estado='ENVIADO', fecha_despacho=None)
+        DespachoItem.objects.create(despacho=d, pedido_item=item, cantidad_despachada=3)
+        self.client.force_login(self.sup)
+
+    def test_dentro_del_rango_aparece(self):
+        resp = self.client.get(self.URL, {'fecha_inicio': '2026-07-01', 'fecha_fin': '2026-07-06'})
+        usernames = [s['picker__username'] for s in resp.context['stats']]
+        self.assertIn('picker_leg', usernames)
+
+    def test_fuera_del_rango_no_aparece(self):
+        resp = self.client.get(self.URL, {'fecha_fin': '2026-07-04'})
+        usernames = [s['picker__username'] for s in resp.context['stats']]
+        self.assertNotIn('picker_leg', usernames)
+
+
+class ReportePickersPermisosTest(TestCase):
+    """Solo el supervisor accede al reporte de pickers."""
+
+    URL = '/pedidos/reporte/pickers/'
+
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        self.supervisor = User.objects.create_user(username='sup_rperm', password='x')
+        g_sup, _ = Group.objects.get_or_create(name='Pedidos Supervisor')
+        self.supervisor.groups.add(g_sup)
+        self.tienda = User.objects.create_user(username='tnd_rperm', password='x')
+        g_t, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.tienda.groups.add(g_t)
+        self.picker = User.objects.create_user(username='pck_rperm', password='x')
+        g_p, _ = Group.objects.get_or_create(name='Pedidos Picker')
+        self.picker.groups.add(g_p)
+
+    def test_supervisor_accede(self):
+        self.client.force_login(self.supervisor)
+        self.assertEqual(self.client.get(self.URL).status_code, 200)
+
+    def test_tienda_redirige(self):
+        self.client.force_login(self.tienda)
+        resp = self.client.get(self.URL)
+        self.assertEqual(resp.status_code, 302)
+
+    def test_picker_redirige(self):
+        self.client.force_login(self.picker)
+        resp = self.client.get(self.URL)
+        self.assertEqual(resp.status_code, 302)
+
+
+class ReportePickersPdfTest(TestCase):
+    """El export PDF del reporte de pickers responde un PDF adjunto."""
+
+    URL = '/pedidos/reporte/pickers/pdf/'
+
+    def setUp(self):
+        from datetime import datetime
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem
+        self.sup = User.objects.create_superuser(username='sup_rpdf', password='x')
+        g_picker, _ = Group.objects.get_or_create(name='Pedidos Picker')
+        p1 = User.objects.create_user(username='picker_pdf', password='x')
+        p1.groups.add(g_picker)
+        pedido = Pedido.objects.create(solicitante=self.sup, estado='DESPACHADO')
+        item = PedidoItem.objects.create(
+            pedido=pedido, codigo='SKU1', descripcion='P1', cantidad_solicitada=3)
+        d = Despacho.objects.create(
+            pedido=pedido, picker=p1, estado='ENVIADO',
+            fecha_despacho=datetime(2026, 7, 10, 10, 0))
+        DespachoItem.objects.create(despacho=d, pedido_item=item, cantidad_despachada=3)
+        self.client.force_login(self.sup)
+
+    def test_devuelve_pdf(self):
+        resp = self.client.get(self.URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp['Content-Type'], 'application/pdf')
+        self.assertIn('estadisticas_pickers_', resp['Content-Disposition'])
+        self.assertTrue(resp.content.startswith(b'%PDF'))

@@ -144,7 +144,9 @@ def api_preparar_pedido(request, pk):
                 status=409,
             )
         pedido.estado = 'PICKING'
-        pedido.save(update_fields=['estado'])
+        pedido.fecha_inicio_picking = timezone.now()
+        pedido.fecha_fin_picking = None
+        pedido.save(update_fields=['estado', 'fecha_inicio_picking', 'fecha_fin_picking'])
 
     elif accion == 'finalizar':
         cantidades = request.data.get('cantidades', {})
@@ -154,8 +156,10 @@ def api_preparar_pedido(request, pk):
             if cantidad is not None:
                 item.cantidad_preparada = int(cantidad)
                 item.save(update_fields=['cantidad_preparada'])
+        if pedido.estado == 'PICKING':
+            pedido.fecha_fin_picking = timezone.now()
         pedido.estado = 'EN_PREPARACION'
-        pedido.save(update_fields=['estado'])
+        pedido.save(update_fields=['estado', 'fecha_fin_picking'])
 
     else:
         return Response(
@@ -238,7 +242,10 @@ def api_crear_despacho(request):
     despacho = Despacho.objects.create(
         pedido=pedido,
         picker=pedido.picker or request.user,
+        fecha_inicio_picking=pedido.fecha_inicio_picking,
+        fecha_fin_picking=pedido.fecha_fin_picking,
         estado='PENDIENTE_APROBACION',
+        fecha_despacho=timezone.now(),
         observaciones=data.get('observaciones', ''),
     )
 
