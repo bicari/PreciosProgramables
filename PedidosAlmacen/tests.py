@@ -2255,3 +2255,52 @@ class PickerReceptorComboTest(TestCase):
         resp = self.client.get('/pedidos/pendientes-count/')
         # 1 despacho ENVIADO de su depósito + 1 pedido en PICKING asignado a él.
         self.assertIn('>2<', resp.content.decode())
+
+
+class NotificacionesDesactivadasTest(TestCase):
+    """Con PEDIDOS_ENVIAR_CORREOS=False (default) la app no envía correos;
+    con el flag activo el envío sigue funcionando (camino de reactivación)."""
+
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from users.models import User
+        from .models import Pedido
+        grupo_tienda, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.tienda = User.objects.create_user(
+            username='notif_tienda', password='x', email='tienda@test.local')
+        self.tienda.groups.add(grupo_tienda)
+        self.almacen = User.objects.create_user(username='notif_almacen', password='x')
+        self.pedido = Pedido.objects.create(
+            solicitante=self.tienda, despachador=self.almacen, estado='DESPACHADO')
+
+    def test_flag_apagado_por_defecto(self):
+        from django.conf import settings
+        self.assertFalse(settings.PEDIDOS_ENVIAR_CORREOS)
+
+    def test_nuevo_pedido_no_envia_correo(self):
+        from django.core import mail
+        from .notifications import notificar_nuevo_pedido
+        notificar_nuevo_pedido(self.pedido)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_despacho_no_envia_correo(self):
+        from django.core import mail
+        from .notifications import notificar_despacho
+        notificar_despacho(self.pedido)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_despacho_parcial_no_envia_correo(self):
+        from django.core import mail
+        from .notifications import notificar_despacho_parcial
+        notificar_despacho_parcial(self.pedido)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_con_flag_activo_el_despacho_si_envia(self):
+        from django.core import mail
+        from django.test import override_settings
+        from .notifications import notificar_despacho
+        with override_settings(PEDIDOS_ENVIAR_CORREOS=True):
+            notificar_despacho(self.pedido)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('Despachado', mail.outbox[0].subject)
+        self.assertIn('tienda@test.local', mail.outbox[0].to)

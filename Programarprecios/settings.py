@@ -266,6 +266,8 @@ EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
 EMAIL_USE_TLS = config('EMAIL_USE_TLS')
 EMAIL_USERS = config('EMAIL_USERS').split(',')
 EMAIL_RECEPCIONES = config('EMAIL_RECEPCIONES').split(',')
+# Interruptor de los correos de PedidosAlmacen (nuevo pedido y despachos).
+PEDIDOS_ENVIAR_CORREOS = config('PEDIDOS_ENVIAR_CORREOS', default=False, cast=bool)
 
 #CONFIGURACION ALMACEN DEFECTO X EXCESO DE PRODUCTOS 
 ALMACEN_PPAL = config('ALMACEN')
