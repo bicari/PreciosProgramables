@@ -2772,13 +2772,17 @@ class CerrarPedidoVistaTest(TestCase):
         self.assertEqual(self.pedido.estado, 'CERRADO')
 
     def test_tienda_no_puede_cerrar(self):
-        self._cerrar(self.tienda)
+        resp = self._cerrar(self.tienda)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn('dashboard', resp.url)
         self._refrescar()
         self.assertEqual(self.pedido.estado, 'PARCIAL')
         self.assertEqual(self.item_parcial.cantidad_back_order, 4)
 
     def test_picker_no_puede_cerrar(self):
-        self._cerrar(self.picker)
+        resp = self._cerrar(self.picker)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn('dashboard', resp.url)
         self._refrescar()
         self.assertEqual(self.pedido.estado, 'PARCIAL')
 
@@ -2878,4 +2882,6 @@ class CerrarPedidoUITest(TestCase):
         self.assertContains(resp, 'Pedido cerrado')
         self.assertContains(resp, 'proveedor descontinuó el producto')
         self.assertContains(resp, self.supervisor.username)
+        # Badge del item cerrado (búsqueda sin html=True por problemas de parsing)
+        self.assertContains(resp, 'badge bg-secondary">Cerrado</span>')
         self.assertNotContains(resp, 'modalCerrarPedido')
