@@ -37,6 +37,9 @@ def _emails_por_grupos(*nombres_grupo):
 
 
 def notificar_nuevo_pedido(pedido):
+    if not settings.PEDIDOS_ENVIAR_CORREOS:
+        logger.info(f'Correos de pedidos desactivados; se omite notificación del pedido #{pedido.numero_pedido}')
+        return
     try:
         html_str = render_to_string('pedido-mail.html', context={
             'titulo': 'Nuevo Pedido de Tienda',
@@ -59,6 +62,9 @@ def notificar_nuevo_pedido(pedido):
 
 
 def notificar_despacho(pedido):
+    if not settings.PEDIDOS_ENVIAR_CORREOS:
+        logger.info(f'Correos de pedidos desactivados; se omite notificación del pedido #{pedido.numero_pedido}')
+        return
     try:
         html_str = render_to_string('pedido-mail.html', context={
             'titulo': 'Pedido Despachado',
@@ -81,6 +87,9 @@ def notificar_despacho(pedido):
 
 
 def notificar_despacho_parcial(pedido):
+    if not settings.PEDIDOS_ENVIAR_CORREOS:
+        logger.info(f'Correos de pedidos desactivados; se omite notificación del pedido #{pedido.numero_pedido}')
+        return
     try:
         items_despachados = pedido.items.filter(estado='DESPACHADO')
         items_back_order = pedido.items.filter(estado='BACK_ORDER')
