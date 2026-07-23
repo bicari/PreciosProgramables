@@ -2688,3 +2688,139 @@ class CierrePedidoModeloTest(TestCase):
         self.assertIn(
             ('CERRADO', 'Cerrado'), PedidoItem.ESTADO_ITEM_CHOICES,
         )
+
+
+class CerrarPedidoVistaTest(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from users.models import User
+        from .models import Pedido, PedidoItem
+
+        g_sup, _ = Group.objects.get_or_create(name='Pedidos Supervisor')
+        g_alm, _ = Group.objects.get_or_create(name='Pedidos Almacen')
+        g_tnd, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        g_pick, _ = Group.objects.get_or_create(name='Pedidos Picker')
+
+        self.supervisor = User.objects.create_user(username='sup_cierre', password='x')
+        self.supervisor.groups.add(g_sup)
+        self.almacen = User.objects.create_user(username='alm_cierre', password='x')
+        self.almacen.groups.add(g_alm)
+        self.tienda = User.objects.create_user(username='tnd_cierre', password='x')
+        self.tienda.groups.add(g_tnd)
+        self.picker = User.objects.create_user(username='pick_cierre', password='x')
+        self.picker.groups.add(g_pick)
+        self.superuser = User.objects.create_superuser(username='root_cierre', password='x')
+
+        self.pedido = Pedido.objects.create(solicitante=self.tienda, estado='PARCIAL')
+        self.item_parcial = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='A1', descripcion='Prod A',
+            cantidad_solicitada=10, cantidad_despachada=6,
+            cantidad_back_order=4, estado='PARCIAL',
+        )
+        self.item_bo = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='B2', descripcion='Prod B',
+            cantidad_solicitada=5, cantidad_despachada=0,
+            cantidad_back_order=5, estado='BACK_ORDER',
+        )
+        self.item_recibido = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='C3', descripcion='Prod C',
+            cantidad_solicitada=2, cantidad_despachada=2,
+            cantidad_back_order=0, cantidad_recibida=2, estado='RECIBIDO',
+        )
+
+    def _cerrar(self, user, motivo='proveedor sin stock'):
+        self.client.force_login(user)
+        return self.client.post(
+            f'/pedidos/{self.pedido.numero_pedido}/cerrar/',
+            {'motivo': motivo},
+        )
+
+    def _refrescar(self):
+        self.pedido.refresh_from_db()
+        self.item_parcial.refresh_from_db()
+        self.item_bo.refresh_from_db()
+        self.item_recibido.refresh_from_db()
+
+    def test_supervisor_cierra_pedido_parcial(self):
+        resp = self._cerrar(self.supervisor)
+        self.assertRedirects(
+            resp, f'/pedidos/{self.pedido.numero_pedido}/',
+            fetch_redirect_response=False,
+        )
+        self._refrescar()
+        self.assertEqual(self.pedido.estado, 'CERRADO')
+        self.assertEqual(self.pedido.cerrado_por, self.supervisor)
+        self.assertEqual(self.pedido.motivo_cierre, 'proveedor sin stock')
+        self.assertIsNotNone(self.pedido.fecha_cierre)
+        self.assertEqual(self.item_parcial.estado, 'CERRADO')
+        self.assertEqual(self.item_parcial.cantidad_back_order, 0)
+        self.assertEqual(self.item_bo.estado, 'CERRADO')
+        self.assertEqual(self.item_bo.cantidad_back_order, 0)
+        # El item ya recibido no se toca
+        self.assertEqual(self.item_recibido.estado, 'RECIBIDO')
+        self.assertEqual(self.item_recibido.cantidad_recibida, 2)
+
+    def test_almacen_puede_cerrar(self):
+        self._cerrar(self.almacen)
+        self._refrescar()
+        self.assertEqual(self.pedido.estado, 'CERRADO')
+        self.assertEqual(self.pedido.cerrado_por, self.almacen)
+
+    def test_superuser_puede_cerrar(self):
+        self._cerrar(self.superuser)
+        self._refrescar()
+        self.assertEqual(self.pedido.estado, 'CERRADO')
+
+    def test_tienda_no_puede_cerrar(self):
+        self._cerrar(self.tienda)
+        self._refrescar()
+        self.assertEqual(self.pedido.estado, 'PARCIAL')
+        self.assertEqual(self.item_parcial.cantidad_back_order, 4)
+
+    def test_picker_no_puede_cerrar(self):
+        self._cerrar(self.picker)
+        self._refrescar()
+        self.assertEqual(self.pedido.estado, 'PARCIAL')
+
+    def test_motivo_obligatorio(self):
+        self._cerrar(self.supervisor, motivo='   ')
+        self._refrescar()
+        self.assertEqual(self.pedido.estado, 'PARCIAL')
+        self.assertEqual(self.item_parcial.cantidad_back_order, 4)
+
+    def test_get_no_cierra(self):
+        self.client.force_login(self.supervisor)
+        self.client.get(f'/pedidos/{self.pedido.numero_pedido}/cerrar/')
+        self._refrescar()
+        self.assertEqual(self.pedido.estado, 'PARCIAL')
+
+    def test_rechaza_pedido_no_parcial(self):
+        for estado in ('PENDIENTE', 'ASIGNADO', 'PICKING', 'EN_PREPARACION',
+                       'DESPACHADO', 'RECIBIDO', 'CERRADO', 'ANULADO'):
+            self.pedido.estado = estado
+            self.pedido.save()
+            self._cerrar(self.supervisor)
+            self.pedido.refresh_from_db()
+            self.assertEqual(self.pedido.estado, estado)
+        self.item_parcial.refresh_from_db()
+        self.assertEqual(self.item_parcial.cantidad_back_order, 4)
+
+    def test_despacho_pendiente_bloquea_cierre(self):
+        from .models import Despacho
+        for estado_despacho in ('ENVIADO', 'PENDIENTE_APROBACION', 'PREPARANDO'):
+            despacho = Despacho.objects.create(
+                pedido=self.pedido, estado=estado_despacho,
+            )
+            self._cerrar(self.supervisor)
+            self._refrescar()
+            self.assertEqual(self.pedido.estado, 'PARCIAL',
+                             f'despacho {estado_despacho} debería bloquear')
+            despacho.delete()
+
+    def test_despacho_finalizado_no_bloquea(self):
+        from .models import Despacho
+        for estado_despacho in ('RECIBIDO', 'PARCIAL', 'ANULADO'):
+            Despacho.objects.create(pedido=self.pedido, estado=estado_despacho)
+        self._cerrar(self.supervisor)
+        self._refrescar()
+        self.assertEqual(self.pedido.estado, 'CERRADO')

@@ -91,6 +91,11 @@ def is_pedidos_supervisor(user):
     return user.groups.filter(name=GROUP_SUPERVISOR).exists() or user.is_superuser
 
 
+def is_pedidos_supervisor_o_almacen(user):
+    """Puede cerrar pedidos: Supervisor, Almacén o superuser."""
+    return is_pedidos_supervisor(user) or is_pedidos_almacen(user)
+
+
 def is_pedidos_picker(user):
     return user.groups.filter(name=GROUP_PICKER).exists() or user.is_superuser
 
@@ -397,6 +402,18 @@ def detalle_pedido(request, pk):
     })
 
 
+def _puede_cerrar_pedido(pedido: Pedido) -> bool:
+    """True si el pedido es elegible para cierre (no chequea permisos).
+
+    Elegible: estado PARCIAL y sin despachos aún no finalizados.
+    """
+    if pedido.estado != 'PARCIAL':
+        return False
+    return not pedido.despachos.filter(
+        estado__in=('ENVIADO', 'PENDIENTE_APROBACION', 'PREPARANDO')
+    ).exists()
+
+
 @login_required(login_url='/login/')
 @user_passes_test(is_pedidos_supervisor, login_url='dashboard')
 def anular_pedido(request, pk):
@@ -423,6 +440,47 @@ def anular_pedido(request, pk):
         pedido.numero_pedido, request.user.username, motivo,
     )
     messages.success(request, f'Pedido #{pedido.numero_pedido} anulado')
+    return redirect('pedidos-detalle', pk=pk)
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor_o_almacen, login_url='dashboard')
+def cerrar_pedido(request, pk):
+    """Cierra un pedido PARCIAL cuyos back orders no se van a completar.
+
+    Deja cantidad_back_order = 0 en los items pendientes (PARCIAL/BACK_ORDER),
+    los marca CERRADO y registra auditoría en el pedido.
+    """
+    if request.method != 'POST':
+        return redirect('pedidos-detalle', pk=pk)
+    motivo = request.POST.get('motivo', '').strip()
+    if not motivo:
+        messages.error(request, 'Debes indicar un motivo para cerrar el pedido')
+        return redirect('pedidos-detalle', pk=pk)
+    with transaction.atomic():
+        pedido = get_object_or_404(
+            Pedido.objects.select_for_update(), numero_pedido=pk,
+        )
+        if not _puede_cerrar_pedido(pedido):
+            messages.error(
+                request,
+                'Este pedido no se puede cerrar: debe estar en estado Parcial '
+                'y no tener despachos pendientes',
+            )
+            return redirect('pedidos-detalle', pk=pk)
+        pedido.items.filter(estado__in=('PARCIAL', 'BACK_ORDER')).update(
+            cantidad_back_order=0, estado='CERRADO',
+        )
+        pedido.estado = 'CERRADO'
+        pedido.cerrado_por = request.user
+        pedido.fecha_cierre = timezone.now()
+        pedido.motivo_cierre = motivo
+        pedido.save()
+    logger.info(
+        'Pedido #%s cerrado por %s. Motivo: %s',
+        pedido.numero_pedido, request.user.username, motivo,
+    )
+    messages.success(request, f'Pedido #{pedido.numero_pedido} cerrado')
     return redirect('pedidos-detalle', pk=pk)
 
 
