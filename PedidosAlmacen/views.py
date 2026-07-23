@@ -397,6 +397,7 @@ def detalle_pedido(request, pk):
         'puede_imprimir_despacho': request.user.is_superuser or is_pedidos_almacen(request.user) or is_pedidos_supervisor(request.user),
         'es_superuser': request.user.is_superuser,
         'es_picker_asignado': es_picker_asignado,
+        'puede_cerrar': (es_supervisor or es_despachador) and _puede_cerrar_pedido(pedido),
         'vistas_pdf': vistas_pdf,
         'volver_url': request.session.get('pedidos_volver_url') or reverse('pedidos-lista'),
     })

@@ -2824,3 +2824,58 @@ class CerrarPedidoVistaTest(TestCase):
         self._cerrar(self.supervisor)
         self._refrescar()
         self.assertEqual(self.pedido.estado, 'CERRADO')
+
+
+class CerrarPedidoUITest(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from users.models import User
+        from .models import Pedido, PedidoItem
+
+        g_sup, _ = Group.objects.get_or_create(name='Pedidos Supervisor')
+        g_tnd, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.supervisor = User.objects.create_user(username='sup_ui_c', password='x')
+        self.supervisor.groups.add(g_sup)
+        self.tienda = User.objects.create_user(username='tnd_ui_c', password='x')
+        self.tienda.groups.add(g_tnd)
+
+        self.pedido = Pedido.objects.create(solicitante=self.tienda, estado='PARCIAL')
+        PedidoItem.objects.create(
+            pedido=self.pedido, codigo='A1', descripcion='Prod A',
+            cantidad_solicitada=10, cantidad_despachada=6,
+            cantidad_back_order=4, estado='PARCIAL',
+        )
+
+    def _detalle(self, user):
+        self.client.force_login(user)
+        return self.client.get(f'/pedidos/{self.pedido.numero_pedido}/')
+
+    def test_supervisor_ve_boton_cerrar_en_pedido_elegible(self):
+        resp = self._detalle(self.supervisor)
+        self.assertContains(resp, 'modalCerrarPedido')
+        self.assertContains(resp, f'/pedidos/{self.pedido.numero_pedido}/cerrar/')
+
+    def test_tienda_no_ve_boton_cerrar(self):
+        resp = self._detalle(self.tienda)
+        self.assertNotContains(resp, 'modalCerrarPedido')
+
+    def test_pedido_no_elegible_no_muestra_boton(self):
+        from .models import Despacho
+        Despacho.objects.create(pedido=self.pedido, estado='ENVIADO')
+        resp = self._detalle(self.supervisor)
+        self.assertNotContains(resp, 'modalCerrarPedido')
+
+    def test_pedido_cerrado_muestra_auditoria_y_badge_item(self):
+        from django.utils import timezone
+        self.pedido.estado = 'CERRADO'
+        self.pedido.cerrado_por = self.supervisor
+        self.pedido.fecha_cierre = timezone.now()
+        self.pedido.motivo_cierre = 'proveedor descontinuó el producto'
+        self.pedido.save()
+        self.pedido.items.update(estado='CERRADO', cantidad_back_order=0)
+
+        resp = self._detalle(self.supervisor)
+        self.assertContains(resp, 'Pedido cerrado')
+        self.assertContains(resp, 'proveedor descontinuó el producto')
+        self.assertContains(resp, self.supervisor.username)
+        self.assertNotContains(resp, 'modalCerrarPedido')

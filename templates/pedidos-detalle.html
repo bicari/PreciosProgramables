@@ -76,6 +76,11 @@
             <i class="fas fa-ban"></i> <span class="d-none d-sm-inline">Anular</span>
         </button>
         {% endif %}
+        {% if puede_cerrar %}
+        <button type="button" class="btn btn-sm btn-dark" data-bs-toggle="modal" data-bs-target="#modalCerrarPedido" title="Cerrar pedido">
+            <i class="fas fa-lock"></i> <span class="d-none d-sm-inline">Cerrar</span>
+        </button>
+        {% endif %}
     </div>
 </div>
 
@@ -94,6 +99,14 @@
     {% if pedido.estado_anterior %}(estado previo: {{ pedido.estado_anterior }}){% endif %}<br>
     <strong>Motivo:</strong> {{ pedido.motivo_anulacion }}<br>
     <small>Por {{ pedido.anulado_por.username|default:"-" }} el {{ pedido.fecha_anulacion|date:"d/m/Y H:i" }}</small>
+</div>
+{% endif %}
+
+{% if pedido.estado == 'CERRADO' and pedido.fecha_cierre %}
+<div class="alert alert-secondary mb-3">
+    <strong><i class="fas fa-lock"></i> Pedido cerrado</strong> — los back orders pendientes quedaron en 0<br>
+    <strong>Motivo:</strong> {{ pedido.motivo_cierre }}<br>
+    <small>Por {{ pedido.cerrado_por.username|default:"-" }} el {{ pedido.fecha_cierre|date:"d/m/Y H:i" }}</small>
 </div>
 {% endif %}
 
@@ -235,6 +248,7 @@
                         {% elif item.estado == 'BACK_ORDER' %}<span class="badge bg-danger">Back Order</span>
                         {% elif item.estado == 'INCIDENCIA' %}<span class="badge bg-dark">Incidencia</span>
                         {% elif item.estado == 'INCIDENCIA_RESUELTA' %}<span class="badge" style="background-color:#20c997;">Inc. Resuelta</span>
+                        {% elif item.estado == 'CERRADO' %}<span class="badge bg-secondary">Cerrado</span>
                         {% endif %}
                     </td>
                     <td data-label="Observación"><small class="text-muted">{{ item.observacion|default:"-" }}</small></td>
@@ -499,6 +513,31 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
           <button type="submit" class="btn btn-danger">Anular pedido</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% if puede_cerrar %}
+<div class="modal fade" id="modalCerrarPedido" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <form method="post" action="{% url 'pedidos-cerrar' pedido.numero_pedido %}">
+      {% csrf_token %}
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Cerrar pedido #{{ pedido.numero_pedido }}</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-secondary"><i class="fas fa-exclamation-triangle"></i> Los back orders pendientes quedarán en 0, los items incompletos pasarán a Cerrado y el pedido saldrá de las listas activas. Esta acción no se puede deshacer.</p>
+          <label class="form-label fw-bold">Motivo del cierre <span class="text-danger">*</span></label>
+          <textarea name="motivo" class="form-control" rows="3" required></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-dark">Cerrar pedido</button>
         </div>
       </div>
     </form>
