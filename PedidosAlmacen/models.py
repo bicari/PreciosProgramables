@@ -54,6 +54,13 @@ class Pedido(models.Model):
     )
     fecha_anulacion = models.DateTimeField(null=True, blank=True)
     estado_anterior = models.CharField(max_length=20, blank=True, default='')
+    # Cierre administrativo de pedidos PARCIAL con back orders incompletables.
+    cerrado_por = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='pedidos_cerrados',
+    )
+    fecha_cierre = models.DateTimeField(null=True, blank=True)
+    motivo_cierre = models.TextField(blank=True, default='')
 
     def __str__(self):
         return f"Pedido #{self.numero_pedido} - {self.solicitante.username}"
@@ -68,6 +75,7 @@ class PedidoItem(models.Model):
         ('BACK_ORDER', 'Back Order'),
         ('INCIDENCIA', 'Incidencia'),
         ('INCIDENCIA_RESUELTA', 'Incidencia Resuelta'),
+        ('CERRADO', 'Cerrado'),
     ]
     pedido = models.ForeignKey(Pedido, on_delete=models.CASCADE, related_name='items')
     codigo = models.CharField(max_length=50)

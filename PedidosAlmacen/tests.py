@@ -2659,3 +2659,32 @@ class ReportePickersPdfTest(TestCase):
         self.assertEqual(resp['Content-Type'], 'application/pdf')
         self.assertIn('estadisticas_pickers_', resp['Content-Disposition'])
         self.assertTrue(resp.content.startswith(b'%PDF'))
+
+
+class CierrePedidoModeloTest(TestCase):
+    def test_pedido_tiene_campos_de_cierre(self):
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        from django.utils import timezone
+
+        user = User.objects.create_user(username='mod_cierre', password='x')
+        pedido = Pedido.objects.create(
+            solicitante=user, estado='PARCIAL',
+            cerrado_por=user, fecha_cierre=timezone.now(),
+            motivo_cierre='prueba de cierre',
+        )
+        item = PedidoItem.objects.create(
+            pedido=pedido, codigo='X1', descripcion='Prod X',
+            cantidad_solicitada=3, estado='CERRADO',
+        )
+
+        pedido.refresh_from_db()
+        item.refresh_from_db()
+        self.assertEqual(pedido.cerrado_por, user)
+        self.assertEqual(pedido.motivo_cierre, 'prueba de cierre')
+        self.assertIsNotNone(pedido.fecha_cierre)
+        self.assertEqual(item.estado, 'CERRADO')
+        self.assertIn(pedido, user.pedidos_cerrados.all())
+        self.assertIn(
+            ('CERRADO', 'Cerrado'), PedidoItem.ESTADO_ITEM_CHOICES,
+        )
