@@ -14,6 +14,10 @@
         </div>
     </div>
     <div class="pd-header-actions">
+        <a href="{% url 'pedidos-reporte-pickers' %}?fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}"
+           class="btn btn-sm btn-outline-light">
+            <i class="fas fa-people-carry-box"></i> <span class="d-none d-sm-inline">Pickers</span>
+        </a>
         <a href="{% url 'pedidos-reporte-pdf' %}?fecha_inicio={{ fecha_inicio }}&fecha_fin={{ fecha_fin }}&categoria={{ categoria_filtro }}&condicion={{ condicion_filtro }}"
            class="btn btn-sm btn-danger">
             <i class="fas fa-file-pdf"></i> <span class="d-none d-sm-inline">Exportar PDF</span>

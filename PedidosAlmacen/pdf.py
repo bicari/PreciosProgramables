@@ -275,6 +275,128 @@ def generar_reporte_pedidos_pdf(ctx: dict) -> bytes:
     return pdf_bytes
 
 
+def generar_reporte_pickers_pdf(ctx: dict) -> bytes:
+    """
+    Genera el PDF del reporte de estadisticas por picker.
+
+    Args:
+        ctx: Diccionario con los datos calculados en _estadisticas_pickers.
+            Claves requeridas: stats (lista de dicts por picker), totales,
+            fecha_inicio, fecha_fin. Opcional: picker_filtro_nombre.
+
+    Returns:
+        Bytes del PDF generado.
+    """
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=LETTER,
+        leftMargin=35, rightMargin=35, topMargin=25, bottomMargin=25,
+    )
+    elements = []
+
+    # ---- Encabezado ----
+    st_titulo = ParagraphStyle("t", fontSize=16, textColor=_AZUL_OSCURO,
+                                spaceAfter=4, alignment=TA_CENTER, fontName="Helvetica-Bold")
+    st_sub = ParagraphStyle("s", fontSize=9, textColor=colors.grey,
+                             spaceAfter=2, alignment=TA_CENTER)
+
+    elements.append(Paragraph("Estadisticas por Picker", st_titulo))
+
+    filtros = []
+    if ctx.get("fecha_inicio"):
+        filtros.append(f"Desde: {ctx['fecha_inicio']}")
+    if ctx.get("fecha_fin"):
+        filtros.append(f"Hasta: {ctx['fecha_fin']}")
+    if ctx.get("picker_filtro_nombre"):
+        filtros.append(f"Picker: {ctx['picker_filtro_nombre']}")
+    if filtros:
+        elements.append(Paragraph(" | ".join(filtros), st_sub))
+    elements.append(Paragraph(f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}", st_sub))
+    elements.append(Spacer(1, 14))
+
+    # ---- Fila de KPIs ----
+    totales = ctx["totales"]
+    anulados_color = _ROJO if totales["anulados"] else colors.grey
+    kpis = Table([[
+        _kpi_card("Despachos", str(totales["despachos"]), _AZUL_CLARO),
+        _kpi_card("Pedidos", str(totales["pedidos"]), _AZUL_OSCURO),
+        _kpi_card("Uds. Pickeadas", str(totales["unidades"]), _VERDE),
+        _kpi_card("Lineas", str(totales["lineas"]), _MORADO),
+        _kpi_card("Desp. Anulados", str(totales["anulados"]), anulados_color),
+    ]], colWidths=[108, 108, 108, 108, 108])
+    kpis.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(kpis)
+    elements.append(Spacer(1, 16))
+
+    # ---- Tabla por picker ----
+    elements.append(_seccion_header("Detalle por Picker", 542))
+
+    st_cell = ParagraphStyle("pc", fontSize=8, leading=10)
+    st_head = ParagraphStyle("ph", fontSize=8, leading=10, fontName="Helvetica-Bold")
+    data = [[
+        Paragraph("Picker", st_head), Paragraph("Despachos", st_head),
+        Paragraph("Pedidos", st_head), Paragraph("Lineas", st_head),
+        Paragraph("Productos", st_head), Paragraph("Uds. Pickeadas", st_head),
+        Paragraph("Anulados", st_head),
+    ]]
+    for s in ctx["stats"]:
+        data.append([
+            Paragraph(s["picker__username"], st_cell),
+            str(s["total_despachos"]), str(s["total_pedidos"]),
+            str(s["total_lineas"]), str(s["total_productos"]),
+            str(s["total_unidades"]), str(s["despachos_anulados"]),
+        ])
+    if not ctx["stats"]:
+        data.append([Paragraph("Sin datos", st_cell), "-", "-", "-", "-", "-", "-"])
+    else:
+        data.append([
+            Paragraph("Totales", st_head),
+            str(totales["despachos"]), str(totales["pedidos"]),
+            str(totales["lineas"]), "", str(totales["unidades"]),
+            str(totales["anulados"]),
+        ])
+
+    tabla = Table(data, colWidths=[182, 60, 60, 60, 60, 60, 60], repeatRows=1)
+    estilo = [
+        ("BACKGROUND", (0, 0), (-1, 0), _GRIS_CLARO),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _GRIS_CLARO]),
+        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+    ]
+    if ctx["stats"]:
+        estilo += [
+            ("BACKGROUND", (0, -1), (-1, -1), _GRIS_CLARO),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("LINEABOVE", (0, -1), (-1, -1), 1, _AZUL_OSCURO),
+        ]
+    tabla.setStyle(TableStyle(estilo))
+    elements.append(tabla)
+
+    elements.append(Spacer(1, 10))
+    st_nota = ParagraphStyle("nt", fontSize=7, textColor=colors.grey, leading=9)
+    elements.append(Paragraph(
+        "Un pedido atendido por varios pickers cuenta para cada uno; el total de pedidos no duplica. "
+        "Las metricas excluyen despachos anulados (columna aparte) y solo incluyen usuarios del grupo Pedidos Picker. "
+        "Los SKU no contemplados cuentan en lineas y unidades, pero no en productos distintos.",
+        st_nota,
+    ))
+
+    doc.build(elements)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes
+
 
 def generar_pedido_pdf(pedido, items, vista: str = "todos", mostrar_cantidades: bool = False) -> bytes:
     """

@@ -7,6 +7,7 @@ from django.contrib import messages
 from django.db import transaction
 from django.db.models import Sum, Count, IntegerField, Q, Max
 from django.db.models import Case, When, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from datetime import datetime, timedelta, time as dtime
 from .models import (
@@ -16,7 +17,7 @@ from .models import (
 from .forms import PedidoForm
 from .dbisam import PedidosDBISAM, DEPOSITO_ALMACEN
 from .notifications import notificar_nuevo_pedido, notificar_despacho, notificar_despacho_parcial
-from .pdf import generar_reporte_pedidos_pdf, generar_pedido_pdf, generar_despacho_pdf
+from .pdf import generar_reporte_pedidos_pdf, generar_reporte_pickers_pdf, generar_pedido_pdf, generar_despacho_pdf
 import logging
 import json
 
@@ -497,8 +498,10 @@ def despachar_pedido(request, pk):
         despacho = Despacho.objects.create(
             pedido=pedido,
             picker=pedido.picker or request.user,
+            fecha_inicio_picking=pedido.fecha_inicio_picking,
+            fecha_fin_picking=pedido.fecha_fin_picking,
             estado='PENDIENTE_APROBACION',
-            fecha_despacho=datetime.now(),
+            fecha_despacho=timezone.now(),
         )
 
         ids_despachados = set()
@@ -592,6 +595,8 @@ def desasignar_picker(request, pk):
     picker_anterior = pedido.picker.username if pedido.picker else '—'
     pedido.picker = None
     pedido.fecha_asignacion = None
+    pedido.fecha_inicio_picking = None
+    pedido.fecha_fin_picking = None
     tiene_bo = pedido.items.filter(estado='BACK_ORDER').exists()
     pedido.estado = 'PARCIAL' if tiene_bo else 'PENDIENTE'
     pedido.save()
@@ -621,6 +626,8 @@ def preparar_pedido(request, pk):
             messages.warning(request, 'Ya tienes otro pedido en Picking. Finalízalo antes de iniciar este.')
             return redirect('pedidos-lista')
         pedido.estado = 'PICKING'
+        pedido.fecha_inicio_picking = timezone.now()
+        pedido.fecha_fin_picking = None
         pedido.save()
 
     items = pedido.items.filter(estado__in=['PENDIENTE', 'BACK_ORDER', 'PARCIAL'])
@@ -640,6 +647,8 @@ def preparar_pedido(request, pk):
             except ValueError:
                 item.cantidad_preparada = 0
             item.save()
+        if pedido.estado == 'PICKING':
+            pedido.fecha_fin_picking = timezone.now()
         pedido.estado = 'EN_PREPARACION'
         pedido.save()
         messages.success(request, f'Pedido #{pk} marcado como En Preparación')
@@ -1560,6 +1569,103 @@ def exportar_reporte_pdf(request):
 
     pdf_bytes = generar_reporte_pedidos_pdf(ctx)
     nombre_archivo = f"reporte_pedidos_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
+    return response
+
+
+def _estadisticas_pickers(fecha_inicio: str, fecha_fin: str, picker_id: str) -> dict:
+    """
+    Estadísticas de picking agregadas por picker sobre Despacho/DespachoItem.
+
+    Solo cuenta despachos cuyo picker pertenece al grupo Pedidos Picker
+    (los creados sin picker asignado quedan atribuidos al despachador y
+    se excluyen). Los despachos ANULADOS se reportan en columna aparte
+    y quedan fuera de las métricas netas.
+
+    Args:
+        fecha_inicio: Fecha 'YYYY-MM-DD' o '' (sin filtro inferior).
+        fecha_fin: Fecha 'YYYY-MM-DD' o '' (sin filtro superior).
+        picker_id: PK del picker a filtrar o '' (todos).
+
+    Returns:
+        {'stats': [dict por picker], 'totales': dict global}
+    """
+    no_anulado = ~Q(estado='ANULADO')
+    qs = Despacho.objects.filter(
+        picker__isnull=False, picker__groups__name=GROUP_PICKER,
+    ).annotate(
+        # Despachos legacy creados por la API quedaron con fecha_despacho null
+        fecha_ref=Coalesce('fecha_despacho', 'pedido__fecha_despacho', 'pedido__fecha_creacion'),
+    )
+    for valor, lookup in ((fecha_inicio, 'fecha_ref__date__gte'), (fecha_fin, 'fecha_ref__date__lte')):
+        if valor:
+            try:
+                qs = qs.filter(**{lookup: datetime.strptime(valor, '%Y-%m-%d').date()})
+            except ValueError:
+                pass
+    if picker_id:
+        try:
+            qs = qs.filter(picker_id=int(picker_id))
+        except ValueError:
+            pass
+
+    stats = list(
+        qs.values('picker_id', 'picker__username')
+        .annotate(
+            total_despachos=Count('numero_despacho', filter=no_anulado, distinct=True),
+            total_pedidos=Count('pedido_id', filter=no_anulado, distinct=True),
+            total_unidades=Coalesce(Sum('items__cantidad_despachada', filter=no_anulado), 0),
+            total_lineas=Count('items__id', filter=no_anulado, distinct=True),
+            total_productos=Count('items__pedido_item__codigo', filter=no_anulado, distinct=True),
+            despachos_anulados=Count('numero_despacho', filter=Q(estado='ANULADO'), distinct=True),
+        )
+        .order_by('-total_unidades', 'picker__username')
+    )
+    totales = {
+        'despachos': sum(s['total_despachos'] for s in stats),
+        # Query aparte: un pedido tocado por varios pickers cuenta una sola vez
+        'pedidos': qs.filter(no_anulado).values('pedido_id').distinct().count(),
+        'unidades': sum(s['total_unidades'] for s in stats),
+        'lineas': sum(s['total_lineas'] for s in stats),
+        'anulados': sum(s['despachos_anulados'] for s in stats),
+    }
+    return {'stats': stats, 'totales': totales}
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def reporte_pickers(request):
+    fecha_inicio = request.GET.get('fecha_inicio', '')
+    fecha_fin = request.GET.get('fecha_fin', '')
+    picker_filtro = request.GET.get('picker', '')
+
+    ctx = _estadisticas_pickers(fecha_inicio, fecha_fin, picker_filtro)
+    ctx.update({
+        'pickers_disponibles': _pickers_disponibles(),
+        'fecha_inicio': fecha_inicio,
+        'fecha_fin': fecha_fin,
+        'picker_filtro': picker_filtro,
+    })
+    return render(request, 'pedidos-reporte-pickers.html', ctx)
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def exportar_reporte_pickers_pdf(request):
+    fecha_inicio = request.GET.get('fecha_inicio', '')
+    fecha_fin = request.GET.get('fecha_fin', '')
+    picker_filtro = request.GET.get('picker', '')
+
+    ctx = _estadisticas_pickers(fecha_inicio, fecha_fin, picker_filtro)
+    ctx.update({'fecha_inicio': fecha_inicio, 'fecha_fin': fecha_fin})
+    if picker_filtro.isdigit():
+        from users.models import User as UserModel
+        picker = UserModel.objects.filter(pk=picker_filtro).first()
+        ctx['picker_filtro_nombre'] = picker.username if picker else ''
+
+    pdf_bytes = generar_reporte_pickers_pdf(ctx)
+    nombre_archivo = f"estadisticas_pickers_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
     return response
