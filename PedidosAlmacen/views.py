@@ -1829,6 +1829,85 @@ def reporte_incidencias(request):
     })
 
 
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def reporte_items(request):
+    codigos_raw = request.GET.get('codigos', '').strip()
+    categoria_filtro = request.GET.get('categoria', '')
+    estado_filtro = request.GET.get('estado', '')
+
+    pedidos = Pedido.objects.exclude(estado='ANULADO')
+    items = PedidoItem.objects.filter(pedido__in=pedidos)
+
+    if codigos_raw:
+        codigos_lista = [c.strip() for c in codigos_raw.split(',') if c.strip()]
+        items = items.filter(codigo__in=codigos_lista)
+    if categoria_filtro:
+        items = items.filter(pedido__categoria=categoria_filtro)
+    if estado_filtro:
+        items = items.filter(estado=estado_filtro)
+
+    grupos = list(
+        items.values('codigo')
+        .annotate(
+            descripcion=Max('descripcion'),
+            total_solicitada=Sum('cantidad_solicitada'),
+            total_preparada=Coalesce(Sum('cantidad_preparada'), Value(0)),
+            total_despachada=Sum('cantidad_despachada'),
+            total_recibida=Sum('cantidad_recibida'),
+            total_back_order=Sum('cantidad_back_order'),
+            num_pedidos=Count('pedido', distinct=True),
+        )
+        .order_by('codigo')
+    )
+
+    codigos_pagina = [g['codigo'] for g in grupos]
+    detalle_por_codigo = {}
+    if codigos_pagina:
+        detalle_items = (
+            items.filter(codigo__in=codigos_pagina)
+            .select_related('pedido')
+            .order_by('codigo', 'pedido_id')
+        )
+        for item in detalle_items:
+            detalle_por_codigo.setdefault(item.codigo, []).append(item)
+
+    for grupo in grupos:
+        detalle = detalle_por_codigo.get(grupo['codigo'], [])
+        grupo['detalle'] = detalle
+        grupo['estados_badges'] = sorted({(item.estado, item.get_estado_display()) for item in detalle})
+        grupo['detalle_json'] = json.dumps([
+            {
+                'pedido': item.pedido_id,
+                'estado': item.get_estado_display(),
+                'estado_code': item.estado,
+                'solicitada': item.cantidad_solicitada,
+                'preparada': item.cantidad_preparada or 0,
+                'despachada': item.cantidad_despachada,
+                'recibida': item.cantidad_recibida,
+                'back_order': item.cantidad_back_order,
+            }
+            for item in detalle
+        ])
+        grupo['existencia'] = None  # se completa en la Task 2
+
+    categorias_disponibles = (
+        Pedido.objects.exclude(categoria='')
+        .values('categoria')
+        .annotate(nombre=Max('categoria_nombre'))
+        .order_by('categoria')
+    )
+
+    return render(request, 'pedidos-reporte-items.html', {
+        'grupos': grupos,
+        'codigos_filtro': codigos_raw,
+        'categoria_filtro': categoria_filtro,
+        'estado_filtro': estado_filtro,
+        'categorias_disponibles': categorias_disponibles,
+        'estados_item': PedidoItem.ESTADO_ITEM_CHOICES,
+    })
+
+
 def _sku_incidencia(di: DespachoItem) -> str:
     """SKU que debe figurar en el traslado a2 que resuelve la incidencia.
 

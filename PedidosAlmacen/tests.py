@@ -2984,3 +2984,116 @@ class ListaDespachosReceptorTest(TestCase):
         resp = self.client.get(self.url)
         self.assertContains(resp, '/pedidos/reporte/')
         self.assertContains(resp, '/pedidos/incidencias/resolver/')
+
+
+class ReporteItemsTest(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from django.urls import reverse
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        self.reverse = reverse
+
+        self.g_supervisor, _ = Group.objects.get_or_create(name='Pedidos Supervisor')
+        self.supervisor = User.objects.create_user(username='sup_items', password='x')
+        self.supervisor.groups.add(self.g_supervisor)
+        self.tienda = User.objects.create_user(username='tnd_items', password='x')
+
+        # Código 01120044: 2 pedidos (PARCIAL + PENDIENTE) -> debe agruparse
+        self.pedido1 = Pedido.objects.create(
+            solicitante=self.supervisor, estado='PARCIAL',
+            categoria='FERR', categoria_nombre='Ferretería',
+        )
+        PedidoItem.objects.create(
+            pedido=self.pedido1, codigo='01120044', descripcion='Tubo PVC 1/2"',
+            cantidad_solicitada=40, cantidad_preparada=40, cantidad_despachada=25,
+            cantidad_recibida=25, cantidad_back_order=15, estado='PARCIAL',
+        )
+        self.pedido2 = Pedido.objects.create(
+            solicitante=self.supervisor, estado='PENDIENTE',
+            categoria='FERR', categoria_nombre='Ferretería',
+        )
+        PedidoItem.objects.create(
+            pedido=self.pedido2, codigo='01120044', descripcion='Tubo PVC 1/2"',
+            cantidad_solicitada=10, cantidad_preparada=0, cantidad_despachada=0,
+            cantidad_recibida=0, cantidad_back_order=0, estado='PENDIENTE',
+        )
+        # Código 02030011: 1 solo pedido, categoría distinta -> no debe agruparse
+        self.pedido3 = Pedido.objects.create(
+            solicitante=self.supervisor, estado='RECIBIDO',
+            categoria='PLOM', categoria_nombre='Plomería',
+        )
+        PedidoItem.objects.create(
+            pedido=self.pedido3, codigo='02030011', descripcion='Cemento gris',
+            cantidad_solicitada=80, cantidad_preparada=80, cantidad_despachada=80,
+            cantidad_recibida=80, cantidad_back_order=0, estado='RECIBIDO',
+        )
+        # Pedido anulado -> su item nunca debe aparecer
+        self.pedido_anulado = Pedido.objects.create(
+            solicitante=self.supervisor, estado='ANULADO', motivo_anulacion='x',
+        )
+        PedidoItem.objects.create(
+            pedido=self.pedido_anulado, codigo='99999999', descripcion='No debe aparecer',
+            cantidad_solicitada=5, estado='PENDIENTE',
+        )
+
+    def test_no_supervisor_redirige(self):
+        self.client.force_login(self.tienda)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        self.assertEqual(resp.status_code, 302)
+
+    def test_supervisor_accede(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        self.assertEqual(resp.status_code, 200)
+
+    def test_excluye_pedidos_anulados_por_defecto(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        codigos = [g['codigo'] for g in resp.context['grupos']]
+        self.assertNotIn('99999999', codigos)
+
+    def test_agrega_cantidades_de_multiples_pedidos_del_mismo_codigo(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        grupos_por_codigo = {g['codigo']: g for g in resp.context['grupos']}
+        grupo = grupos_por_codigo['01120044']
+        self.assertEqual(grupo['num_pedidos'], 2)
+        self.assertEqual(grupo['total_solicitada'], 50)
+        self.assertEqual(grupo['total_preparada'], 40)
+        self.assertEqual(grupo['total_despachada'], 25)
+        self.assertEqual(grupo['total_recibida'], 25)
+        self.assertEqual(grupo['total_back_order'], 15)
+
+    def test_codigo_con_un_solo_pedido_no_se_agrupa(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        grupos_por_codigo = {g['codigo']: g for g in resp.context['grupos']}
+        self.assertEqual(grupos_por_codigo['02030011']['num_pedidos'], 1)
+
+    def test_filtro_por_codigo_unico(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'codigos': '02030011'})
+        codigos = [g['codigo'] for g in resp.context['grupos']]
+        self.assertEqual(codigos, ['02030011'])
+
+    def test_filtro_por_multiples_codigos(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'codigos': '01120044, 02030011'})
+        codigos = sorted(g['codigo'] for g in resp.context['grupos'])
+        self.assertEqual(codigos, ['01120044', '02030011'])
+
+    def test_filtro_por_categoria(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'categoria': 'PLOM'})
+        codigos = [g['codigo'] for g in resp.context['grupos']]
+        self.assertEqual(codigos, ['02030011'])
+
+    def test_filtro_por_estado(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'estado': 'PENDIENTE'})
+        codigos = [g['codigo'] for g in resp.context['grupos']]
+        self.assertEqual(codigos, ['01120044'])
+        grupo = resp.context['grupos'][0]
+        self.assertEqual(grupo['num_pedidos'], 1)
+        self.assertEqual(grupo['total_solicitada'], 10)

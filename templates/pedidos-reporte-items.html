@@ -1,0 +1,20 @@
+{% extends "dashboard.html" %}
+{% load permisos_tags %}
+{% block content %}
+<div class="pd-header">
+    <div class="pd-header-left">
+        <div>
+            <span class="pd-header-eyebrow">Almacén</span>
+            <div class="pd-header-title-row">
+                <h1 class="pd-header-num">Reporte de Items por Estado</h1>
+            </div>
+        </div>
+    </div>
+</div>
+<p>{{ grupos|length }} código{{ grupos|length|pluralize }} encontrado{{ grupos|length|pluralize }}.</p>
+<style>
+.pd-header { background:#2e353d; color:#fff; border-radius:12px; padding:1.1rem 1.5rem; margin-bottom:1.25rem; }
+.pd-header-eyebrow { display:block; font-size:0.62rem; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:rgba(255,255,255,0.45); }
+.pd-header-num { font-size:1.5rem; font-weight:700; margin:0; }
+</style>
+{% endblock content %}
