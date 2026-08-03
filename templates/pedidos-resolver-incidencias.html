@@ -148,7 +148,9 @@
                         <label class="form-label fw-semibold">Tipo de resolución</label>
                         <select name="tipo" id="tipo-resolucion" class="form-select">
                             <option value="TRASLADO" selected>Traslado a2</option>
+                            {% if request.user.is_superuser %}
                             <option value="MANUAL">Manual (sin documento)</option>
+                            {% endif %}
                         </select>
                     </div>
                     <div class="col-md-3" id="grupo-documento">

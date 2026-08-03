@@ -98,8 +98,10 @@
                         {% if request.user|has_group:"Pedidos Tienda" %}
                         <li><a href="/pedidos/crear/">Nuevo Pedido</a></li>
                         {% endif %}
-                        {% if request.user|has_group:"Pedidos Supervisor" %}
+                        {% if request.user|has_group:"Pedidos Supervisor" or request.user|has_group:"Pedidos Receptor" %}
                         <li><a href="/despachos/">Despachos</a></li>
+                        {% endif %}
+                        {% if request.user|has_group:"Pedidos Supervisor" %}
                         <li><a href="/pedidos/reporte/">Reporte</a></li>
                         <li><a href="/pedidos/incidencias/resolver/">Incidencias</a></li>
                         {% endif %}

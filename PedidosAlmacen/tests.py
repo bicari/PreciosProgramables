@@ -2741,15 +2741,15 @@ class CerrarPedidoVistaTest(TestCase):
         self.item_bo.refresh_from_db()
         self.item_recibido.refresh_from_db()
 
-    def test_supervisor_cierra_pedido_parcial(self):
-        resp = self._cerrar(self.supervisor)
+    def test_superuser_cierra_pedido_parcial(self):
+        resp = self._cerrar(self.superuser)
         self.assertRedirects(
             resp, f'/pedidos/{self.pedido.numero_pedido}/',
             fetch_redirect_response=False,
         )
         self._refrescar()
         self.assertEqual(self.pedido.estado, 'CERRADO')
-        self.assertEqual(self.pedido.cerrado_por, self.supervisor)
+        self.assertEqual(self.pedido.cerrado_por, self.superuser)
         self.assertEqual(self.pedido.motivo_cierre, 'proveedor sin stock')
         self.assertIsNotNone(self.pedido.fecha_cierre)
         self.assertEqual(self.item_parcial.estado, 'CERRADO')
@@ -2760,16 +2760,20 @@ class CerrarPedidoVistaTest(TestCase):
         self.assertEqual(self.item_recibido.estado, 'RECIBIDO')
         self.assertEqual(self.item_recibido.cantidad_recibida, 2)
 
-    def test_almacen_puede_cerrar(self):
-        self._cerrar(self.almacen)
+    def test_supervisor_no_puede_cerrar(self):
+        resp = self._cerrar(self.supervisor)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn('dashboard', resp.url)
         self._refrescar()
-        self.assertEqual(self.pedido.estado, 'CERRADO')
-        self.assertEqual(self.pedido.cerrado_por, self.almacen)
+        self.assertEqual(self.pedido.estado, 'PARCIAL')
+        self.assertEqual(self.item_parcial.cantidad_back_order, 4)
 
-    def test_superuser_puede_cerrar(self):
-        self._cerrar(self.superuser)
+    def test_almacen_no_puede_cerrar(self):
+        resp = self._cerrar(self.almacen)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn('dashboard', resp.url)
         self._refrescar()
-        self.assertEqual(self.pedido.estado, 'CERRADO')
+        self.assertEqual(self.pedido.estado, 'PARCIAL')
 
     def test_tienda_no_puede_cerrar(self):
         resp = self._cerrar(self.tienda)
@@ -2787,13 +2791,13 @@ class CerrarPedidoVistaTest(TestCase):
         self.assertEqual(self.pedido.estado, 'PARCIAL')
 
     def test_motivo_obligatorio(self):
-        self._cerrar(self.supervisor, motivo='   ')
+        self._cerrar(self.superuser, motivo='   ')
         self._refrescar()
         self.assertEqual(self.pedido.estado, 'PARCIAL')
         self.assertEqual(self.item_parcial.cantidad_back_order, 4)
 
     def test_get_no_cierra(self):
-        self.client.force_login(self.supervisor)
+        self.client.force_login(self.superuser)
         self.client.get(f'/pedidos/{self.pedido.numero_pedido}/cerrar/')
         self._refrescar()
         self.assertEqual(self.pedido.estado, 'PARCIAL')
@@ -2803,7 +2807,7 @@ class CerrarPedidoVistaTest(TestCase):
                        'DESPACHADO', 'RECIBIDO', 'CERRADO', 'ANULADO'):
             self.pedido.estado = estado
             self.pedido.save()
-            self._cerrar(self.supervisor)
+            self._cerrar(self.superuser)
             self.pedido.refresh_from_db()
             self.assertEqual(self.pedido.estado, estado)
         self.item_parcial.refresh_from_db()
@@ -2815,7 +2819,7 @@ class CerrarPedidoVistaTest(TestCase):
             despacho = Despacho.objects.create(
                 pedido=self.pedido, estado=estado_despacho,
             )
-            self._cerrar(self.supervisor)
+            self._cerrar(self.superuser)
             self._refrescar()
             self.assertEqual(self.pedido.estado, 'PARCIAL',
                              f'despacho {estado_despacho} debería bloquear')
@@ -2825,7 +2829,7 @@ class CerrarPedidoVistaTest(TestCase):
         from .models import Despacho
         for estado_despacho in ('RECIBIDO', 'PARCIAL', 'ANULADO'):
             Despacho.objects.create(pedido=self.pedido, estado=estado_despacho)
-        self._cerrar(self.supervisor)
+        self._cerrar(self.superuser)
         self._refrescar()
         self.assertEqual(self.pedido.estado, 'CERRADO')
 
@@ -2842,6 +2846,7 @@ class CerrarPedidoUITest(TestCase):
         self.supervisor.groups.add(g_sup)
         self.tienda = User.objects.create_user(username='tnd_ui_c', password='x')
         self.tienda.groups.add(g_tnd)
+        self.superuser = User.objects.create_superuser(username='root_ui_c', password='x')
 
         self.pedido = Pedido.objects.create(solicitante=self.tienda, estado='PARCIAL')
         PedidoItem.objects.create(
@@ -2854,10 +2859,14 @@ class CerrarPedidoUITest(TestCase):
         self.client.force_login(user)
         return self.client.get(f'/pedidos/{self.pedido.numero_pedido}/')
 
-    def test_supervisor_ve_boton_cerrar_en_pedido_elegible(self):
-        resp = self._detalle(self.supervisor)
+    def test_superuser_ve_boton_cerrar_en_pedido_elegible(self):
+        resp = self._detalle(self.superuser)
         self.assertContains(resp, 'modalCerrarPedido')
         self.assertContains(resp, f'/pedidos/{self.pedido.numero_pedido}/cerrar/')
+
+    def test_supervisor_no_ve_boton_cerrar(self):
+        resp = self._detalle(self.supervisor)
+        self.assertNotContains(resp, 'modalCerrarPedido')
 
     def test_tienda_no_ve_boton_cerrar(self):
         resp = self._detalle(self.tienda)
@@ -2866,7 +2875,7 @@ class CerrarPedidoUITest(TestCase):
     def test_pedido_no_elegible_no_muestra_boton(self):
         from .models import Despacho
         Despacho.objects.create(pedido=self.pedido, estado='ENVIADO')
-        resp = self._detalle(self.supervisor)
+        resp = self._detalle(self.superuser)
         self.assertNotContains(resp, 'modalCerrarPedido')
 
     def test_pedido_cerrado_muestra_auditoria_y_badge_item(self):
@@ -2885,3 +2894,93 @@ class CerrarPedidoUITest(TestCase):
         # Badge del item cerrado (búsqueda sin html=True por problemas de parsing)
         self.assertContains(resp, 'badge bg-secondary">Cerrado</span>')
         self.assertNotContains(resp, 'modalCerrarPedido')
+
+
+class ListaDespachosReceptorTest(TestCase):
+    """Acceso del rol Pedidos Receptor a la lista de despachos, filtrada por
+    sus depósitos asignados; el supervisor sigue viendo todo."""
+
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        from django.urls import reverse
+        from .models import Pedido, Despacho, DepositoPermitido
+        self.reverse = reverse
+        self.Despacho = Despacho
+
+        g_tienda, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        g_receptor, _ = Group.objects.get_or_create(name='Pedidos Receptor')
+        g_supervisor, _ = Group.objects.get_or_create(name='Pedidos Supervisor')
+
+        self.tienda = User.objects.create_user(username='tnd_ld', password='x')
+        self.tienda.groups.add(g_tienda)
+        self.receptor = User.objects.create_user(username='rcp_ld', password='x')
+        self.receptor.groups.add(g_receptor)
+        self.supervisor = User.objects.create_user(username='sup_ld', password='x')
+        self.supervisor.groups.add(g_supervisor)
+
+        dep2 = DepositoPermitido.objects.create(codigo=2, nombre='Tienda Dos')
+        dep2.receptores.add(self.receptor)
+
+        self.pedido_dep2 = Pedido.objects.create(
+            solicitante=self.tienda, estado='DESPACHADO', deposito_codigo=2,
+        )
+        self.pedido_dep9 = Pedido.objects.create(
+            solicitante=self.tienda, estado='DESPACHADO', deposito_codigo=9,
+        )
+        self.despacho_dep2 = Despacho.objects.create(pedido=self.pedido_dep2, estado='ENVIADO')
+        self.despacho_dep9 = Despacho.objects.create(pedido=self.pedido_dep9, estado='ENVIADO')
+
+        self.url = reverse('despachos-lista')
+
+    def test_receptor_ve_solo_despachos_de_sus_depositos(self):
+        self.client.force_login(self.receptor)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        despachos = list(resp.context['despachos'])
+        self.assertIn(self.despacho_dep2, despachos)
+        self.assertNotIn(self.despacho_dep9, despachos)
+
+    def test_supervisor_sigue_viendo_todos(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        despachos = list(resp.context['despachos'])
+        self.assertIn(self.despacho_dep2, despachos)
+        self.assertIn(self.despacho_dep9, despachos)
+
+    def test_tienda_redirige_al_dashboard(self):
+        self.client.force_login(self.tienda)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn('dashboard', resp.url)
+
+    def test_receptor_no_ve_boton_confirmar(self):
+        self.Despacho.objects.create(
+            pedido=self.pedido_dep2, estado='PENDIENTE_APROBACION',
+        )
+        self.client.force_login(self.receptor)
+        resp = self.client.get(self.url)
+        self.assertNotContains(resp, 'Confirmar')
+
+    def test_supervisor_si_ve_boton_confirmar(self):
+        self.Despacho.objects.create(
+            pedido=self.pedido_dep2, estado='PENDIENTE_APROBACION',
+        )
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.url)
+        self.assertContains(resp, 'Confirmar')
+
+    def test_menu_receptor_solo_muestra_despachos(self):
+        # El menú vive en dashboard.html (template base de despachos-lista).
+        self.client.force_login(self.receptor)
+        resp = self.client.get(self.url)
+        self.assertContains(resp, '/despachos/')
+        self.assertNotContains(resp, '/pedidos/reporte/')
+        self.assertNotContains(resp, '/pedidos/incidencias/resolver/')
+
+    def test_menu_supervisor_conserva_reporte_e_incidencias(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.url)
+        self.assertContains(resp, '/pedidos/reporte/')
+        self.assertContains(resp, '/pedidos/incidencias/resolver/')

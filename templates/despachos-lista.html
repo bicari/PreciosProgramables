@@ -113,7 +113,7 @@
                         <a href="{% url 'pedidos-detalle' despacho.pedido.numero_pedido %}" class="btn btn-sm btn-outline-primary" title="Ver pedido">
                             <i class="fas fa-eye"></i>
                         </a>
-                        {% if despacho.estado == 'PENDIENTE_APROBACION' %}
+                        {% if despacho.estado == 'PENDIENTE_APROBACION' and request.user|has_group:"Pedidos Supervisor" %}
                         <form method="post" action="{% url 'pedidos-confirmar-despacho' despacho.pedido.numero_pedido despacho.numero_despacho %}" class="d-inline">
                             {% csrf_token %}
                             <input type="hidden" name="next" value="despachos-lista">

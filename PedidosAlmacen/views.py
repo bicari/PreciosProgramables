@@ -91,11 +91,6 @@ def is_pedidos_supervisor(user):
     return user.groups.filter(name=GROUP_SUPERVISOR).exists() or user.is_superuser
 
 
-def is_pedidos_supervisor_o_almacen(user):
-    """Puede cerrar pedidos: Supervisor, Almacén o superuser."""
-    return is_pedidos_supervisor(user) or is_pedidos_almacen(user)
-
-
 def is_pedidos_picker(user):
     return user.groups.filter(name=GROUP_PICKER).exists() or user.is_superuser
 
@@ -397,7 +392,7 @@ def detalle_pedido(request, pk):
         'puede_imprimir_despacho': request.user.is_superuser or is_pedidos_almacen(request.user) or is_pedidos_supervisor(request.user),
         'es_superuser': request.user.is_superuser,
         'es_picker_asignado': es_picker_asignado,
-        'puede_cerrar': (es_supervisor or es_despachador) and _puede_cerrar_pedido(pedido),
+        'puede_cerrar': request.user.is_superuser and _puede_cerrar_pedido(pedido),
         'vistas_pdf': vistas_pdf,
         'volver_url': request.session.get('pedidos_volver_url') or reverse('pedidos-lista'),
     })
@@ -445,9 +440,11 @@ def anular_pedido(request, pk):
 
 
 @login_required(login_url='/login/')
-@user_passes_test(is_pedidos_supervisor_o_almacen, login_url='dashboard')
+@user_passes_test(lambda u: u.is_superuser, login_url='dashboard')
 def cerrar_pedido(request, pk):
     """Cierra un pedido PARCIAL cuyos back orders no se van a completar.
+
+    Solo el administrador (superuser) puede ejecutar el cierre.
 
     Deja cantidad_back_order = 0 en los items pendientes (PARCIAL/BACK_ORDER),
     los marca CERRADO y registra auditoría en el pedido.
@@ -862,11 +859,16 @@ def confirmar_despacho(request, pk, despacho_id):
 
 
 @login_required(login_url='/login/')
-@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+@user_passes_test(is_pedidos_receptor, login_url='dashboard')
 def lista_despachos(request):
     despachos = Despacho.objects.select_related(
         'pedido__solicitante', 'despachador', 'picker'
     ).order_by('-fecha_despacho')
+
+    if not (request.user.is_superuser or is_pedidos_supervisor(request.user)):
+        despachos = despachos.filter(
+            pedido__deposito_codigo__in=_codigos_depositos_receptor(request.user)
+        )
 
     estado_filter = request.GET.get('estado', '')
     if estado_filter:
