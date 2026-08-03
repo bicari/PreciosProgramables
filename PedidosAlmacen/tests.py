@@ -3097,3 +3097,36 @@ class ReporteItemsTest(TestCase):
         grupo = resp.context['grupos'][0]
         self.assertEqual(grupo['num_pedidos'], 1)
         self.assertEqual(grupo['total_solicitada'], 10)
+
+    def test_existencia_ok(self):
+        from unittest.mock import patch
+        self.client.force_login(self.supervisor)
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.return_value = {
+                '01120044': 128, '02030011': 340,
+            }
+            resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        grupos_por_codigo = {g['codigo']: g for g in resp.context['grupos']}
+        self.assertEqual(grupos_por_codigo['01120044']['existencia'], 128)
+        self.assertEqual(grupos_por_codigo['02030011']['existencia'], 340)
+
+    def test_existencia_codigo_sin_stock_es_cero(self):
+        from unittest.mock import patch
+        self.client.force_login(self.supervisor)
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.return_value = {'01120044': 128}
+            resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        grupos_por_codigo = {g['codigo']: g for g in resp.context['grupos']}
+        self.assertEqual(grupos_por_codigo['02030011']['existencia'], 0)
+
+    def test_existencia_fallback_nd_si_dbisam_falla(self):
+        from unittest.mock import patch
+        self.client.force_login(self.supervisor)
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.side_effect = Exception('DBISAM caído')
+            resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        self.assertEqual(resp.status_code, 200)
+        for grupo in resp.context['grupos']:
+            self.assertIsNone(grupo['existencia'])
+        mensajes = [str(m) for m in resp.context['messages']]
+        self.assertTrue(any('existencia' in m.lower() for m in mensajes))

@@ -1872,6 +1872,20 @@ def reporte_items(request):
         for item in detalle_items:
             detalle_por_codigo.setdefault(item.codigo, []).append(item)
 
+    existencia_por_codigo = {}
+    stock_no_disponible = False
+    if codigos_pagina:
+        try:
+            dbisam = PedidosDBISAM()
+            existencia_por_codigo = dbisam.consultar_stock_multiple(codigos_pagina)
+        except Exception as e:
+            logger.warning(f"No se pudo consultar existencia para reporte de items: {e}")
+            messages.warning(
+                request,
+                'No se pudo consultar la existencia en almacén (a2 no disponible en este momento).',
+            )
+            stock_no_disponible = True
+
     for grupo in grupos:
         detalle = detalle_por_codigo.get(grupo['codigo'], [])
         grupo['detalle'] = detalle
@@ -1889,7 +1903,7 @@ def reporte_items(request):
             }
             for item in detalle
         ])
-        grupo['existencia'] = None  # se completa en la Task 2
+        grupo['existencia'] = None if stock_no_disponible else existencia_por_codigo.get(grupo['codigo'], 0)
 
     categorias_disponibles = (
         Pedido.objects.exclude(categoria='')
