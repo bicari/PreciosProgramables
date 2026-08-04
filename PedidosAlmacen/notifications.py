@@ -92,7 +92,7 @@ def notificar_despacho_parcial(pedido):
         return
     try:
         items_despachados = pedido.items.filter(estado='DESPACHADO')
-        items_back_order = pedido.items.filter(estado='BACK_ORDER')
+        items_back_order = pedido.items.filter(cantidad_back_order__gt=0)
         html_str = render_to_string('pedido-mail.html', context={
             'titulo': 'Despacho Parcial de Pedido',
             'mensaje': (

@@ -212,7 +212,7 @@ def lista_pedidos(request):
 
     pedidos = pedidos.annotate(
         items_back_order=Count(
-            Case(When(items__estado='BACK_ORDER', then=Value(1)), output_field=IntegerField())
+            Case(When(items__cantidad_back_order__gt=0, then=Value(1)), output_field=IntegerField())
         )
     )
 
@@ -616,7 +616,7 @@ def asignar_picker(request, pk):
     if request.method != 'POST':
         return redirect('pedidos-lista')
     pedido = get_object_or_404(Pedido, numero_pedido=pk)
-    tiene_bo = pedido.items.filter(estado='BACK_ORDER').exists()
+    tiene_bo = pedido.items.filter(cantidad_back_order__gt=0).exists()
     if pedido.estado not in ('PENDIENTE',) and not (pedido.estado == 'PARCIAL' and tiene_bo):
         messages.warning(request, f'El pedido #{pk} no puede asignarse picker en su estado actual')
         return redirect('pedidos-lista')
@@ -653,7 +653,7 @@ def desasignar_picker(request, pk):
     pedido.fecha_asignacion = None
     pedido.fecha_inicio_picking = None
     pedido.fecha_fin_picking = None
-    tiene_bo = pedido.items.filter(estado='BACK_ORDER').exists()
+    tiene_bo = pedido.items.filter(cantidad_back_order__gt=0).exists()
     pedido.estado = 'PARCIAL' if tiene_bo else 'PENDIENTE'
     pedido.save()
     messages.success(request, f'Pedido #{pk} liberado (picker {picker_anterior} desasignado) — estado: {"Parcial" if tiene_bo else "Pendiente"}')

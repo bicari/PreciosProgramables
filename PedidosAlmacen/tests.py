@@ -736,7 +736,7 @@ class ReasignarPickerParcialTest(TestCase):
         self.p2.groups.add(g_picker)
         # Pedido PARCIAL con picker p1 y un item en BACK_ORDER
         self.pedido = Pedido.objects.create(solicitante=self.sup, estado='PARCIAL', picker=self.p1)
-        PedidoItem.objects.create(
+        self.item = PedidoItem.objects.create(
             pedido=self.pedido, codigo='A', descripcion='a',
             cantidad_solicitada=10, cantidad_despachada=4,
             cantidad_back_order=6, estado='BACK_ORDER',
@@ -762,14 +762,28 @@ class ReasignarPickerParcialTest(TestCase):
         self.assertEqual(self.pedido.estado, 'PARCIAL')
 
     def test_liberar_parcial_sin_backorder_pasa_a_pendiente(self):
-        # Caso borde: PARCIAL sin items en BACK_ORDER → vuelve a PENDIENTE
-        self.pedido.items.update(estado='PARCIAL')
+        # Caso borde: PARCIAL sin unidades pendientes en back order → vuelve a PENDIENTE
+        self.pedido.items.update(estado='PARCIAL', cantidad_back_order=0)
         self.client.force_login(self.sup)
         url = self.reverse('pedidos-desasignar-picker', args=[self.pedido.numero_pedido])
         self.client.post(url)
         self.pedido.refresh_from_db()
         self.assertIsNone(self.pedido.picker)
         self.assertEqual(self.pedido.estado, 'PENDIENTE')
+
+    def test_reasignar_parcial_con_item_estado_parcial_y_backorder(self):
+        # Item despachado parcialmente: estado='PARCIAL' (no 'BACK_ORDER') pero
+        # con unidades pendientes en cantidad_back_order. El gate de asignar_picker
+        # debe aceptar la reasignación igual que con estado='BACK_ORDER'.
+        self.item.estado = 'PARCIAL'
+        self.item.save()
+        self.client.force_login(self.sup)
+        url = self.reverse('pedidos-asignar-picker', args=[self.pedido.numero_pedido])
+        resp = self.client.post(url, {'picker_id': self.p2.pk})
+        self.assertEqual(resp.status_code, 302)
+        self.pedido.refresh_from_db()
+        self.assertEqual(self.pedido.estado, 'ASIGNADO')
+        self.assertEqual(self.pedido.picker, self.p2)
 
 
 class ReasignarPickerParcialTemplateTest(TestCase):
@@ -803,6 +817,16 @@ class ReasignarPickerParcialTemplateTest(TestCase):
         self.client.force_login(self.tienda)
         resp = self.client.get(self.reverse('pedidos-lista'))
         self.assertNotContains(resp, 'Reasignar picker')
+
+    def test_ve_reasignar_con_item_estado_parcial_y_backorder(self):
+        # Item despachado parcialmente: estado='PARCIAL' (no 'BACK_ORDER') pero
+        # con unidades pendientes en cantidad_back_order. El botón debe seguir
+        # apareciendo aunque ningún item tenga estado literal 'BACK_ORDER'.
+        from .models import PedidoItem
+        PedidoItem.objects.filter(pedido=self.pedido).update(estado='PARCIAL')
+        self.client.force_login(self.sup)
+        resp = self.client.get(self.reverse('pedidos-lista'))
+        self.assertContains(resp, 'Reasignar picker')
 
 
 class CrearPedidoStockTest(TestCase):
