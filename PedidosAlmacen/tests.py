@@ -3352,6 +3352,7 @@ class ExportarReporteItemsTest(TestCase):
         resp = self.client.get(self.reverse('pedidos-reporte-items-pdf'), {'estado': ''})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp['Content-Type'], 'application/pdf')
+        self.assertTrue(resp.content.startswith(b'%PDF'))
         self.assertIn('attachment; filename="reporte_items_', resp['Content-Disposition'])
 
     def test_pdf_no_lanza_excepcion_sin_grupos(self):
@@ -3359,12 +3360,14 @@ class ExportarReporteItemsTest(TestCase):
         resp = self.client.get(self.reverse('pedidos-reporte-items-pdf'), {'codigos': 'NOEXISTE'})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp['Content-Type'], 'application/pdf')
+        self.assertTrue(resp.content.startswith(b'%PDF'))
 
     def test_pdf_respeta_default_de_back_order_sin_filtros(self):
         self.client.force_login(self.supervisor)
         resp = self.client.get(self.reverse('pedidos-reporte-items-pdf'))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp['Content-Type'], 'application/pdf')
+        self.assertTrue(resp.content.startswith(b'%PDF'))
 
     def test_pdf_existencia_nd_si_dbisam_falla_no_rompe_generacion(self):
         self.client.force_login(self.supervisor)
@@ -3372,3 +3375,4 @@ class ExportarReporteItemsTest(TestCase):
         resp = self.client.get(self.reverse('pedidos-reporte-items-pdf'), {'estado': ''})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp['Content-Type'], 'application/pdf')
+        self.assertTrue(resp.content.startswith(b'%PDF'))
