@@ -3129,6 +3129,15 @@ class ReporteItemsTest(TestCase):
         self.assertEqual(grupo['num_pedidos'], 1)
         self.assertEqual(grupo['total_solicitada'], 10)
 
+    def test_filtro_por_estado_back_order_usa_cantidad_no_estado_literal(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'estado': 'BACK_ORDER'})
+        codigos = [g['codigo'] for g in resp.context['grupos']]
+        # pedido1 tiene estado literal 'PARCIAL' pero cantidad_back_order=15 > 0 -> debe aparecer
+        self.assertIn('01120044', codigos)
+        # pedido3 tiene cantidad_back_order=0 -> no debe aparecer aunque exista
+        self.assertNotIn('02030011', codigos)
+
     def test_existencia_ok(self):
         self.client.force_login(self.supervisor)
         self.mock_dbisam.return_value.consultar_stock_multiple.return_value = {

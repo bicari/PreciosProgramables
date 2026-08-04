@@ -1855,7 +1855,9 @@ def _construir_grupos_reporte_items(request, emitir_mensajes=True):
         items = items.filter(codigo__in=codigos_lista)
     if categoria_filtro:
         items = items.filter(pedido__categoria=categoria_filtro)
-    if estado_filtro:
+    if estado_filtro == 'BACK_ORDER':
+        items = items.filter(cantidad_back_order__gt=0)
+    elif estado_filtro:
         items = items.filter(estado=estado_filtro)
     if fecha_inicio:
         items = items.filter(pedido__fecha_creacion__date__gte=fecha_inicio)
