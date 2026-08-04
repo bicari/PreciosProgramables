@@ -10,6 +10,7 @@ from django.db.models import Case, When, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from datetime import datetime, timedelta, time as dtime
+from urllib.parse import urlencode
 from .models import (
     Pedido, PedidoItem, Despacho, DespachoItem, DepositoPermitido,
     ConfiguracionPedidos, ResolucionIncidencia, IncidenciaEvento,
@@ -1829,9 +1830,11 @@ def reporte_incidencias(request):
     })
 
 
-@login_required(login_url='/login/')
-@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
-def reporte_items(request):
+def _construir_grupos_reporte_items(request):
+    """
+    Query y agregacion compartidos por pantalla, export CSV y export PDF
+    del reporte de items. Devuelve (grupos, filtros).
+    """
     codigos_raw = request.GET.get('codigos', '').strip()
     categoria_filtro = request.GET.get('categoria', '')
     estado_filtro = request.GET.get('estado', '')
@@ -1910,6 +1913,33 @@ def reporte_items(request):
         ]) if grupo['num_pedidos'] > 1 else '[]'
         grupo['existencia'] = None if stock_no_disponible else existencia_por_codigo.get(grupo['codigo'], 0)
 
+    querystring_filtros = urlencode({
+        k: v for k, v in {
+            'codigos': codigos_raw,
+            'categoria': categoria_filtro,
+            'estado': estado_filtro,
+            'fecha_inicio': fecha_inicio,
+            'fecha_fin': fecha_fin,
+        }.items() if v
+    })
+
+    filtros = {
+        'codigos_filtro': codigos_raw,
+        'categoria_filtro': categoria_filtro,
+        'estado_filtro': estado_filtro,
+        'fecha_inicio': fecha_inicio,
+        'fecha_fin': fecha_fin,
+        'sin_filtros_aplicados': sin_filtros_aplicados,
+        'querystring_filtros': querystring_filtros,
+    }
+    return grupos, filtros
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def reporte_items(request):
+    grupos, filtros = _construir_grupos_reporte_items(request)
+
     categorias_disponibles = (
         Pedido.objects.exclude(categoria='')
         .exclude(estado='ANULADO')
@@ -1920,12 +1950,13 @@ def reporte_items(request):
 
     return render(request, 'pedidos-reporte-items.html', {
         'grupos': grupos,
-        'codigos_filtro': codigos_raw,
-        'categoria_filtro': categoria_filtro,
-        'estado_filtro': estado_filtro,
-        'fecha_inicio': fecha_inicio,
-        'fecha_fin': fecha_fin,
-        'sin_filtros_aplicados': sin_filtros_aplicados,
+        'codigos_filtro': filtros['codigos_filtro'],
+        'categoria_filtro': filtros['categoria_filtro'],
+        'estado_filtro': filtros['estado_filtro'],
+        'fecha_inicio': filtros['fecha_inicio'],
+        'fecha_fin': filtros['fecha_fin'],
+        'sin_filtros_aplicados': filtros['sin_filtros_aplicados'],
+        'querystring_filtros': filtros['querystring_filtros'],
         'categorias_disponibles': categorias_disponibles,
         'estados_item': PedidoItem.ESTADO_ITEM_CHOICES,
     })

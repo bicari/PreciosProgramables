@@ -3224,6 +3224,19 @@ class ReporteItemsTest(TestCase):
         codigos = [g['codigo'] for g in resp.context['grupos']]
         self.assertNotIn('02030011', codigos)
 
+    def test_querystring_filtros_vacio_sin_filtros(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        self.assertEqual(resp.context['querystring_filtros'], '')
+
+    def test_querystring_filtros_incluye_solo_valores_no_vacios(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'categoria': 'PLOM', 'estado': ''})
+        qs = resp.context['querystring_filtros']
+        self.assertIn('categoria=PLOM', qs)
+        self.assertNotIn('estado=', qs)
+        self.assertNotIn('codigos=', qs)
+
 
 class MenuReporteItemsTest(TestCase):
     def setUp(self):
