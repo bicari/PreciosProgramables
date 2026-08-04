@@ -3131,3 +3131,29 @@ class ReporteItemsTest(TestCase):
             self.assertIsNone(grupo['existencia'])
         mensajes = [str(m) for m in resp.context['messages']]
         self.assertTrue(any('existencia' in m.lower() for m in mensajes))
+
+    def test_template_muestra_boton_detalle_para_codigo_con_multiples_pedidos(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        self.assertContains(resp, 'class="grp-detail-btn"')
+        self.assertContains(resp, '01120044')
+
+    def test_template_no_muestra_boton_detalle_para_codigo_de_un_solo_pedido(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'codigos': '02030011'})
+        self.assertNotContains(resp, 'class="grp-detail-btn"')
+        self.assertContains(resp, 'grp-no-detail')
+
+    def test_template_muestra_nd_cuando_falla_dbisam(self):
+        from unittest.mock import patch
+        self.client.force_login(self.supervisor)
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.side_effect = Exception('caído')
+            resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        self.assertContains(resp, 'N/D')
+
+    def test_template_incluye_filtros_aplicados_en_el_formulario(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'codigos': '02030011', 'categoria': 'PLOM'})
+        self.assertContains(resp, 'value="02030011"')
+        self.assertContains(resp, 'selected')
