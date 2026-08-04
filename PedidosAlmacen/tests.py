@@ -3258,3 +3258,86 @@ class MenuReporteItemsTest(TestCase):
         self.client.force_login(self.tienda)
         resp = self.client.get(self.reverse('dashboard'))
         self.assertNotContains(resp, '/pedidos/reporte/items/')
+
+
+class ExportarReporteItemsTest(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from django.urls import reverse
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        from unittest.mock import patch
+        self.reverse = reverse
+
+        self.dbisam_patcher = patch('PedidosAlmacen.views.PedidosDBISAM')
+        self.mock_dbisam = self.dbisam_patcher.start()
+        self.addCleanup(self.dbisam_patcher.stop)
+        self.mock_dbisam.return_value.consultar_stock_multiple.return_value = {}
+
+        self.g_supervisor, _ = Group.objects.get_or_create(name='Pedidos Supervisor')
+        self.supervisor = User.objects.create_user(username='sup_export_items', password='x')
+        self.supervisor.groups.add(self.g_supervisor)
+        self.tienda = User.objects.create_user(username='tnd_export_items', password='x')
+
+        self.pedido1 = Pedido.objects.create(
+            solicitante=self.supervisor, estado='PARCIAL',
+            categoria='FERR', categoria_nombre='Ferretería',
+        )
+        PedidoItem.objects.create(
+            pedido=self.pedido1, codigo='01120044', descripcion='Tubo PVC 1/2"',
+            cantidad_solicitada=40, cantidad_preparada=40, cantidad_despachada=25,
+            cantidad_recibida=25, cantidad_back_order=15, estado='PARCIAL',
+        )
+        self.pedido2 = Pedido.objects.create(
+            solicitante=self.supervisor, estado='PENDIENTE',
+            categoria='FERR', categoria_nombre='Ferretería',
+        )
+        PedidoItem.objects.create(
+            pedido=self.pedido2, codigo='01120044', descripcion='Tubo PVC 1/2"',
+            cantidad_solicitada=10, cantidad_preparada=0, cantidad_despachada=0,
+            cantidad_recibida=0, cantidad_back_order=0, estado='PENDIENTE',
+        )
+        self.pedido3 = Pedido.objects.create(
+            solicitante=self.supervisor, estado='RECIBIDO',
+            categoria='PLOM', categoria_nombre='Plomería',
+        )
+        PedidoItem.objects.create(
+            pedido=self.pedido3, codigo='02030011', descripcion='Cemento gris',
+            cantidad_solicitada=80, cantidad_preparada=80, cantidad_despachada=80,
+            cantidad_recibida=80, cantidad_back_order=0, estado='RECIBIDO',
+        )
+
+    def test_no_supervisor_redirige_csv(self):
+        self.client.force_login(self.tienda)
+        resp = self.client.get(self.reverse('pedidos-reporte-items-csv'))
+        self.assertEqual(resp.status_code, 302)
+
+    def test_csv_content_type_y_nombre_archivo(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items-csv'), {'estado': ''})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp['Content-Type'], 'text/csv')
+        self.assertIn('attachment; filename="reporte_items_', resp['Content-Disposition'])
+
+    def test_csv_incluye_fila_por_codigo_agrupado(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items-csv'), {'estado': ''})
+        contenido = resp.content.decode('utf-8-sig')
+        self.assertIn('01120044', contenido)
+        self.assertIn('2 pedidos', contenido)
+        self.assertIn('02030011', contenido)
+        self.assertIn(f'#{self.pedido3.pk}', contenido)
+
+    def test_csv_respeta_default_de_back_order_sin_filtros(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items-csv'))
+        contenido = resp.content.decode('utf-8-sig')
+        self.assertIn('01120044', contenido)
+        self.assertNotIn('02030011', contenido)
+
+    def test_csv_existencia_nd_si_dbisam_falla(self):
+        self.client.force_login(self.supervisor)
+        self.mock_dbisam.return_value.consultar_stock_multiple.side_effect = Exception('caído')
+        resp = self.client.get(self.reverse('pedidos-reporte-items-csv'), {'estado': ''})
+        contenido = resp.content.decode('utf-8-sig')
+        self.assertIn('N/D', contenido)

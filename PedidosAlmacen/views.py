@@ -21,6 +21,8 @@ from .notifications import notificar_nuevo_pedido, notificar_despacho, notificar
 from .pdf import generar_reporte_pedidos_pdf, generar_reporte_pickers_pdf, generar_pedido_pdf, generar_despacho_pdf
 import logging
 import json
+import csv
+import io
 
 logger = logging.getLogger(__name__)
 
@@ -1960,6 +1962,36 @@ def reporte_items(request):
         'categorias_disponibles': categorias_disponibles,
         'estados_item': PedidoItem.ESTADO_ITEM_CHOICES,
     })
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def exportar_reporte_items_csv(request):
+    grupos, _filtros = _construir_grupos_reporte_items(request)
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([
+        'Código', 'Descripción', 'Pedido(s)', 'Estado',
+        'Solicit.', 'Preparada', 'Despach.', 'Recibida', 'Back Order', 'Existencia',
+    ])
+    for grupo in grupos:
+        if grupo['num_pedidos'] == 1:
+            pedido_col = f"#{grupo['detalle'][0].pedido_id}"
+        else:
+            pedido_col = f"{grupo['num_pedidos']} pedidos"
+        estado_col = ', '.join(label for _codigo, label in grupo['estados_badges'])
+        existencia_col = 'N/D' if grupo['existencia'] is None else grupo['existencia']
+        writer.writerow([
+            grupo['codigo'], grupo['descripcion'], pedido_col, estado_col,
+            grupo['total_solicitada'], grupo['total_preparada'], grupo['total_despachada'],
+            grupo['total_recibida'], grupo['total_back_order'], existencia_col,
+        ])
+
+    nombre_archivo = f"reporte_items_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+    response = HttpResponse(buffer.getvalue().encode('utf-8-sig'), content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
+    return response
 
 
 def _sku_incidencia(di: DespachoItem) -> str:
