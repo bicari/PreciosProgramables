@@ -103,6 +103,7 @@
                         {% endif %}
                         {% if request.user|has_group:"Pedidos Supervisor" %}
                         <li><a href="/pedidos/reporte/">Reporte</a></li>
+                        <li><a href="/pedidos/reporte/items/">Reporte de Items</a></li>
                         <li><a href="/pedidos/incidencias/resolver/">Incidencias</a></li>
                         {% endif %}
                         {% if request.user.is_superuser %}

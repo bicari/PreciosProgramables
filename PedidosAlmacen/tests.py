@@ -3157,3 +3157,25 @@ class ReporteItemsTest(TestCase):
         resp = self.client.get(self.reverse('pedidos-reporte-items'), {'codigos': '02030011', 'categoria': 'PLOM'})
         self.assertContains(resp, 'value="02030011"')
         self.assertContains(resp, 'selected')
+
+
+class MenuReporteItemsTest(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from django.urls import reverse
+        from users.models import User
+        self.reverse = reverse
+        self.g_supervisor, _ = Group.objects.get_or_create(name='Pedidos Supervisor')
+        self.supervisor = User.objects.create_user(username='sup_menu', password='x')
+        self.supervisor.groups.add(self.g_supervisor)
+        self.tienda = User.objects.create_user(username='tnd_menu', password='x')
+
+    def test_supervisor_ve_el_link_en_el_menu(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('dashboard'))
+        self.assertContains(resp, '/pedidos/reporte/items/')
+
+    def test_no_supervisor_no_ve_el_link(self):
+        self.client.force_login(self.tienda)
+        resp = self.client.get(self.reverse('dashboard'))
+        self.assertNotContains(resp, '/pedidos/reporte/items/')
