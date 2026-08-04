@@ -3237,6 +3237,18 @@ class ReporteItemsTest(TestCase):
         self.assertNotIn('estado=', qs)
         self.assertNotIn('codigos=', qs)
 
+    def test_muestra_botones_exportar_sin_filtros(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        self.assertContains(resp, self.reverse('pedidos-reporte-items-csv') + '"')
+        self.assertContains(resp, self.reverse('pedidos-reporte-items-pdf') + '"')
+
+    def test_botones_exportar_incluyen_filtros_aplicados(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'categoria': 'PLOM'})
+        self.assertContains(resp, self.reverse('pedidos-reporte-items-csv') + '?categoria=PLOM')
+        self.assertContains(resp, self.reverse('pedidos-reporte-items-pdf') + '?categoria=PLOM')
+
 
 class MenuReporteItemsTest(TestCase):
     def setUp(self):

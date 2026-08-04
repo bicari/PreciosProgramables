@@ -18,6 +18,14 @@
         </div>
     </div>
     <div class="pd-header-actions">
+        <a href="{% url 'pedidos-reporte-items-csv' %}{% if querystring_filtros %}?{{ querystring_filtros }}{% endif %}"
+           class="btn btn-sm btn-outline-success">
+            <i class="fas fa-file-csv"></i> <span class="d-none d-sm-inline">Exportar CSV</span>
+        </a>
+        <a href="{% url 'pedidos-reporte-items-pdf' %}{% if querystring_filtros %}?{{ querystring_filtros }}{% endif %}"
+           class="btn btn-sm btn-danger">
+            <i class="fas fa-file-pdf"></i> <span class="d-none d-sm-inline">Exportar PDF</span>
+        </a>
         <a href="{% url 'pedidos-lista' %}" class="btn btn-sm btn-outline-light">
             <i class="fas fa-arrow-left"></i> <span class="d-none d-sm-inline">Volver a Pedidos</span>
         </a>
