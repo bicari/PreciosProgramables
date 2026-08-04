@@ -809,3 +809,106 @@ def generar_despacho_pdf(despacho, despacho_items) -> bytes:
     pdf_bytes = buffer.getvalue()
     buffer.close()
     return pdf_bytes
+
+
+def generar_reporte_items_pdf(grupos: list, filtros: dict) -> bytes:
+    """
+    Genera el PDF del reporte de items agrupado por codigo (solo cabecera,
+    sin el detalle por pedido).
+
+    Args:
+        grupos: Lista de dicts con las mismas claves usadas en pantalla
+            (codigo, descripcion, num_pedidos, detalle, estados_badges,
+            total_solicitada, total_preparada, total_despachada,
+            total_recibida, total_back_order, existencia).
+        filtros: Dict con codigos_filtro, categoria_filtro, estado_filtro,
+            fecha_inicio, fecha_fin, sin_filtros_aplicados.
+
+    Returns:
+        Bytes del PDF generado.
+    """
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=LETTER,
+        leftMargin=35, rightMargin=35, topMargin=25, bottomMargin=25,
+    )
+    elements = []
+
+    st_titulo = ParagraphStyle("t", fontSize=16, textColor=_AZUL_OSCURO,
+                                spaceAfter=4, alignment=TA_CENTER, fontName="Helvetica-Bold")
+    st_sub = ParagraphStyle("s", fontSize=9, textColor=colors.grey,
+                             spaceAfter=2, alignment=TA_CENTER)
+
+    elements.append(Paragraph("Reporte de Items por Estado", st_titulo))
+
+    filtros_texto = []
+    if filtros.get("codigos_filtro"):
+        filtros_texto.append(f"Codigos: {filtros['codigos_filtro']}")
+    if filtros.get("categoria_filtro"):
+        filtros_texto.append(f"Categoria: {filtros['categoria_filtro']}")
+    if filtros.get("estado_filtro"):
+        filtros_texto.append(f"Estado: {filtros['estado_filtro']}")
+    if filtros.get("fecha_inicio"):
+        filtros_texto.append(f"Desde: {filtros['fecha_inicio']}")
+    if filtros.get("fecha_fin"):
+        filtros_texto.append(f"Hasta: {filtros['fecha_fin']}")
+    if filtros.get("sin_filtros_aplicados"):
+        filtros_texto.append("Solo items con back order pendiente (default)")
+    if filtros_texto:
+        elements.append(Paragraph(" | ".join(filtros_texto), st_sub))
+    elements.append(Paragraph(f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}", st_sub))
+    elements.append(Spacer(1, 14))
+
+    elements.append(_seccion_header("Items", 542))
+
+    st_cell = ParagraphStyle("ic", fontSize=8, leading=10)
+    st_head = ParagraphStyle("ih", fontSize=8, leading=10, fontName="Helvetica-Bold")
+    data = [[
+        Paragraph("Codigo", st_head), Paragraph("Descripcion", st_head),
+        Paragraph("Pedido(s)", st_head), Paragraph("Estado", st_head),
+        Paragraph("Solicit.", st_head), Paragraph("Preparada", st_head),
+        Paragraph("Despach.", st_head), Paragraph("Recibida", st_head),
+        Paragraph("Back Order", st_head), Paragraph("Existencia", st_head),
+    ]]
+    for grupo in grupos:
+        if grupo["num_pedidos"] == 1:
+            pedido_col = f"#{grupo['detalle'][0].pedido_id}"
+        else:
+            pedido_col = f"{grupo['num_pedidos']} pedidos"
+        estado_col = ", ".join(label for _codigo, label in grupo["estados_badges"])
+        existencia_col = "N/D" if grupo["existencia"] is None else str(grupo["existencia"])
+        data.append([
+            Paragraph(grupo["codigo"], st_cell),
+            Paragraph(grupo["descripcion"], st_cell),
+            Paragraph(pedido_col, st_cell),
+            Paragraph(estado_col, st_cell),
+            str(grupo["total_solicitada"]), str(grupo["total_preparada"]),
+            str(grupo["total_despachada"]), str(grupo["total_recibida"]),
+            str(grupo["total_back_order"]), existencia_col,
+        ])
+    if not grupos:
+        data.append([Paragraph("Sin datos", st_cell), "-", "-", "-", "-", "-", "-", "-", "-", "-"])
+
+    # Ancho util = 542 pt (612 - margenes 35*2)
+    # Codigo 50 | Descripcion 118 | Pedido(s) 55 | Estado 80 | Solicit 38 | Preparada 40 | Despach 40 | Recibida 38 | BackOrder 43 | Existencia 40 = 542
+    col_widths = [50, 118, 55, 80, 38, 40, 40, 38, 43, 40]
+    tabla = Table(data, colWidths=col_widths, repeatRows=1)
+    tabla.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), _GRIS_CLARO),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _GRIS_CLARO]),
+        ("ALIGN", (4, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(tabla)
+
+    doc.build(elements)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes

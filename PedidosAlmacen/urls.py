@@ -21,6 +21,7 @@ urlpatterns = [
     path('pedidos/reporte/incidencias/', views.reporte_incidencias, name='pedidos-reporte-incidencias'),
     path('pedidos/reporte/items/', views.reporte_items, name='pedidos-reporte-items'),
     path('pedidos/reporte/items/csv/', views.exportar_reporte_items_csv, name='pedidos-reporte-items-csv'),
+    path('pedidos/reporte/items/pdf/', views.exportar_reporte_items_pdf, name='pedidos-reporte-items-pdf'),
     path('pedidos/incidencias/resolver/', views.resolver_incidencias, name='pedidos-resolver-incidencias'),
     path('pedidos/incidencias/resolver/validar/', views.validar_traslado_incidencias, name='pedidos-validar-traslado-incidencias'),
     path('pedidos/incidencias/resolver/confirmar/', views.confirmar_resolucion_incidencias, name='pedidos-confirmar-resolucion'),

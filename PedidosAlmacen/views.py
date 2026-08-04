@@ -18,7 +18,10 @@ from .models import (
 from .forms import PedidoForm
 from .dbisam import PedidosDBISAM, DEPOSITO_ALMACEN
 from .notifications import notificar_nuevo_pedido, notificar_despacho, notificar_despacho_parcial
-from .pdf import generar_reporte_pedidos_pdf, generar_reporte_pickers_pdf, generar_pedido_pdf, generar_despacho_pdf
+from .pdf import (
+    generar_reporte_pedidos_pdf, generar_reporte_pickers_pdf,
+    generar_pedido_pdf, generar_despacho_pdf, generar_reporte_items_pdf,
+)
 import logging
 import json
 import csv
@@ -1990,6 +1993,17 @@ def exportar_reporte_items_csv(request):
 
     nombre_archivo = f"reporte_items_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
     response = HttpResponse(buffer.getvalue().encode('utf-8-sig'), content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
+    return response
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_supervisor, login_url='dashboard')
+def exportar_reporte_items_pdf(request):
+    grupos, filtros = _construir_grupos_reporte_items(request)
+    pdf_bytes = generar_reporte_items_pdf(grupos, filtros)
+    nombre_archivo = f"reporte_items_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
     return response
 

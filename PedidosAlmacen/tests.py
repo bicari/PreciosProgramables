@@ -3341,3 +3341,34 @@ class ExportarReporteItemsTest(TestCase):
         resp = self.client.get(self.reverse('pedidos-reporte-items-csv'), {'estado': ''})
         contenido = resp.content.decode('utf-8-sig')
         self.assertIn('N/D', contenido)
+
+    def test_no_supervisor_redirige_pdf(self):
+        self.client.force_login(self.tienda)
+        resp = self.client.get(self.reverse('pedidos-reporte-items-pdf'))
+        self.assertEqual(resp.status_code, 302)
+
+    def test_pdf_content_type_y_nombre_archivo(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items-pdf'), {'estado': ''})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp['Content-Type'], 'application/pdf')
+        self.assertIn('attachment; filename="reporte_items_', resp['Content-Disposition'])
+
+    def test_pdf_no_lanza_excepcion_sin_grupos(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items-pdf'), {'codigos': 'NOEXISTE'})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp['Content-Type'], 'application/pdf')
+
+    def test_pdf_respeta_default_de_back_order_sin_filtros(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items-pdf'))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp['Content-Type'], 'application/pdf')
+
+    def test_pdf_existencia_nd_si_dbisam_falla_no_rompe_generacion(self):
+        self.client.force_login(self.supervisor)
+        self.mock_dbisam.return_value.consultar_stock_multiple.side_effect = Exception('caído')
+        resp = self.client.get(self.reverse('pedidos-reporte-items-pdf'), {'estado': ''})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp['Content-Type'], 'application/pdf')
