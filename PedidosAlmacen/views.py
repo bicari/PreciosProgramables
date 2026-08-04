@@ -1835,6 +1835,9 @@ def reporte_items(request):
     codigos_raw = request.GET.get('codigos', '').strip()
     categoria_filtro = request.GET.get('categoria', '')
     estado_filtro = request.GET.get('estado', '')
+    fecha_inicio = request.GET.get('fecha_inicio', '')
+    fecha_fin = request.GET.get('fecha_fin', '')
+    sin_filtros_aplicados = not request.GET
 
     pedidos = Pedido.objects.exclude(estado='ANULADO')
     items = PedidoItem.objects.filter(pedido__in=pedidos)
@@ -1846,6 +1849,12 @@ def reporte_items(request):
         items = items.filter(pedido__categoria=categoria_filtro)
     if estado_filtro:
         items = items.filter(estado=estado_filtro)
+    if fecha_inicio:
+        items = items.filter(pedido__fecha_creacion__date__gte=fecha_inicio)
+    if fecha_fin:
+        items = items.filter(pedido__fecha_creacion__date__lte=fecha_fin)
+    if sin_filtros_aplicados:
+        items = items.filter(cantidad_back_order__gt=0)
 
     grupos = list(
         items.values('codigo')
@@ -1864,11 +1873,7 @@ def reporte_items(request):
     codigos_pagina = [g['codigo'] for g in grupos]
     detalle_por_codigo = {}
     if codigos_pagina:
-        detalle_items = (
-            items.filter(codigo__in=codigos_pagina)
-            .select_related('pedido')
-            .order_by('codigo', 'pedido_id')
-        )
+        detalle_items = items.order_by('codigo', 'pedido_id')
         for item in detalle_items:
             detalle_por_codigo.setdefault(item.codigo, []).append(item)
 
@@ -1877,7 +1882,7 @@ def reporte_items(request):
     if codigos_pagina:
         try:
             dbisam = PedidosDBISAM()
-            existencia_por_codigo = dbisam.consultar_stock_multiple(codigos_pagina)
+            existencia_por_codigo = dbisam.consultar_stock_multiple(codigos_pagina, deposito=DEPOSITO_ALMACEN)
         except Exception as e:
             logger.warning(f"No se pudo consultar existencia para reporte de items: {e}")
             messages.warning(
@@ -1902,11 +1907,12 @@ def reporte_items(request):
                 'back_order': item.cantidad_back_order,
             }
             for item in detalle
-        ])
+        ]) if grupo['num_pedidos'] > 1 else '[]'
         grupo['existencia'] = None if stock_no_disponible else existencia_por_codigo.get(grupo['codigo'], 0)
 
     categorias_disponibles = (
         Pedido.objects.exclude(categoria='')
+        .exclude(estado='ANULADO')
         .values('categoria')
         .annotate(nombre=Max('categoria_nombre'))
         .order_by('categoria')
@@ -1917,6 +1923,9 @@ def reporte_items(request):
         'codigos_filtro': codigos_raw,
         'categoria_filtro': categoria_filtro,
         'estado_filtro': estado_filtro,
+        'fecha_inicio': fecha_inicio,
+        'fecha_fin': fecha_fin,
+        'sin_filtros_aplicados': sin_filtros_aplicados,
         'categorias_disponibles': categorias_disponibles,
         'estados_item': PedidoItem.ESTADO_ITEM_CHOICES,
     })

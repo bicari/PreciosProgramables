@@ -33,6 +33,14 @@
     {% endfor %}
 {% endif %}
 
+{% if sin_filtros_aplicados %}
+<div class="alert alert-info alert-dismissible fade show mb-3" role="alert">
+    <i class="fas fa-info-circle me-1"></i>
+    Mostrando solo items con back order pendiente. Aplica un filtro o selecciona "Todos" en Estado para ver el listado completo.
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
 <!-- FILTROS -->
 <div class="pr-filter-card mb-4">
     <div class="pr-filter-header">
@@ -40,6 +48,14 @@
     </div>
     <form method="get" class="pr-filter-body">
         <div class="pr-filter-fields">
+            <div class="pr-filter-field">
+                <label class="pr-field-label">Fecha inicio</label>
+                <input type="date" name="fecha_inicio" class="form-control form-control-sm" value="{{ fecha_inicio }}">
+            </div>
+            <div class="pr-filter-field">
+                <label class="pr-field-label">Fecha fin</label>
+                <input type="date" name="fecha_fin" class="form-control form-control-sm" value="{{ fecha_fin }}">
+            </div>
             <div class="pr-filter-field pr-filter-field--wide">
                 <label class="pr-field-label">Código(s) de producto</label>
                 <input type="text" name="codigos" class="form-control form-control-sm"
@@ -211,6 +227,7 @@
 .grp-child-pedido { font-family:'Consolas','Courier New',monospace; font-size:0.78rem; }
 .grp-child-table td { padding-top:0.4rem; padding-bottom:0.4rem; color:#495057; border-bottom:1px solid #f4f6f8; }
 .grp-child-table td:first-child { padding-left:1.9rem; }
+.pl-tabla tbody td.grp-child-cell { padding:0; }
 
 /* ── Responsive ── */
 @media (max-width: 767px) {
@@ -264,7 +281,7 @@ $(document).ready(function () {
             btn.removeClass('is-open');
         } else {
             var detalle = JSON.parse(tr.attr('data-detalle') || '[]');
-            row.child(formatDetalleItems(detalle)).show();
+            row.child(formatDetalleItems(detalle), 'grp-child-cell').show();
             btn.addClass('is-open');
         }
     });

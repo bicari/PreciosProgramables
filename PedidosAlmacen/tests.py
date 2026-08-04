@@ -3056,13 +3056,13 @@ class ReporteItemsTest(TestCase):
 
     def test_excluye_pedidos_anulados_por_defecto(self):
         self.client.force_login(self.supervisor)
-        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'estado': ''})
         codigos = [g['codigo'] for g in resp.context['grupos']]
         self.assertNotIn('99999999', codigos)
 
     def test_agrega_cantidades_de_multiples_pedidos_del_mismo_codigo(self):
         self.client.force_login(self.supervisor)
-        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'estado': ''})
         grupos_por_codigo = {g['codigo']: g for g in resp.context['grupos']}
         grupo = grupos_por_codigo['01120044']
         self.assertEqual(grupo['num_pedidos'], 2)
@@ -3074,7 +3074,7 @@ class ReporteItemsTest(TestCase):
 
     def test_codigo_con_un_solo_pedido_no_se_agrupa(self):
         self.client.force_login(self.supervisor)
-        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'estado': ''})
         grupos_por_codigo = {g['codigo']: g for g in resp.context['grupos']}
         self.assertEqual(grupos_por_codigo['02030011']['num_pedidos'], 1)
 
@@ -3110,7 +3110,7 @@ class ReporteItemsTest(TestCase):
         self.mock_dbisam.return_value.consultar_stock_multiple.return_value = {
             '01120044': 128, '02030011': 340,
         }
-        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'estado': ''})
         grupos_por_codigo = {g['codigo']: g for g in resp.context['grupos']}
         self.assertEqual(grupos_por_codigo['01120044']['existencia'], 128)
         self.assertEqual(grupos_por_codigo['02030011']['existencia'], 340)
@@ -3118,7 +3118,7 @@ class ReporteItemsTest(TestCase):
     def test_existencia_codigo_sin_stock_es_cero(self):
         self.client.force_login(self.supervisor)
         self.mock_dbisam.return_value.consultar_stock_multiple.return_value = {'01120044': 128}
-        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'estado': ''})
         grupos_por_codigo = {g['codigo']: g for g in resp.context['grupos']}
         self.assertEqual(grupos_por_codigo['02030011']['existencia'], 0)
 
@@ -3134,7 +3134,7 @@ class ReporteItemsTest(TestCase):
 
     def test_template_muestra_boton_detalle_para_codigo_con_multiples_pedidos(self):
         self.client.force_login(self.supervisor)
-        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'estado': ''})
         self.assertContains(resp, 'class="grp-detail-btn"')
         self.assertContains(resp, '01120044')
 
@@ -3156,7 +3156,49 @@ class ReporteItemsTest(TestCase):
         self.client.force_login(self.supervisor)
         resp = self.client.get(self.reverse('pedidos-reporte-items'), {'codigos': '02030011', 'categoria': 'PLOM'})
         self.assertContains(resp, 'value="02030011"')
-        self.assertContains(resp, 'selected')
+        self.assertContains(resp, 'value="PLOM" selected')
+
+    def test_existencia_consulta_solo_deposito_almacen(self):
+        from PedidosAlmacen.dbisam import DEPOSITO_ALMACEN
+        self.client.force_login(self.supervisor)
+        self.client.get(self.reverse('pedidos-reporte-items'), {'estado': ''})
+        self.mock_dbisam.return_value.consultar_stock_multiple.assert_called_once()
+        _, kwargs = self.mock_dbisam.return_value.consultar_stock_multiple.call_args
+        self.assertEqual(kwargs.get('deposito'), DEPOSITO_ALMACEN)
+
+    def test_sin_filtros_muestra_solo_items_con_back_order_pendiente(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        codigos = [g['codigo'] for g in resp.context['grupos']]
+        # Solo pedido1 (01120044, back_order=15) tiene back order pendiente;
+        # pedido2 (mismo código, back_order=0), pedido3 (02030011, back_order=0)
+        # y el pedido anulado quedan fuera del default.
+        self.assertEqual(codigos, ['01120044'])
+        grupo = resp.context['grupos'][0]
+        self.assertEqual(grupo['num_pedidos'], 1)
+        self.assertEqual(grupo['total_solicitada'], 40)
+
+    def test_cualquier_filtro_explicito_desactiva_el_default_de_back_order(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'estado': ''})
+        codigos = sorted(g['codigo'] for g in resp.context['grupos'])
+        # Con el default desactivado, 02030011 (back_order=0) vuelve a aparecer.
+        self.assertIn('02030011', codigos)
+
+    def test_filtro_por_fecha(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        from .models import Pedido
+        self.client.force_login(self.supervisor)
+        fecha_vieja = (timezone.now() - timedelta(days=30)).date()
+        Pedido.objects.filter(pk=self.pedido3.pk).update(fecha_creacion=fecha_vieja)
+        fecha_inicio = (timezone.now() - timedelta(days=1)).date().isoformat()
+        resp = self.client.get(
+            self.reverse('pedidos-reporte-items'),
+            {'estado': '', 'fecha_inicio': fecha_inicio},
+        )
+        codigos = [g['codigo'] for g in resp.context['grupos']]
+        self.assertNotIn('02030011', codigos)
 
 
 class MenuReporteItemsTest(TestCase):
