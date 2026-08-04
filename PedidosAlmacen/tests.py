@@ -3249,6 +3249,14 @@ class ReporteItemsTest(TestCase):
         self.assertContains(resp, self.reverse('pedidos-reporte-items-csv') + '?categoria=PLOM')
         self.assertContains(resp, self.reverse('pedidos-reporte-items-pdf') + '?categoria=PLOM')
 
+    def test_querystring_filtros_incluye_marcador_si_form_se_envia_vacio(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {
+            'codigos': '', 'categoria': '', 'estado': '', 'fecha_inicio': '', 'fecha_fin': '',
+        })
+        self.assertFalse(resp.context['sin_filtros_aplicados'])
+        self.assertEqual(resp.context['querystring_filtros'], 'estado=')
+
 
 class MenuReporteItemsTest(TestCase):
     def setUp(self):
@@ -3388,3 +3396,33 @@ class ExportarReporteItemsTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp['Content-Type'], 'application/pdf')
         self.assertTrue(resp.content.startswith(b'%PDF'))
+
+    def test_csv_respeta_listado_completo_cuando_form_se_envia_vacio(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items-csv'), {
+            'codigos': '', 'categoria': '', 'estado': '', 'fecha_inicio': '', 'fecha_fin': '',
+        })
+        contenido = resp.content.decode('utf-8-sig')
+        self.assertIn('01120044', contenido)
+        self.assertIn('02030011', contenido)
+
+    def test_csv_no_deja_mensaje_pendiente_si_dbisam_falla(self):
+        self.client.force_login(self.supervisor)
+        self.mock_dbisam.return_value.consultar_stock_multiple.side_effect = Exception('caído')
+        self.client.get(self.reverse('pedidos-reporte-items-csv'), {'estado': ''})
+        # DBISAM se recupera antes de visitar la siguiente pagina: si el mensaje
+        # de advertencia aparece igual, es porque quedo colgado del export (fuga),
+        # no porque esta consulta haya vuelto a fallar.
+        self.mock_dbisam.return_value.consultar_stock_multiple.side_effect = None
+        self.mock_dbisam.return_value.consultar_stock_multiple.return_value = {}
+        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        mensajes = [str(m) for m in resp.context['messages']]
+        self.assertFalse(any('existencia' in m.lower() for m in mensajes))
+
+    def test_csv_neutraliza_formulas_en_descripcion(self):
+        from .models import PedidoItem
+        self.client.force_login(self.supervisor)
+        PedidoItem.objects.filter(pedido=self.pedido3).update(descripcion='=HYPERLINK("http://evil")')
+        resp = self.client.get(self.reverse('pedidos-reporte-items-csv'), {'categoria': 'PLOM'})
+        contenido = resp.content.decode('utf-8-sig')
+        self.assertIn("'=HYPERLINK", contenido)

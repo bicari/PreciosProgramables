@@ -1835,7 +1835,7 @@ def reporte_incidencias(request):
     })
 
 
-def _construir_grupos_reporte_items(request):
+def _construir_grupos_reporte_items(request, emitir_mensajes=True):
     """
     Query y agregacion compartidos por pantalla, export CSV y export PDF
     del reporte de items. Devuelve (grupos, filtros).
@@ -1893,10 +1893,11 @@ def _construir_grupos_reporte_items(request):
             existencia_por_codigo = dbisam.consultar_stock_multiple(codigos_pagina, deposito=DEPOSITO_ALMACEN)
         except Exception as e:
             logger.warning(f"No se pudo consultar existencia para reporte de items: {e}")
-            messages.warning(
-                request,
-                'No se pudo consultar la existencia en almacén (a2 no disponible en este momento).',
-            )
+            if emitir_mensajes:
+                messages.warning(
+                    request,
+                    'No se pudo consultar la existencia en almacén (a2 no disponible en este momento).',
+                )
             stock_no_disponible = True
 
     for grupo in grupos:
@@ -1927,6 +1928,8 @@ def _construir_grupos_reporte_items(request):
             'fecha_fin': fecha_fin,
         }.items() if v
     })
+    if not querystring_filtros and not sin_filtros_aplicados:
+        querystring_filtros = 'estado='
 
     filtros = {
         'codigos_filtro': codigos_raw,
@@ -1943,7 +1946,7 @@ def _construir_grupos_reporte_items(request):
 @login_required(login_url='/login/')
 @user_passes_test(is_pedidos_supervisor, login_url='dashboard')
 def reporte_items(request):
-    grupos, filtros = _construir_grupos_reporte_items(request)
+    grupos, filtros = _construir_grupos_reporte_items(request, emitir_mensajes=True)
 
     categorias_disponibles = (
         Pedido.objects.exclude(categoria='')
@@ -1967,10 +1970,22 @@ def reporte_items(request):
     })
 
 
+def _csv_safe(valor):
+    """
+    Neutraliza inyección de fórmulas CSV: si el valor empieza con un
+    caracter que Excel/Sheets interpretaría como inicio de fórmula,
+    lo antepone con comilla simple para forzarlo a texto literal.
+    """
+    texto = str(valor)
+    if texto[:1] in ('=', '+', '-', '@', '\t', '\r'):
+        return "'" + texto
+    return texto
+
+
 @login_required(login_url='/login/')
 @user_passes_test(is_pedidos_supervisor, login_url='dashboard')
 def exportar_reporte_items_csv(request):
-    grupos, _filtros = _construir_grupos_reporte_items(request)
+    grupos, _filtros = _construir_grupos_reporte_items(request, emitir_mensajes=False)
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
@@ -1986,7 +2001,7 @@ def exportar_reporte_items_csv(request):
         estado_col = ', '.join(label for _codigo, label in grupo['estados_badges'])
         existencia_col = 'N/D' if grupo['existencia'] is None else grupo['existencia']
         writer.writerow([
-            grupo['codigo'], grupo['descripcion'], pedido_col, estado_col,
+            _csv_safe(grupo['codigo']), _csv_safe(grupo['descripcion']), _csv_safe(pedido_col), _csv_safe(estado_col),
             grupo['total_solicitada'], grupo['total_preparada'], grupo['total_despachada'],
             grupo['total_recibida'], grupo['total_back_order'], existencia_col,
         ])
@@ -2000,7 +2015,7 @@ def exportar_reporte_items_csv(request):
 @login_required(login_url='/login/')
 @user_passes_test(is_pedidos_supervisor, login_url='dashboard')
 def exportar_reporte_items_pdf(request):
-    grupos, filtros = _construir_grupos_reporte_items(request)
+    grupos, filtros = _construir_grupos_reporte_items(request, emitir_mensajes=False)
     pdf_bytes = generar_reporte_items_pdf(grupos, filtros)
     nombre_archivo = f"reporte_items_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
