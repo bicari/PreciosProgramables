@@ -27,6 +27,7 @@
     <form method="post" id="form-recepcion" data-ajax="true" enctype="multipart/form-data">
         {% csrf_token %}
         <input type="hidden" name="productos_extra" id="productos_extra" value="[]">
+        <input type="hidden" name="items_no_despachados" id="items_no_despachados" value="[]">
 
         <!-- ── Tabla de items ───────────────────────────────────────── -->
         <div class="card mb-3">
@@ -115,6 +116,43 @@
                     </tbody>
                 </table>
                 </div>
+            </div>
+        </div>
+
+        <!-- ── Productos del pedido recibidos fuera de este despacho ─── -->
+        <div class="card mb-3" id="card-fuera-despacho" style="display:none">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-box-open text-info"></i> Productos del pedido recibidos fuera de este despacho</span>
+                <span class="badge bg-info text-dark" id="badge-fuera-despacho-count">0</span>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0" id="tabla-fuera-despacho">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Código</th>
+                            <th>Descripción</th>
+                            <th class="text-center" style="width:100px">Solicitado</th>
+                            <th class="text-center" style="width:100px">Pendiente</th>
+                            <th class="text-center" style="width:100px">Cantidad</th>
+                            <th style="width:50px"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-fuera-despacho"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ── Foto para productos del pedido recibidos fuera de despacho ── -->
+        <div class="card mb-3 border-info" id="panel-foto-fuera-despacho" style="display:none">
+            <div class="card-body d-flex align-items-center gap-3 flex-wrap">
+                <i class="fas fa-camera text-info fa-lg"></i>
+                <div>
+                    <label class="fw-bold mb-0 text-info">Foto de los productos recibidos fuera de este despacho (obligatorio):</label>
+                    <small class="d-block text-muted">Se requiere una foto de evidencia de los productos del pedido recibidos sin figurar en este despacho.</small>
+                </div>
+                <input type="file" name="foto_no_despachados" id="foto_no_despachados"
+                    accept="image/*" capture="environment"
+                    class="form-control form-control-sm" style="max-width:300px">
             </div>
         </div>
 
@@ -216,7 +254,7 @@
                         <button type="button" class="btn btn-outline-primary btn-lg px-4 py-3" id="modal-btn-agregar-nuevo" style="min-width:200px">
                             <i class="fas fa-plus-circle d-block mb-2" style="font-size:2rem"></i>
                             <strong>Agregar producto nuevo</strong><br>
-                            <small class="fw-normal text-muted">Producto recibido no estaba en el pedido</small>
+                            <small class="fw-normal text-muted">No vino en este despacho: no estaba en el pedido, o estaba pero no se despachó</small>
                         </button>
                     </div>
                 </div>
@@ -301,13 +339,20 @@
     </div>
 </div>
 
+{{ items_fuera_despacho|json_script:"items-fuera-despacho-data" }}
 <script>
 const URL_VERIFICAR = "{% url 'pedidos-verificar-autorizacion' %}";
 const URL_BUSCAR    = "{% url 'pedidos-buscar-producto' %}";
 const CATEGORIA_PEDIDO = "{{ pedido.categoria|escapejs }}";
 const CATEGORIA_NOMBRE = "{{ pedido.categoria_nombre|escapejs }}";
-const CODIGOS_PEDIDO = [{% for it in pedido.items.all %}"{{ it.codigo|escapejs }}",{% endfor %}].map(c => c.trim().toUpperCase());
+const CODIGOS_PEDIDO = [{% for di in despacho_items %}{% if di.pedido_item %}"{{ di.pedido_item.codigo|escapejs }}",{% endif %}{% endfor %}].map(c => c.trim().toUpperCase());
 const CSRF = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+// Productos del pedido que no vinieron en este despacho, indexados por código normalizado
+const ITEMS_FUERA_DESPACHO = {};
+JSON.parse(document.getElementById('items-fuera-despacho-data').textContent).forEach(function (it) {
+    ITEMS_FUERA_DESPACHO[String(it.codigo).trim().toUpperCase()] = it;
+});
 
 // ── Estado global ─────────────────────────────────────────────────────
 let autorizacionOk  = false;
@@ -316,6 +361,7 @@ let currentDiId     = null;  // di.id que abrió el modal (null = acción global
 let currentAction   = null;  // 'cambiar' | 'agregar'
 let selectedProduct = null;  // {codigo, descripcion}
 let extrasRows      = [];
+let itemsNoDespachadosRows = [];
 
 // ── Helpers de modal ──────────────────────────────────────────────────
 function getModal() {
@@ -520,6 +566,35 @@ function confirmarAgregarExtra() {
         errorEl.classList.remove('d-none');
         return;
     }
+
+    const itemFueraDespacho = ITEMS_FUERA_DESPACHO[codigoNorm];
+    if (itemFueraDespacho) {
+        if (itemFueraDespacho.bloqueado_por) {
+            errorEl.textContent = `${selectedProduct.codigo} viene en el Despacho #${itemFueraDespacho.bloqueado_por}, que aún está pendiente de recepción. Recíbelo en ese despacho en lugar de agregarlo aquí.`;
+            errorEl.classList.remove('d-none');
+            return;
+        }
+        if (itemsNoDespachadosRows.some(r => r.pedido_item_id === itemFueraDespacho.id)) {
+            errorEl.textContent = `El producto ${selectedProduct.codigo} ya está en la lista de recibidos fuera de este despacho.`;
+            errorEl.classList.remove('d-none');
+            return;
+        }
+        errorEl.classList.add('d-none');
+
+        itemsNoDespachadosRows.push({
+            pedido_item_id: itemFueraDespacho.id,
+            codigo: itemFueraDespacho.codigo,
+            descripcion: itemFueraDespacho.descripcion,
+            solicitada: itemFueraDespacho.cantidad_solicitada,
+            pendiente: itemFueraDespacho.cantidad_back_order,
+            cantidad,
+        });
+        renderItemsNoDespachados();
+        getModal().hide();
+        actualizarPanelAutorizados();
+        return;
+    }
+
     if (extrasRows.some(r => String(r.codigo).trim().toUpperCase() === codigoNorm)) {
         errorEl.textContent = `El producto ${selectedProduct.codigo} ya está en la lista de adicionales.`;
         errorEl.classList.remove('d-none');
@@ -593,6 +668,53 @@ function eliminarExtra(idx) {
     actualizarPanelAutorizados();
 }
 
+// ── Render items del pedido recibidos fuera de este despacho ──────────
+function renderItemsNoDespachados() {
+    const tbody   = document.getElementById('tbody-fuera-despacho');
+    const cardFD  = document.getElementById('card-fuera-despacho');
+    const badge   = document.getElementById('badge-fuera-despacho-count');
+    tbody.innerHTML = '';
+
+    const panelFotoFD = document.getElementById('panel-foto-fuera-despacho');
+    if (itemsNoDespachadosRows.length === 0) {
+        cardFD.style.display = 'none';
+        if (panelFotoFD) panelFotoFD.style.display = 'none';
+    } else {
+        cardFD.style.display = '';
+        if (panelFotoFD) panelFotoFD.style.display = '';
+        badge.textContent = itemsNoDespachadosRows.length;
+        itemsNoDespachadosRows.forEach((row, idx) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${escHtml(row.codigo)}</td>
+                <td>${escHtml(row.descripcion)}</td>
+                <td class="text-center">${row.solicitada}</td>
+                <td class="text-center">${row.pendiente}</td>
+                <td><input type="number" class="form-control form-control-sm text-center" value="${row.cantidad}" min="1"
+                    onchange="itemsNoDespachadosRows[${idx}].cantidad = parseInt(this.value)||1; sincronizarItemsNoDespachados()"></td>
+                <td class="text-center">
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="eliminarItemNoDespachado(${idx})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>`;
+            tbody.appendChild(tr);
+        });
+    }
+    sincronizarItemsNoDespachados();
+}
+
+function sincronizarItemsNoDespachados() {
+    document.getElementById('items_no_despachados').value = JSON.stringify(
+        itemsNoDespachadosRows.map(r => ({pedido_item_id: r.pedido_item_id, cantidad: r.cantidad}))
+    );
+}
+
+function eliminarItemNoDespachado(idx) {
+    itemsNoDespachadosRows.splice(idx, 1);
+    renderItemsNoDespachados();
+    actualizarPanelAutorizados();
+}
+
 function escHtml(str) {
     return String(str).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -602,7 +724,7 @@ function tieneEspeciales() {
     for (const inp of document.querySelectorAll('input[id^="tipo_inc_"]')) {
         if (inp.value === 'PRODUCTO_ERRONEO') return true;
     }
-    return extrasRows.length > 0;
+    return extrasRows.length > 0 || itemsNoDespachadosRows.length > 0;
 }
 
 function actualizarPanelAutorizados() {
@@ -636,6 +758,7 @@ document.getElementById('form-recepcion').addEventListener('submit', function (e
         }
     });
     totalRecibido += extrasRows.reduce((s, r) => s + (parseInt(r.cantidad) || 0), 0);
+    totalRecibido += itemsNoDespachadosRows.reduce((s, r) => s + (parseInt(r.cantidad) || 0), 0);
     if (totalRecibido === 0) {
         alert('Debe ingresar al menos una cantidad mayor a 0 para confirmar la recepción.');
         return;
@@ -656,6 +779,12 @@ document.getElementById('form-recepcion').addEventListener('submit', function (e
         const fotoE = document.getElementById('foto_extras');
         if (!fotoE || !fotoE.files || !fotoE.files.length) {
             fotosFaltantes.push('productos adicionales');
+        }
+    }
+    if (itemsNoDespachadosRows.length > 0) {
+        const fotoFD = document.getElementById('foto_no_despachados');
+        if (!fotoFD || !fotoFD.files || !fotoFD.files.length) {
+            fotosFaltantes.push('productos del pedido recibidos fuera de este despacho');
         }
     }
     if (fotosFaltantes.length > 0) {

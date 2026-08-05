@@ -136,6 +136,7 @@ class DespachoItem(models.Model):
         ('SKU_NO_CONTEMPLADO', 'SKU No Contemplado'),
         ('CANTIDAD_MENOR', 'Cantidad Menor a lo Despachado'),
         ('CANTIDAD_MAYOR', 'Cantidad Mayor a lo Despachado'),
+        ('RECIBIDO_SIN_DESPACHAR', 'Recibido sin haber sido despachado'),
     ]
     despacho = models.ForeignKey(Despacho, on_delete=models.CASCADE, related_name='items')
     # Nullable para SKU no contemplados (no tienen PedidoItem de origen)
@@ -143,7 +144,7 @@ class DespachoItem(models.Model):
     cantidad_despachada = models.IntegerField()
     cantidad_recibida = models.IntegerField(default=0)
     observacion = models.CharField(max_length=255, blank=True)
-    tipo_incidencia = models.CharField(max_length=20, choices=TIPO_INCIDENCIA_CHOICES, blank=True, default='')
+    tipo_incidencia = models.CharField(max_length=30, choices=TIPO_INCIDENCIA_CHOICES, blank=True, default='')
     # Producto realmente recibido (solo para PRODUCTO_ERRONEO)
     codigo_real = models.CharField(max_length=50, blank=True)
     descripcion_real = models.CharField(max_length=255, blank=True)

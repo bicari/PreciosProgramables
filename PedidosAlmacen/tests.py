@@ -895,6 +895,171 @@ class CrearPedidoStockTest(TestCase):
         self.assertIn('items_json_inicial', resp.context)
 
 
+class CrearPedidoDisponibilidadTest(TestCase):
+    """crear_pedido descuenta lo comprometido por pedidos previos no completados
+    del stock físico, y rechaza pedidos que excedan lo realmente disponible."""
+
+    def setUp(self):
+        from users.models import User
+        from django.urls import reverse
+        from .models import Pedido, PedidoItem
+        self.Pedido = Pedido
+        self.PedidoItem = PedidoItem
+        self.user = User.objects.create_superuser(username='disp_view_u', password='x')
+        self.client.force_login(self.user)
+        self.url = reverse('pedidos-crear')
+
+    def _pedido_previo(self, cantidad_solicitada=70, cantidad_despachada=0,
+                        estado_item='PENDIENTE', estado_pedido='PENDIENTE'):
+        pedido = self.Pedido.objects.create(solicitante=self.user, estado=estado_pedido)
+        self.PedidoItem.objects.create(
+            pedido=pedido, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=cantidad_solicitada, cantidad_despachada=cantidad_despachada,
+            estado=estado_item,
+        )
+        return pedido
+
+    def _post(self, cantidad, mock_stock):
+        items = [{'codigo': 'SKU1', 'descripcion': 'Producto Uno', 'cantidad': str(cantidad),
+                  'referencia': '', 'puesto': '', 'ref_proveedor': ''}]
+        form_data = {
+            'categoria': 'CAT1', 'categoria_nombre': 'Categoría 1', 'condicion': 'URGENTE',
+            'deposito': '2', 'deposito_nombre': 'Tienda Norte',
+            'items_json': json.dumps(items),
+        }
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.obtener_categorias.return_value = []
+            mock_db.return_value.consultar_stock_multiple.return_value = mock_stock
+            resp = self.client.post(self.url, form_data)
+        return resp
+
+    def test_pedido_previo_pendiente_bloquea_si_excede_disponible(self):
+        """Existencia 100, pedido previo de 70 -> disponible 30. Pedir 50 se rechaza."""
+        previo = self._pedido_previo(cantidad_solicitada=70)
+        resp = self._post(50, {'SKU1': 100})
+        self.assertEqual(self.Pedido.objects.exclude(pk=previo.pk).count(), 0)
+        self.assertEqual(resp.status_code, 200)
+        mensajes = [str(m) for m in resp.context['messages']]
+        self.assertTrue(any(f'#{previo.numero_pedido}' in m for m in mensajes))
+        self.assertTrue(any('30' in m for m in mensajes))
+
+    def test_pedido_previo_pendiente_permite_si_no_excede_disponible(self):
+        """Mismo compromiso de 70, pero pedir solo 30 (el disponible) sí se crea."""
+        previo = self._pedido_previo(cantidad_solicitada=70)
+        resp = self._post(30, {'SKU1': 100})
+        self.assertEqual(self.Pedido.objects.exclude(pk=previo.pk).count(), 1)
+        self.assertEqual(resp.status_code, 302)
+
+    def test_pedido_previo_anulado_no_descuenta_disponibilidad(self):
+        self._pedido_previo(cantidad_solicitada=70, estado_pedido='ANULADO')
+        resp = self._post(50, {'SKU1': 100})
+        self.assertEqual(resp.status_code, 302)  # se crea: no hay compromiso real
+
+    def test_pedido_previo_cerrado_no_descuenta_disponibilidad(self):
+        self._pedido_previo(cantidad_solicitada=70, estado_item='CERRADO', estado_pedido='CERRADO')
+        resp = self._post(50, {'SKU1': 100})
+        self.assertEqual(resp.status_code, 302)
+
+    def test_item_parcial_descuenta_solo_lo_pendiente(self):
+        """Solicitó 70, ya despachó 50 -> solo 20 siguen comprometidos."""
+        self._pedido_previo(cantidad_solicitada=70, cantidad_despachada=50, estado_item='PARCIAL')
+        resp = self._post(75, {'SKU1': 100})  # disponible = 100 - 20 = 80 >= 75
+        self.assertEqual(resp.status_code, 302)
+
+    def test_fallo_dbisam_no_bloquea_creacion_pese_a_compromiso(self):
+        """Si DBISAM falla, se preserva la degradación actual: se crea igual."""
+        self._pedido_previo(cantidad_solicitada=70)
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.obtener_categorias.return_value = []
+            mock_db.return_value.consultar_stock_multiple.side_effect = Exception('odbc down')
+            items = [{'codigo': 'SKU1', 'descripcion': 'Producto Uno', 'cantidad': '50',
+                      'referencia': '', 'puesto': '', 'ref_proveedor': ''}]
+            resp = self.client.post(self.url, {
+                'categoria': 'CAT1', 'categoria_nombre': 'Categoría 1', 'condicion': 'URGENTE',
+                'deposito': '2', 'deposito_nombre': 'Tienda Norte',
+                'items_json': json.dumps(items),
+            })
+        self.assertEqual(resp.status_code, 302)
+
+
+class CrearPedidoDuplicadoMismoDepositoTest(TestCase):
+    """crear_pedido bloquea (sin importar cantidad ni stock global) cuando el
+    mismo depósito de destino ya tiene un pedido activo sin despachar de ese SKU."""
+
+    def setUp(self):
+        from users.models import User
+        from django.urls import reverse
+        from .models import Pedido, PedidoItem
+        self.Pedido = Pedido
+        self.PedidoItem = PedidoItem
+        self.user = User.objects.create_superuser(username='dup_view_u', password='x')
+        self.client.force_login(self.user)
+        self.url = reverse('pedidos-crear')
+
+    def _pedido_previo(self, deposito_codigo, cantidad_solicitada=50,
+                        cantidad_despachada=0, estado_item='PENDIENTE', estado_pedido='PENDIENTE'):
+        pedido = self.Pedido.objects.create(
+            solicitante=self.user, estado=estado_pedido, deposito_codigo=deposito_codigo,
+        )
+        self.PedidoItem.objects.create(
+            pedido=pedido, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=cantidad_solicitada, cantidad_despachada=cantidad_despachada,
+            estado=estado_item,
+        )
+        return pedido
+
+    def _post(self, deposito_codigo, cantidad, mock_stock):
+        items = [{'codigo': 'SKU1', 'descripcion': 'Producto Uno', 'cantidad': str(cantidad),
+                  'referencia': '', 'puesto': '', 'ref_proveedor': ''}]
+        form_data = {
+            'categoria': 'CAT1', 'categoria_nombre': 'Categoría 1', 'condicion': 'URGENTE',
+            'deposito': str(deposito_codigo), 'deposito_nombre': 'Tienda',
+            'items_json': json.dumps(items),
+        }
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.obtener_categorias.return_value = []
+            mock_db.return_value.consultar_stock_multiple.return_value = mock_stock
+            resp = self.client.post(self.url, form_data)
+        return resp
+
+    def test_escenario_usuario_deposito_2_repite_pedido_pese_a_alcanzar_stock(self):
+        """Existencia 100. Dep.2 pidió 50 (pendiente). Dep.10 pidió 40 (pendiente).
+        Disponible global = 10. Dep.2 vuelve a pedir 10 (SI alcanzaría el disponible
+        global) -> debe bloquearse igual, por tener un pedido anterior sin despachar."""
+        previo_dep2 = self._pedido_previo(deposito_codigo=2, cantidad_solicitada=50)
+        self._pedido_previo(deposito_codigo=10, cantidad_solicitada=40)
+        resp = self._post(deposito_codigo=2, cantidad=10, mock_stock={'SKU1': 100})
+        self.assertEqual(
+            self.Pedido.objects.filter(deposito_codigo=2).count(), 1,
+            'No debió crearse el segundo pedido del depósito 2',
+        )
+        self.assertEqual(resp.status_code, 200)
+        mensajes = [str(m) for m in resp.context['messages']]
+        self.assertTrue(any(f'#{previo_dep2.numero_pedido}' in m for m in mensajes))
+
+    def test_otro_deposito_no_se_bloquea_por_pedido_de_deposito_distinto(self):
+        """El pedido pendiente del depósito 2 no debe bloquear al depósito 10."""
+        self._pedido_previo(deposito_codigo=2, cantidad_solicitada=50)
+        resp = self._post(deposito_codigo=10, cantidad=10, mock_stock={'SKU1': 100})
+        self.assertEqual(resp.status_code, 302)
+
+    def test_pedido_previo_anulado_no_bloquea(self):
+        self._pedido_previo(deposito_codigo=2, cantidad_solicitada=50, estado_pedido='ANULADO')
+        resp = self._post(deposito_codigo=2, cantidad=10, mock_stock={'SKU1': 100})
+        self.assertEqual(resp.status_code, 302)
+
+    def test_pedido_previo_ya_despachado_por_completo_no_bloquea(self):
+        self._pedido_previo(
+            deposito_codigo=2, cantidad_solicitada=50, cantidad_despachada=50, estado_item='DESPACHADO',
+        )
+        resp = self._post(deposito_codigo=2, cantidad=10, mock_stock={'SKU1': 100})
+        self.assertEqual(resp.status_code, 302)
+
+    def test_sin_pedido_previo_no_bloquea(self):
+        resp = self._post(deposito_codigo=2, cantidad=10, mock_stock={'SKU1': 100})
+        self.assertEqual(resp.status_code, 302)
+
+
 class ApiCrearDespachoStockTest(TestCase):
     """api_crear_despacho valida stock en depósito 1 igual que la vista clásica."""
 
@@ -1397,6 +1562,209 @@ class RecibirDespachoSkuExtraDuplicadoTest(TestCase):
             responsable=self.user.username, proposito='URGENTE',
             numero_despacho=self.despacho.numero_despacho,
         )
+
+
+class RecibirDespachoRecibidoSinDespacharTest(TestCase):
+    """Un producto que sí está en el pedido pero no vino en la línea de este
+    despacho (típicamente porque quedó en back order) debe poder registrarse
+    como 'recibido sin despachar', casándose con su PedidoItem original en
+    lugar de ser bloqueado como si fuera un SKU nuevo."""
+
+    GIF_1PX = (
+        b'GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04'
+        b'\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D'
+        b'\x01\x00;'
+    )
+
+    def setUp(self):
+        import json
+        from users.models import User
+        from django.urls import reverse
+        from .models import Pedido, PedidoItem, Despacho, DespachoItem
+        self.json = json
+        self.reverse = reverse
+        self.PedidoItem = PedidoItem
+        self.Despacho = Despacho
+        self.DespachoItem = DespachoItem
+        self.user = User.objects.create_superuser(username='fuera_desp_u', password='x')
+        self.client.force_login(self.user)
+        self.pedido = Pedido.objects.create(
+            solicitante=self.user, estado='PARCIAL', deposito_codigo=2,
+            condicion='URGENTE',
+        )
+        self.item1 = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=5, cantidad_despachada=5, estado='DESPACHADO',
+        )
+        self.item2 = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU2', descripcion='Producto Dos',
+            cantidad_solicitada=10, cantidad_despachada=4, cantidad_back_order=6,
+            cantidad_recibida=4, estado='BACK_ORDER',
+        )
+        self.despacho = Despacho.objects.create(pedido=self.pedido, estado='ENVIADO')
+        self.di1 = DespachoItem.objects.create(
+            despacho=self.despacho, pedido_item=self.item1, cantidad_despachada=5,
+        )
+        self.url = reverse(
+            'pedidos-recibir-despacho',
+            args=[self.pedido.numero_pedido, self.despacho.numero_despacho],
+        )
+        session = self.client.session
+        session['despacho_auth_user_id'] = self.user.id
+        session.save()
+
+    def _post(self, items_no_despachados, con_foto=True, con_auth=True):
+        if not con_auth:
+            session = self.client.session
+            session.pop('despacho_auth_user_id', None)
+            session.save()
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        data = {
+            f'recibido_{self.di1.id}': '5',
+            f'observacion_{self.di1.id}': '',
+            f'tipo_incidencia_{self.di1.id}': '',
+            'productos_extra': '[]',
+            'items_no_despachados': self.json.dumps(items_no_despachados),
+        }
+        if con_foto:
+            data['foto_no_despachados'] = SimpleUploadedFile('foto.gif', self.GIF_1PX, content_type='image/gif')
+        return self.client.post(self.url, data)
+
+    def _mensajes(self, resp):
+        from django.contrib.messages import get_messages
+        return [str(m) for m in get_messages(resp.wsgi_request)]
+
+    def test_get_renderiza_card_de_items_fuera_de_despacho(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'card-fuera-despacho')
+        self.assertContains(resp, 'items-fuera-despacho-data')
+        self.assertContains(resp, 'SKU2')
+        # SKU1 sí tiene línea en este despacho: no debe listarse como "fuera de despacho"
+        content = resp.content.decode()
+        import re
+        data_match = re.search(
+            r'<script id="items-fuera-despacho-data"[^>]*>(.*?)</script>',
+            content, re.DOTALL,
+        )
+        self.assertIsNotNone(data_match)
+        payload = self.json.loads(data_match.group(1))
+        codigos = [it['codigo'] for it in payload]
+        self.assertIn('SKU2', codigos)
+        self.assertNotIn('SKU1', codigos)
+
+    def test_camino_feliz_casa_con_pedido_item_y_deja_back_order_residual(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            resp = self._post([{'pedido_item_id': self.item2.id, 'cantidad': 5}])
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, self.reverse('pedidos-detalle', args=[self.pedido.numero_pedido]))
+
+        self.item2.refresh_from_db()
+        self.assertEqual(self.item2.cantidad_recibida, 9)
+        self.assertEqual(self.item2.cantidad_despachada, 9)
+        self.assertEqual(self.item2.cantidad_back_order, 1)
+        self.assertEqual(self.item2.estado, 'BACK_ORDER')
+
+        di_nuevo = self.DespachoItem.objects.get(despacho=self.despacho, pedido_item=self.item2)
+        self.assertEqual(di_nuevo.cantidad_despachada, 0)
+        self.assertEqual(di_nuevo.cantidad_recibida, 5)
+        self.assertEqual(di_nuevo.tipo_incidencia, 'RECIBIDO_SIN_DESPACHAR')
+
+        self.despacho.refresh_from_db()
+        self.assertEqual(self.despacho.estado, 'PARCIAL')
+
+        mock_db.return_value.insertar_traslado_recepcion.assert_called_once_with(
+            self.pedido.numero_pedido, 10, 2,
+            [{'codigo': 'SKU1', 'cantidad': 5}, {'codigo': 'SKU2', 'cantidad': 5}],
+            responsable=self.user.username, proposito='URGENTE',
+            numero_despacho=self.despacho.numero_despacho,
+        )
+
+    def test_back_order_agotado_exactamente_deja_estado_incidencia(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM'):
+            self._post([{'pedido_item_id': self.item2.id, 'cantidad': 6}])
+
+        self.item2.refresh_from_db()
+        self.assertEqual(self.item2.cantidad_back_order, 0)
+        self.assertEqual(self.item2.estado, 'INCIDENCIA')
+
+    def test_bloqueado_si_item_viene_en_otro_despacho_enviado(self):
+        otro_despacho = self.Despacho.objects.create(pedido=self.pedido, estado='ENVIADO')
+        self.DespachoItem.objects.create(
+            despacho=otro_despacho, pedido_item=self.item2, cantidad_despachada=4,
+        )
+
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            resp = self._post([{'pedido_item_id': self.item2.id, 'cantidad': 5}])
+            mock_db.return_value.insertar_traslado_recepcion.assert_not_called()
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp.url,
+            self.reverse('pedidos-recibir-despacho', args=[self.pedido.numero_pedido, self.despacho.numero_despacho]),
+        )
+        self.item2.refresh_from_db()
+        self.assertEqual(self.item2.cantidad_recibida, 4)  # sin cambios
+        self.assertFalse(self.DespachoItem.objects.filter(despacho=self.despacho, pedido_item=self.item2).exists())
+
+        mensajes = self._mensajes(resp)
+        self.assertEqual(len(mensajes), 1)
+        self.assertIn(f'Despacho #{otro_despacho.numero_despacho}', mensajes[0])
+
+    def test_sin_autorizacion_de_supervisor_se_bloquea(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            resp = self._post([{'pedido_item_id': self.item2.id, 'cantidad': 5}], con_auth=False)
+            mock_db.return_value.insertar_traslado_recepcion.assert_not_called()
+
+        self.item2.refresh_from_db()
+        self.assertEqual(self.item2.cantidad_recibida, 4)
+        mensajes = self._mensajes(resp)
+        self.assertIn('autorización', mensajes[0])
+
+    def test_sin_foto_se_bloquea(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            resp = self._post([{'pedido_item_id': self.item2.id, 'cantidad': 5}], con_foto=False)
+            mock_db.return_value.insertar_traslado_recepcion.assert_not_called()
+
+        self.item2.refresh_from_db()
+        self.assertEqual(self.item2.cantidad_recibida, 4)
+        mensajes = self._mensajes(resp)
+        self.assertIn('foto', mensajes[0].lower())
+
+    def test_pedido_item_de_otro_pedido_se_bloquea(self):
+        otro_pedido = self.pedido.__class__.objects.create(
+            solicitante=self.user, estado='DESPACHADO', deposito_codigo=2, condicion='URGENTE',
+        )
+        item_ajeno = self.PedidoItem.objects.create(
+            pedido=otro_pedido, codigo='AJENO', descripcion='De otro pedido',
+            cantidad_solicitada=1, cantidad_back_order=1, estado='BACK_ORDER',
+        )
+
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            resp = self._post([{'pedido_item_id': item_ajeno.id, 'cantidad': 1}])
+            mock_db.return_value.insertar_traslado_recepcion.assert_not_called()
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(self.DespachoItem.objects.filter(pedido_item=item_ajeno).exists())
+
+    def test_extra_con_sku_en_pedido_pero_no_en_despacho_da_mensaje_del_card_correcto(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            resp = self.client.post(self.url, {
+                f'recibido_{self.di1.id}': '5',
+                f'observacion_{self.di1.id}': '',
+                f'tipo_incidencia_{self.di1.id}': '',
+                'productos_extra': self.json.dumps([{'codigo': 'SKU2', 'descripcion': 'Producto Dos', 'cantidad': 2}]),
+                'items_no_despachados': '[]',
+            })
+            mock_db.return_value.insertar_traslado_recepcion.assert_not_called()
+
+        self.assertEqual(resp.status_code, 302)
+        mensajes = self._mensajes(resp)
+        self.assertEqual(len(mensajes), 1)
+        self.assertIn('no vino en este despacho', mensajes[0])
+        self.assertIn('SKU2', mensajes[0])
+        self.assertNotIn('Registra la cantidad de más en la línea', mensajes[0])
 
 
 class ConfiguracionPedidosModelTest(TestCase):
@@ -3138,6 +3506,35 @@ class ReporteItemsTest(TestCase):
         # pedido3 tiene cantidad_back_order=0 -> no debe aparecer aunque exista
         self.assertNotIn('02030011', codigos)
 
+    def _item_cerrado_con_back_order_residual(self):
+        """Item CERRADO con cantidad_back_order > 0: no debería ocurrir en el flujo
+        normal (cerrar_pedido siempre zera cantidad_back_order al cerrar), pero se
+        construye a propósito para verificar que el reporte nunca lo muestre como
+        pendiente, sin importar cómo haya quedado el dato."""
+        from .models import Pedido, PedidoItem
+        pedido = Pedido.objects.create(
+            solicitante=self.supervisor, estado='CERRADO', categoria='FERR', categoria_nombre='Ferretería',
+        )
+        PedidoItem.objects.create(
+            pedido=pedido, codigo='77770000', descripcion='Item cerrado con residual',
+            cantidad_solicitada=20, cantidad_despachada=5, cantidad_back_order=15, estado='CERRADO',
+        )
+        return pedido
+
+    def test_item_cerrado_no_aparece_filtrando_por_back_order(self):
+        self.client.force_login(self.supervisor)
+        self._item_cerrado_con_back_order_residual()
+        resp = self.client.get(self.reverse('pedidos-reporte-items'), {'estado': 'BACK_ORDER'})
+        codigos = [g['codigo'] for g in resp.context['grupos']]
+        self.assertNotIn('77770000', codigos)
+
+    def test_item_cerrado_no_aparece_en_vista_por_defecto(self):
+        self.client.force_login(self.supervisor)
+        self._item_cerrado_con_back_order_residual()
+        resp = self.client.get(self.reverse('pedidos-reporte-items'))
+        codigos = [g['codigo'] for g in resp.context['grupos']]
+        self.assertNotIn('77770000', codigos)
+
     def test_existencia_ok(self):
         self.client.force_login(self.supervisor)
         self.mock_dbisam.return_value.consultar_stock_multiple.return_value = {
@@ -3435,3 +3832,160 @@ class ExportarReporteItemsTest(TestCase):
         resp = self.client.get(self.reverse('pedidos-reporte-items-csv'), {'categoria': 'PLOM'})
         contenido = resp.content.decode('utf-8-sig')
         self.assertIn("'=HYPERLINK", contenido)
+
+
+class CompromisosPorCodigoTest(TestCase):
+    """compromisos_por_codigo suma lo solicitado-y-no-despachado de pedidos activos."""
+
+    def setUp(self):
+        from users.models import User
+        from .models import Pedido
+        self.user = User.objects.create_superuser(username='disp_u', password='x')
+        self.pedido = Pedido.objects.create(solicitante=self.user, estado='PENDIENTE')
+
+    def _item(self, **kwargs):
+        from .models import PedidoItem
+        base = dict(
+            pedido=self.pedido, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=70, cantidad_despachada=0, estado='PENDIENTE',
+        )
+        base.update(kwargs)
+        return PedidoItem.objects.create(**base)
+
+    def test_item_pendiente_reserva_lo_solicitado(self):
+        from .disponibilidad import compromisos_por_codigo
+        self._item(cantidad_solicitada=70, estado='PENDIENTE')
+        resultado = compromisos_por_codigo(['SKU1'])
+        self.assertEqual(resultado['SKU1']['comprometido'], 70)
+        self.assertEqual(resultado['SKU1']['pedidos'], [self.pedido.numero_pedido])
+
+    def test_item_parcial_reserva_solo_lo_pendiente_no_lo_total(self):
+        from .disponibilidad import compromisos_por_codigo
+        self._item(cantidad_solicitada=70, cantidad_despachada=50, estado='PARCIAL')
+        resultado = compromisos_por_codigo(['SKU1'])
+        self.assertEqual(resultado['SKU1']['comprometido'], 20)
+
+    def test_pedido_anulado_no_reserva_aunque_item_siga_pendiente(self):
+        from .disponibilidad import compromisos_por_codigo
+        self._item(cantidad_solicitada=70, estado='PENDIENTE')
+        self.pedido.estado = 'ANULADO'
+        self.pedido.save()
+        resultado = compromisos_por_codigo(['SKU1'])
+        self.assertNotIn('SKU1', resultado)
+
+    def test_item_despachado_no_reserva(self):
+        from .disponibilidad import compromisos_por_codigo
+        self._item(cantidad_solicitada=70, cantidad_despachada=70, estado='DESPACHADO')
+        resultado = compromisos_por_codigo(['SKU1'])
+        self.assertNotIn('SKU1', resultado)
+
+    def test_lista_vacia_no_consulta_bd(self):
+        from .disponibilidad import compromisos_por_codigo
+        with self.assertNumQueries(0):
+            resultado = compromisos_por_codigo([])
+        self.assertEqual(resultado, {})
+
+
+class CalcularDisponibilidadTest(TestCase):
+    """calcular_disponibilidad cruza existencia física con lo comprometido por pedidos activos."""
+
+    def setUp(self):
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        self.user = User.objects.create_superuser(username='disp_u2', password='x')
+        self.pedido = Pedido.objects.create(solicitante=self.user, estado='PENDIENTE')
+        PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=70, estado='PENDIENTE',
+        )
+
+    def test_escenario_deposito_10_pide_70_luego_deposito_2_pide_50(self):
+        """Existencia 100, comprometidos 70 -> disponible 30 (el ejemplo del usuario)."""
+        from .disponibilidad import calcular_disponibilidad
+        resultado = calcular_disponibilidad(['SKU1'], {'SKU1': 100})
+        self.assertEqual(resultado['SKU1']['existencia'], 100)
+        self.assertEqual(resultado['SKU1']['comprometido'], 70)
+        self.assertEqual(resultado['SKU1']['disponible'], 30)
+        self.assertEqual(resultado['SKU1']['pedidos'], [self.pedido.numero_pedido])
+
+    def test_sin_compromisos_disponible_es_la_existencia(self):
+        from .disponibilidad import calcular_disponibilidad
+        resultado = calcular_disponibilidad(['SKU2'], {'SKU2': 40})
+        self.assertEqual(resultado['SKU2']['disponible'], 40)
+        self.assertEqual(resultado['SKU2']['pedidos'], [])
+
+    def test_compromiso_mayor_a_existencia_no_da_disponible_negativo(self):
+        from .disponibilidad import calcular_disponibilidad
+        resultado = calcular_disponibilidad(['SKU1'], {'SKU1': 50})  # 50 existencia, 70 comprometidos
+        self.assertEqual(resultado['SKU1']['disponible'], 0)
+
+
+class PedidosPreviosMismoDepositoTest(TestCase):
+    """pedidos_previos_mismo_deposito detecta pedidos activos del mismo depósito
+    de destino que ya tienen ese SKU pedido y no despachado por completo."""
+
+    def setUp(self):
+        from users.models import User
+        self.user = User.objects.create_superuser(username='dup_u', password='x')
+
+    def _pedido(self, deposito_codigo, estado_pedido='PENDIENTE'):
+        from .models import Pedido
+        return Pedido.objects.create(
+            solicitante=self.user, estado=estado_pedido, deposito_codigo=deposito_codigo,
+        )
+
+    def _item(self, pedido, **kwargs):
+        from .models import PedidoItem
+        base = dict(
+            pedido=pedido, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=50, cantidad_despachada=0, estado='PENDIENTE',
+        )
+        base.update(kwargs)
+        return PedidoItem.objects.create(**base)
+
+    def test_mismo_deposito_con_pedido_pendiente_aparece(self):
+        from .disponibilidad import pedidos_previos_mismo_deposito
+        pedido = self._pedido(deposito_codigo=2)
+        self._item(pedido, cantidad_solicitada=50)
+        resultado = pedidos_previos_mismo_deposito(2, ['SKU1'])
+        self.assertEqual(resultado['SKU1'], [{'numero_pedido': pedido.numero_pedido, 'pendiente': 50}])
+
+    def test_deposito_distinto_no_aparece(self):
+        from .disponibilidad import pedidos_previos_mismo_deposito
+        pedido = self._pedido(deposito_codigo=10)
+        self._item(pedido, cantidad_solicitada=40)
+        resultado = pedidos_previos_mismo_deposito(2, ['SKU1'])
+        self.assertNotIn('SKU1', resultado)
+
+    def test_pedido_anulado_no_aparece(self):
+        from .disponibilidad import pedidos_previos_mismo_deposito
+        pedido = self._pedido(deposito_codigo=2, estado_pedido='ANULADO')
+        self._item(pedido, cantidad_solicitada=50)
+        resultado = pedidos_previos_mismo_deposito(2, ['SKU1'])
+        self.assertNotIn('SKU1', resultado)
+
+    def test_item_ya_despachado_por_completo_no_aparece(self):
+        from .disponibilidad import pedidos_previos_mismo_deposito
+        pedido = self._pedido(deposito_codigo=2)
+        self._item(pedido, cantidad_solicitada=50, cantidad_despachada=50, estado='DESPACHADO')
+        resultado = pedidos_previos_mismo_deposito(2, ['SKU1'])
+        self.assertNotIn('SKU1', resultado)
+
+    def test_item_parcial_reporta_solo_lo_pendiente(self):
+        from .disponibilidad import pedidos_previos_mismo_deposito
+        pedido = self._pedido(deposito_codigo=2)
+        self._item(pedido, cantidad_solicitada=50, cantidad_despachada=30, estado='PARCIAL')
+        resultado = pedidos_previos_mismo_deposito(2, ['SKU1'])
+        self.assertEqual(resultado['SKU1'], [{'numero_pedido': pedido.numero_pedido, 'pendiente': 20}])
+
+    def test_deposito_none_no_consulta_bd(self):
+        from .disponibilidad import pedidos_previos_mismo_deposito
+        with self.assertNumQueries(0):
+            resultado = pedidos_previos_mismo_deposito(None, ['SKU1'])
+        self.assertEqual(resultado, {})
+
+    def test_codigos_vacios_no_consulta_bd(self):
+        from .disponibilidad import pedidos_previos_mismo_deposito
+        with self.assertNumQueries(0):
+            resultado = pedidos_previos_mismo_deposito(2, [])
+        self.assertEqual(resultado, {})

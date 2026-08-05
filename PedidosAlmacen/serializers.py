@@ -97,7 +97,10 @@ class DespachoItemCreateSerializer(serializers.Serializer):
     cantidad_despachada = serializers.IntegerField(min_value=1)
     observacion = serializers.CharField(max_length=255, required=False, default='')
     tipo_incidencia = serializers.ChoiceField(
-        choices=['', 'PRODUCTO_ERRONEO', 'SKU_NO_CONTEMPLADO', 'CANTIDAD_MENOR', 'CANTIDAD_MAYOR'],
+        choices=[
+            '', 'PRODUCTO_ERRONEO', 'SKU_NO_CONTEMPLADO', 'CANTIDAD_MENOR',
+            'CANTIDAD_MAYOR', 'RECIBIDO_SIN_DESPACHAR',
+        ],
         required=False,
         default='',
     )

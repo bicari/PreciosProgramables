@@ -46,7 +46,7 @@
 
     <!-- KPIs -->
     <div class="row g-3 mb-4">
-        <div class="col-md-3">
+        <div class="col-md-2">
             <div class="card text-center border-warning h-100">
                 <div class="card-body">
                     <div class="fs-1 fw-bold text-warning">{{ total }}</div>
@@ -54,7 +54,7 @@
                 </div>
             </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
             <div class="card text-center border-danger h-100">
                 <div class="card-body">
                     <div class="fs-1 fw-bold text-danger">{{ total_erroneos }}</div>
@@ -62,7 +62,7 @@
                 </div>
             </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
             <div class="card text-center border-primary h-100">
                 <div class="card-body">
                     <div class="fs-1 fw-bold text-primary">{{ total_no_contemplados }}</div>
@@ -70,11 +70,27 @@
                 </div>
             </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
             <div class="card text-center border-secondary h-100">
                 <div class="card-body">
                     <div class="fs-1 fw-bold text-secondary">{{ total_cantidad_menor }}</div>
                     <div class="text-muted small">Cantidad Menor a lo Despachado</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card text-center border-warning h-100">
+                <div class="card-body">
+                    <div class="fs-1 fw-bold text-dark">{{ total_cantidad_mayor }}</div>
+                    <div class="text-muted small">Cantidad Mayor a lo Despachado</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card text-center border-info h-100">
+                <div class="card-body">
+                    <div class="fs-1 fw-bold text-info">{{ total_recibido_sin_despachar }}</div>
+                    <div class="text-muted small">Recibido sin Despachar</div>
                 </div>
             </div>
         </div>
@@ -138,6 +154,8 @@
                                     <span class="badge bg-secondary"><i class="fas fa-arrow-down me-1"></i>Cant. Menor</span>
                                 {% elif inc.tipo_incidencia == 'CANTIDAD_MAYOR' %}
                                     <span class="badge bg-warning text-dark"><i class="fas fa-arrow-up me-1"></i>Cant. Mayor</span>
+                                {% elif inc.tipo_incidencia == 'RECIBIDO_SIN_DESPACHAR' %}
+                                    <span class="badge bg-info text-dark"><i class="fas fa-box-open me-1"></i>Sin Despachar</span>
                                 {% endif %}
                             </td>
 
@@ -166,7 +184,7 @@
                                         Despachado: <strong>{{ inc.cantidad_despachada }}</strong> —
                                         Recibido: <strong>{{ inc.cantidad_recibida }}</strong>
                                     </span>
-                                {% elif inc.tipo_incidencia == 'CANTIDAD_MAYOR' %}
+                                {% elif inc.tipo_incidencia == 'CANTIDAD_MAYOR' or inc.tipo_incidencia == 'RECIBIDO_SIN_DESPACHAR' %}
                                     <span class="text-muted small">
                                         Despachado: <strong>{{ inc.cantidad_despachada }}</strong> —
                                         Recibido: <strong>{{ inc.cantidad_recibida }}</strong>

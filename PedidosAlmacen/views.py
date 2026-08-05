@@ -17,6 +17,7 @@ from .models import (
 )
 from .forms import PedidoForm
 from .dbisam import PedidosDBISAM, DEPOSITO_ALMACEN
+from .disponibilidad import calcular_disponibilidad, pedidos_previos_mismo_deposito
 from .notifications import notificar_nuevo_pedido, notificar_despacho, notificar_despacho_parcial
 from .pdf import (
     generar_reporte_pedidos_pdf, generar_reporte_pickers_pdf,
@@ -287,10 +288,24 @@ def crear_pedido(request):
             messages.error(request, 'Debe agregar al menos un producto al pedido', extra_tags='danger')
             return render(request, 'pedidos-crear.html', ctx)
 
-        # Revalidar existencia en depósito 1 (Almacén) en el servidor.
+        # Revalidar disponibilidad real (existencia en depósito 1 menos lo ya
+        # comprometido por pedidos activos aún no despachados) en el servidor.
         # El frontend bloquea el botón "Agregar" para existencia=0, pero la validación
-        # aquí cubre manipulaciones del form o cambios de stock entre búsqueda y envío.
+        # aquí cubre manipulaciones del form, cambios de stock entre búsqueda y envío,
+        # y pedidos previos de otros depósitos que ya reservaron ese stock.
         codigos_pedido = [item['codigo'] for item in items_data]
+
+        deposito_codigo_int = None
+        try:
+            deposito_codigo_int = int(deposito_codigo)
+        except (ValueError, TypeError):
+            pass
+
+        # El mismo depósito de destino pidiendo de nuevo un ítem que ya tiene
+        # en curso (sin despachar por completo) bloquea sin importar cantidad
+        # ni stock global: es un aviso de pedido duplicado, no de existencia.
+        duplicados = pedidos_previos_mismo_deposito(deposito_codigo_int, codigos_pedido)
+
         stock_pedido = {}
         dbisam_consulta_ok = False
         try:
@@ -299,21 +314,62 @@ def crear_pedido(request):
         except Exception as e:
             messages.warning(request, f'No se pudo verificar el stock en almacén: {e}')
 
-        if dbisam_consulta_ok:
-            excesos_stock = [
-                item['codigo']
+        disponibilidad = calcular_disponibilidad(codigos_pedido, stock_pedido) if dbisam_consulta_ok else {}
+        for codigo in duplicados:
+            # Fuerza el bloqueo (reutiliza el mecanismo de "supera lo disponible")
+            # aunque el stock global alcanzaría o DBISAM no haya respondido.
+            disponibilidad.setdefault(codigo, {'existencia': stock_pedido.get(codigo, 0), 'comprometido': 0, 'pedidos': []})
+            disponibilidad[codigo]['disponible'] = 0
+
+        if disponibilidad:
+            conflictos = [
+                (item, disponibilidad[item['codigo']])
                 for item in items_data
-                if int(item['cantidad']) > stock_pedido.get(item['codigo'], 0)
+                if item['codigo'] in disponibilidad and int(item['cantidad']) > disponibilidad[item['codigo']]['disponible']
             ]
-            if excesos_stock:
+            if conflictos:
+                detalles = []
+                for item, info in conflictos:
+                    codigo = item['codigo']
+                    if codigo in duplicados:
+                        pedidos_str = ', '.join(
+                            f"#{p['numero_pedido']} ({p['pendiente']} pendiente(s))"
+                            for p in duplicados[codigo][:3]
+                        )
+                        if len(duplicados[codigo]) > 3:
+                            pedidos_str += f' y {len(duplicados[codigo]) - 3} más'
+                        detalles.append(
+                            f"{codigo}: este depósito ya tiene pedido(s) {pedidos_str} "
+                            f"de este ítem sin despachar por completo"
+                        )
+                    elif info['comprometido'] > 0:
+                        pedidos_str = ', '.join(f'#{p}' for p in info['pedidos'][:3])
+                        if len(info['pedidos']) > 3:
+                            pedidos_str += f' y {len(info["pedidos"]) - 3} más'
+                        detalles.append(
+                            f"{codigo}: existencia {info['existencia']}, "
+                            f"{info['comprometido']} comprometidas en pedido(s) {pedidos_str} "
+                            f"→ disponible {info['disponible']} (solicita {item['cantidad']})"
+                        )
+                    else:
+                        detalles.append(
+                            f"{codigo}: stock disponible {info['disponible']} "
+                            f"(solicita {item['cantidad']})"
+                        )
                 messages.warning(
                     request,
-                    'Hay ítems con cantidad que supera el stock disponible en almacén. '
-                    'Corrija las cantidades marcadas en rojo antes de enviar el pedido.',
+                    'Hay ítems cuya cantidad supera lo disponible en almacén, '
+                    'o que ya tienen un pedido anterior de este depósito sin despachar. '
+                    'Corrija las cantidades marcadas en rojo antes de enviar el pedido. '
+                    + '; '.join(detalles),
                 )
                 ctx.update({
                     'items_json_inicial': items_json,
-                    'stock_info_json': json.dumps(stock_pedido),
+                    'stock_info_json': json.dumps({
+                        item['codigo']: disponibilidad.get(item['codigo'], {}).get(
+                            'disponible', int(item['cantidad']))
+                        for item in items_data
+                    }),
                     'categoria_inicial': categoria_codigo,
                     'categoria_nombre_inicial': categoria_nombre,
                     'condicion_inicial': condicion,
@@ -321,12 +377,6 @@ def crear_pedido(request):
                     'deposito_nombre_inicial': deposito_nombre or deposito_codigo,
                 })
                 return render(request, 'pedidos-crear.html', ctx)
-
-        deposito_codigo_int = None
-        try:
-            deposito_codigo_int = int(deposito_codigo)
-        except (ValueError, TypeError):
-            pass
 
         pedido = Pedido.objects.create(
             solicitante=request.user,
@@ -1022,28 +1072,50 @@ def recibir_despacho(request, pk, despacho_id):
             productos_extra_parsed = []
             tiene_sku_extra = False
 
-        # ── Bloquear extras cuyo SKU ya existe en el pedido o viene repetido ─
+        items_no_despachados_raw = request.POST.get('items_no_despachados', '[]').strip()
+        try:
+            items_no_despachados_parsed = json.loads(items_no_despachados_raw)
+            tiene_items_no_despachados = bool(items_no_despachados_parsed)
+        except (json.JSONDecodeError, ValueError):
+            items_no_despachados_parsed = []
+            tiene_items_no_despachados = False
+
+        # ── Bloquear extras cuyo SKU ya existe en este despacho o viene repetido ─
         if tiene_sku_extra:
+            codigos_despacho = {
+                di.pedido_item.codigo.strip().upper()
+                for di in despacho_items if di.pedido_item
+            }
             codigos_pedido = {
                 c.strip().upper() for c in pedido.items.values_list('codigo', flat=True)
             }
-            ya_en_pedido, repetidos, vistos = [], [], set()
+            ya_en_despacho, ya_en_pedido, repetidos, vistos = [], [], [], set()
             for extra in productos_extra_parsed:
                 codigo = str(extra.get('codigo', '')).strip()
                 if not codigo:
                     continue
                 codigo_norm = codigo.upper()
-                if codigo_norm in codigos_pedido:
+                if codigo_norm in codigos_despacho:
+                    ya_en_despacho.append(codigo)
+                elif codigo_norm in codigos_pedido:
                     ya_en_pedido.append(codigo)
                 elif codigo_norm in vistos:
                     repetidos.append(codigo)
                 vistos.add(codigo_norm)
+            if ya_en_despacho:
+                messages.error(
+                    request,
+                    f'No se puede agregar como producto nuevo: {", ".join(ya_en_despacho)} '
+                    'ya existe en el pedido. Registra la cantidad de más en la línea '
+                    'correspondiente del despacho.'
+                )
+                return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
             if ya_en_pedido:
                 messages.error(
                     request,
-                    f'No se puede agregar como producto nuevo: {", ".join(ya_en_pedido)} '
-                    'ya existe en el pedido. Registra la cantidad de más en la línea '
-                    'correspondiente del despacho.'
+                    f'{", ".join(ya_en_pedido)} sí está en el pedido pero no vino en este '
+                    'despacho. Regístralo en "Productos del pedido recibidos fuera de este '
+                    'despacho".'
                 )
                 return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
             if repetidos:
@@ -1054,8 +1126,53 @@ def recibir_despacho(request, pk, despacho_id):
                 )
                 return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
 
+        # ── Validar items del pedido recibidos fuera de este despacho ────────
+        items_no_despachados_validos = []
+        if tiene_items_no_despachados:
+            vistos_ids = set()
+            for entry in items_no_despachados_parsed:
+                try:
+                    item_id = int(entry.get('pedido_item_id'))
+                except (TypeError, ValueError):
+                    messages.error(request, 'Producto inválido en la lista de recibidos fuera del despacho.')
+                    return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
+                try:
+                    cantidad_entry = int(entry.get('cantidad', 0))
+                except (TypeError, ValueError):
+                    cantidad_entry = 0
+                if cantidad_entry <= 0:
+                    continue
+                if item_id in vistos_ids:
+                    messages.error(request, 'Hay un producto repetido en la lista de recibidos fuera del despacho.')
+                    return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
+                vistos_ids.add(item_id)
+
+                item = pedido.items.filter(pk=item_id).first()
+                if not item:
+                    messages.error(request, 'Uno de los productos recibidos fuera del despacho no pertenece a este pedido.')
+                    return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
+                if DespachoItem.objects.filter(pedido_item=item, despacho=despacho).exists():
+                    messages.error(request, f'{item.codigo} ya tiene una línea en este despacho.')
+                    return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
+                otro_despacho = (
+                    DespachoItem.objects.filter(pedido_item=item, despacho__estado='ENVIADO')
+                    .exclude(despacho=despacho)
+                    .values_list('despacho__numero_despacho', flat=True)
+                    .first()
+                )
+                if otro_despacho:
+                    messages.error(
+                        request,
+                        f'{item.codigo} viene en el Despacho #{otro_despacho}, que aún está '
+                        'pendiente de recepción. Recíbelo en ese despacho en lugar de '
+                        'agregarlo aquí.'
+                    )
+                    return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
+
+                items_no_despachados_validos.append({'item': item, 'cantidad': cantidad_entry})
+
         auth_user = None
-        if tiene_producto_erroneo or tiene_sku_extra:
+        if tiene_producto_erroneo or tiene_sku_extra or tiene_items_no_despachados:
             auth_user_id = request.session.get('despacho_auth_user_id')
             try:
                 from users.models import User as UserModel
@@ -1086,6 +1203,8 @@ def recibir_despacho(request, pk, despacho_id):
                 cant_extra = 0
             if str(extra.get('codigo', '')).strip() and cant_extra > 0:
                 total_cant_recibida += cant_extra
+        for entry in items_no_despachados_validos:
+            total_cant_recibida += entry['cantidad']
         if total_cant_recibida == 0:
             messages.error(request, 'Debe ingresar al menos una cantidad mayor a 0 para confirmar la recepción.')
             return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
@@ -1104,6 +1223,8 @@ def recibir_despacho(request, pk, despacho_id):
                     errores_foto.append(f'{codigo} (Cambio SKU)')
         if tiene_sku_extra and not request.FILES.get('foto_extras'):
             errores_foto.append('productos adicionales (SKU no contemplado)')
+        if items_no_despachados_validos and not request.FILES.get('foto_no_despachados'):
+            errores_foto.append('productos del pedido recibidos fuera de este despacho')
         if errores_foto:
             messages.error(
                 request,
@@ -1112,6 +1233,7 @@ def recibir_despacho(request, pk, despacho_id):
             return redirect('pedidos-recibir-despacho', pk=pk, despacho_id=despacho_id)
 
         foto_extras = request.FILES.get('foto_extras')
+        foto_no_despachados = request.FILES.get('foto_no_despachados')
         items_traslado = []
         hay_incidencia = False
 
@@ -1210,6 +1332,35 @@ def recibir_despacho(request, pk, despacho_id):
                         items_traslado.append({'codigo': codigo, 'cantidad': cantidad})
                         hay_incidencia = True
 
+                # ── Procesar items del pedido recibidos fuera de este despacho ───────
+                if items_no_despachados_validos:
+                    for entry in items_no_despachados_validos:
+                        cantidad = entry['cantidad']
+                        item = PedidoItem.objects.select_for_update().get(pk=entry['item'].pk)
+                        if foto_no_despachados:
+                            foto_no_despachados.seek(0)
+                        di_no_desp = DespachoItem(
+                            despacho=despacho,
+                            pedido_item=item,
+                            cantidad_despachada=0,
+                            cantidad_recibida=cantidad,
+                            tipo_incidencia='RECIBIDO_SIN_DESPACHAR',
+                            autorizado_por=auth_user,
+                            observacion='Recibido sin figurar en este despacho',
+                        )
+                        if foto_no_despachados:
+                            di_no_desp.foto_incidencia = foto_no_despachados
+                        di_no_desp.save()
+
+                        item.cantidad_recibida = (item.cantidad_recibida or 0) + cantidad
+                        item.cantidad_despachada = (item.cantidad_despachada or 0) + cantidad
+                        item.cantidad_back_order = max(0, (item.cantidad_back_order or 0) - cantidad)
+                        item.estado = 'BACK_ORDER' if item.cantidad_back_order > 0 else 'INCIDENCIA'
+                        item.save()
+
+                        items_traslado.append({'codigo': item.codigo, 'cantidad': cantidad})
+                        hay_incidencia = True
+
                 despacho.receptor = request.user
                 despacho.fecha_recepcion = datetime.now()
                 despacho.estado = 'PARCIAL' if hay_incidencia else 'RECIBIDO'
@@ -1267,6 +1418,7 @@ def recibir_despacho(request, pk, despacho_id):
         'despacho': despacho,
         'despacho_items': despacho_items,
         'ver_despachado': is_pedidos_supervisor(request.user) or is_pedidos_almacen(request.user),
+        'items_fuera_despacho': _items_pedido_fuera_despacho(pedido, despacho),
     })
 
 
@@ -1790,10 +1942,11 @@ def reporte_incidencias(request):
         ('SKU_NO_CONTEMPLADO', 'SKU No Contemplado'),
         ('CANTIDAD_MENOR', 'Cantidad Menor a lo Despachado'),
         ('CANTIDAD_MAYOR', 'Cantidad Mayor a lo Despachado'),
+        ('RECIBIDO_SIN_DESPACHAR', 'Recibido sin haber sido despachado'),
     ]
 
     qs = DespachoItem.objects.filter(
-        tipo_incidencia__in=['PRODUCTO_ERRONEO', 'SKU_NO_CONTEMPLADO', 'CANTIDAD_MENOR', 'CANTIDAD_MAYOR']
+        tipo_incidencia__in=[t[0] for t in TIPOS_INCIDENCIA]
     ).select_related(
         'despacho__pedido__solicitante',
         'pedido_item',
@@ -1820,6 +1973,7 @@ def reporte_incidencias(request):
     total_no_contemplados = qs.filter(tipo_incidencia='SKU_NO_CONTEMPLADO').count()
     total_cantidad_menor = qs.filter(tipo_incidencia='CANTIDAD_MENOR').count()
     total_cantidad_mayor = qs.filter(tipo_incidencia='CANTIDAD_MAYOR').count()
+    total_recibido_sin_despachar = qs.filter(tipo_incidencia='RECIBIDO_SIN_DESPACHAR').count()
 
     return render(request, 'pedidos-reporte-incidencias.html', {
         'incidencias': qs,
@@ -1828,6 +1982,7 @@ def reporte_incidencias(request):
         'total_no_contemplados': total_no_contemplados,
         'total_cantidad_menor': total_cantidad_menor,
         'total_cantidad_mayor': total_cantidad_mayor,
+        'total_recibido_sin_despachar': total_recibido_sin_despachar,
         'fecha_inicio': fecha_inicio,
         'fecha_fin': fecha_fin,
         'tipo_filtro': tipo_filtro,
@@ -1856,7 +2011,7 @@ def _construir_grupos_reporte_items(request, emitir_mensajes=True):
     if categoria_filtro:
         items = items.filter(pedido__categoria=categoria_filtro)
     if estado_filtro == 'BACK_ORDER':
-        items = items.filter(cantidad_back_order__gt=0)
+        items = items.filter(cantidad_back_order__gt=0).exclude(estado='CERRADO')
     elif estado_filtro:
         items = items.filter(estado=estado_filtro)
     if fecha_inicio:
@@ -1864,7 +2019,7 @@ def _construir_grupos_reporte_items(request, emitir_mensajes=True):
     if fecha_fin:
         items = items.filter(pedido__fecha_creacion__date__lte=fecha_fin)
     if sin_filtros_aplicados:
-        items = items.filter(cantidad_back_order__gt=0)
+        items = items.filter(cantidad_back_order__gt=0).exclude(estado='CERRADO')
 
     grupos = list(
         items.values('codigo')
@@ -2050,6 +2205,38 @@ def _incidencias_base_qs():
         .exclude(despacho__pedido__estado='ANULADO')
         .order_by('-despacho__fecha_despacho')
     )
+
+
+def _items_pedido_fuera_despacho(pedido, despacho):
+    """PedidoItems del pedido sin línea en este despacho, con su estado de recepción.
+
+    Cada dict lleva 'bloqueado_por' = numero_despacho de otro despacho ENVIADO que
+    ya contiene el ítem (None si está libre para recibirse aquí).
+    """
+    ids_en_despacho = set(
+        despacho.items.exclude(pedido_item__isnull=True).values_list('pedido_item_id', flat=True)
+    )
+    items = list(pedido.items.exclude(estado='CERRADO').exclude(pk__in=ids_en_despacho))
+    if not items:
+        return []
+    item_ids = [item.pk for item in items]
+    bloqueos = dict(
+        DespachoItem.objects.filter(pedido_item_id__in=item_ids, despacho__estado='ENVIADO')
+        .exclude(despacho=despacho)
+        .values_list('pedido_item_id', 'despacho__numero_despacho')
+    )
+    return [
+        {
+            'id': item.pk,
+            'codigo': item.codigo,
+            'descripcion': item.descripcion,
+            'cantidad_solicitada': item.cantidad_solicitada,
+            'cantidad_recibida': item.cantidad_recibida,
+            'cantidad_back_order': item.cantidad_back_order,
+            'bloqueado_por': bloqueos.get(item.pk),
+        }
+        for item in items
+    ]
 
 
 @login_required(login_url='/login/')

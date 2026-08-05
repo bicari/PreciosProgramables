@@ -108,6 +108,8 @@
                                         <span class="badge bg-secondary"><i class="fas fa-arrow-down me-1"></i>Cant. Menor</span>
                                     {% elif inc.tipo_incidencia == 'CANTIDAD_MAYOR' %}
                                         <span class="badge bg-warning text-dark"><i class="fas fa-arrow-up me-1"></i>Cant. Mayor</span>
+                                    {% elif inc.tipo_incidencia == 'RECIBIDO_SIN_DESPACHAR' %}
+                                        <span class="badge bg-info text-dark"><i class="fas fa-box-open me-1"></i>Sin Despachar</span>
                                     {% endif %}
                                 </td>
                                 <td>
