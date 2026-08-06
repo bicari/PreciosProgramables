@@ -407,6 +407,44 @@ class AlertasStockTest(TestCase):
         self.assertNotContains(resp, 'DEF')
 
 
+class MapaTest(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from django.test import Client
+
+        self.user = User.objects.create_user(username='webuser8', password='x')
+        grupo, _ = Group.objects.get_or_create(name='Pedidos Ubicaciones')
+        self.user.groups.add(grupo)
+        self.client = Client()
+        self.client.login(username='webuser8', password='x')
+        self.galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        self.rack = UbicacionesService.crear_rack(self.galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+        self.cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+
+    def test_mapa_galpon_y_rack_devuelven_200(self):
+        resp = self.client.get(f'/ubicaciones/galpones/{self.galpon.pk}/mapa/')
+        self.assertEqual(resp.status_code, 200)
+        resp = self.client.get(f'/ubicaciones/racks/{self.rack.pk}/mapa/')
+        self.assertEqual(resp.status_code, 200)
+
+    def test_mapa_muestra_boton_desde_detalle(self):
+        resp = self.client.get(f'/ubicaciones/galpones/{self.galpon.pk}/')
+        self.assertContains(resp, f'/ubicaciones/galpones/{self.galpon.pk}/mapa/')
+
+    def test_rack_con_alertas_se_marca_en_el_mapa(self):
+        nivel = self.cuerpo.ubicaciones.order_by('codigo').first().niveles.get(numero=1)
+        ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=nivel, cantidad=1, stock_minimo=10)
+        resp = self.client.get(f'/ubicaciones/galpones/{self.galpon.pk}/mapa/')
+        self.assertContains(resp, 'bg-danger')
+
+    def test_rack_con_fusion_se_marca_en_el_mapa(self):
+        ubicacion = self.cuerpo.ubicaciones.order_by('codigo').first()
+        n1, n2 = ubicacion.niveles.get(numero=1), ubicacion.niveles.get(numero=2)
+        UbicacionesService.fusionar_niveles([n1, n2], n1, self.user)
+        resp = self.client.get(f'/ubicaciones/galpones/{self.galpon.pk}/mapa/')
+        self.assertContains(resp, 'bg-warning')
+
+
 class ApiUbicacionesTest(TestCase):
     def setUp(self):
         from rest_framework.test import APIClient

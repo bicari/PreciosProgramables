@@ -3,7 +3,7 @@ import logging
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.core.exceptions import ValidationError
-from django.db.models import F
+from django.db.models import Exists, F, OuterRef
 from django.shortcuts import get_object_or_404, redirect, render
 
 from PedidosAlmacen.dbisam import DEPOSITO_ALMACEN, PedidosDBISAM
@@ -608,3 +608,28 @@ def alertas_stock(request):
         .order_by('nivel__ubicacion__cuerpo__rack__galpon__codigo', 'nivel__ubicacion__cuerpo__rack__codigo')
     )
     return render(request, 'ubicaciones-alertas.html', {'alertas': alertas})
+
+
+# ------------------------------------------------------------------ Mapa
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def mapa_galpon(request, pk: int):
+    galpon = get_object_or_404(Galpon, pk=pk)
+    alerta_qs = ProductoUbicacion.objects.filter(
+        nivel__ubicacion__cuerpo__rack=OuterRef('pk'),
+        nivel__tipo=Nivel.PICKING, stock_minimo__isnull=False, cantidad__lt=F('stock_minimo'),
+    )
+    fusion_qs = Nivel.objects.filter(ubicacion__cuerpo__rack=OuterRef('pk'), fusionado_en__isnull=False)
+    racks = galpon.racks.filter(activo=True).annotate(
+        tiene_alertas=Exists(alerta_qs), tiene_fusion=Exists(fusion_qs),
+    )
+    return render(request, 'ubicaciones-mapa-galpon.html', {'galpon': galpon, 'racks': racks})
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def mapa_rack(request, pk: int):
+    rack = get_object_or_404(Rack.objects.select_related('galpon'), pk=pk)
+    cuerpos = rack.cuerpos.filter(activo=True).prefetch_related('ubicaciones__niveles')
+    return render(request, 'ubicaciones-mapa-rack.html', {'rack': rack, 'cuerpos': cuerpos})

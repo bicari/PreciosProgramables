@@ -54,4 +54,8 @@ urlpatterns = [
 
     # Alertas
     path('ubicaciones/alertas/', views.alertas_stock, name='ubicaciones-alertas'),
+
+    # Mapa
+    path('ubicaciones/galpones/<int:pk>/mapa/', views.mapa_galpon, name='ubicaciones-mapa-galpon'),
+    path('ubicaciones/racks/<int:pk>/mapa/', views.mapa_rack, name='ubicaciones-mapa-rack'),
 ]
