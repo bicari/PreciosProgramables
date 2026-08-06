@@ -574,3 +574,34 @@ class GalponRackTemplatesSmokeTest(TestCase):
         for url in urls:
             resp = self.client.get(url)
             self.assertEqual(resp.status_code, 200, f"{url} devolvió {resp.status_code}")
+
+
+class CuerpoUbicacionNivelTemplatesSmokeTest(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from django.test import Client
+
+        self.user = User.objects.create_user(username='webuser5', password='x')
+        grupo, _ = Group.objects.get_or_create(name='Pedidos Ubicaciones')
+        self.user.groups.add(grupo)
+        self.client = Client()
+        self.client.login(username='webuser5', password='x')
+        self.galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        self.rack = UbicacionesService.crear_rack(self.galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+        self.cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        self.ubicacion = self.cuerpo.ubicaciones.order_by('codigo').first()
+        self.nivel = self.ubicacion.niveles.get(numero=1)
+
+    def test_paginas_de_cuerpo_ubicacion_nivel_devuelven_200(self):
+        urls = [
+            f'/ubicaciones/racks/{self.rack.pk}/cuerpos/crear/',
+            f'/ubicaciones/cuerpos/{self.cuerpo.pk}/',
+            f'/ubicaciones/cuerpos/{self.cuerpo.pk}/editar/',
+            f'/ubicaciones/ubicaciones/{self.ubicacion.pk}/',
+            f'/ubicaciones/ubicaciones/{self.ubicacion.pk}/editar/',
+            f'/ubicaciones/niveles/{self.nivel.pk}/',
+            f'/ubicaciones/niveles/{self.nivel.pk}/editar/',
+        ]
+        for url in urls:
+            resp = self.client.get(url)
+            self.assertEqual(resp.status_code, 200, f"{url} devolvió {resp.status_code}")

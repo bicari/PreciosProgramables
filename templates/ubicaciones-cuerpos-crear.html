@@ -2,11 +2,12 @@
 {% block content %}
 <div class="container mt-4" style="max-width:600px;">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2><i class="fas fa-edit"></i> Editar Nivel {{ nivel.codigo_completo }}</h2>
-        <a href="{% url 'ubicaciones-niveles-detalle' nivel.pk %}" class="btn btn-outline-secondary">
+        <h2><i class="fas fa-plus-circle"></i> Nuevo Cuerpo en Rack {{ rack.galpon.codigo }}{{ rack.codigo }}</h2>
+        <a href="{% url 'ubicaciones-racks-detalle' rack.pk %}" class="btn btn-outline-secondary">
             <i class="fas fa-arrow-left"></i> Volver
         </a>
     </div>
+
     {% if messages %}
         {% for message in messages %}
         <div class="alert alert-{{ message.tags }} alert-dismissible fade show">
@@ -14,8 +15,13 @@
         </div>
         {% endfor %}
     {% endif %}
+
     <div class="card">
         <div class="card-body">
+            <p class="text-muted small">
+                Se creará el siguiente cuerpo disponible con sus 2 ubicaciones y
+                {{ rack.max_niveles }} niveles cada una, autogenerados.
+            </p>
             <form method="post">
                 {% csrf_token %}
                 {% for field in form %}
@@ -25,7 +31,9 @@
                     {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
                 {% endfor %}
-                <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Guardar cambios</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Crear Cuerpo
+                </button>
             </form>
         </div>
     </div>

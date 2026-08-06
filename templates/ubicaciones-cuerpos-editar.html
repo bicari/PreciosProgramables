@@ -2,8 +2,8 @@
 {% block content %}
 <div class="container mt-4" style="max-width:600px;">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2><i class="fas fa-edit"></i> Editar Nivel {{ nivel.codigo_completo }}</h2>
-        <a href="{% url 'ubicaciones-niveles-detalle' nivel.pk %}" class="btn btn-outline-secondary">
+        <h2><i class="fas fa-edit"></i> Editar Cuerpo {{ cuerpo.codigo }}</h2>
+        <a href="{% url 'ubicaciones-cuerpos-detalle' cuerpo.pk %}" class="btn btn-outline-secondary">
             <i class="fas fa-arrow-left"></i> Volver
         </a>
     </div>
@@ -25,7 +25,7 @@
                     {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                 </div>
                 {% endfor %}
-                <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Guardar cambios</button>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Guardar</button>
             </form>
         </div>
     </div>
