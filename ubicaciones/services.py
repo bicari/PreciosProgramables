@@ -173,3 +173,32 @@ class UbicacionesService:
             'DESACTIVACION_UBICACION', usuario,
             galpon=ubicacion.rack.galpon, rack=ubicacion.rack, ubicacion=ubicacion,
         )
+
+    # ------------------------------------------------------------------ Nivel
+
+    @staticmethod
+    @transaction.atomic
+    def editar_nivel(nivel: Nivel, tipo: str, descripcion: str, usuario) -> Nivel:
+        if nivel.esta_fusionado:
+            raise ValidationError(
+                f"El nivel '{nivel.codigo_completo}' está fusionado con "
+                f"'{nivel.fusionado_en.codigo_completo}'; edítalo desde el nivel maestro."
+            )
+        nivel.tipo = tipo
+        nivel.descripcion = descripcion
+        nivel.save(update_fields=['tipo', 'descripcion', 'fecha_modificacion'])
+        _registrar('EDICION_NIVEL', usuario, galpon=nivel.galpon, rack=nivel.rack, nivel=nivel)
+        return nivel
+
+    @staticmethod
+    @transaction.atomic
+    def desactivar_nivel(nivel: Nivel, usuario) -> None:
+        """Soft-delete de nivel. Rechaza si tiene productos asignados."""
+        if nivel.productos.exists():
+            raise ValidationError(
+                f"El nivel '{nivel.codigo_completo}' tiene productos asignados. "
+                "Quítalos o trasládalos antes de desactivarlo."
+            )
+        nivel.activo = False
+        nivel.save(update_fields=['activo', 'fecha_modificacion'])
+        _registrar('DESACTIVACION_NIVEL', usuario, galpon=nivel.galpon, rack=nivel.rack, nivel=nivel)

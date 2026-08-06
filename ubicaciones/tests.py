@@ -147,3 +147,36 @@ class CuerpoUbicacionServiceTest(TestCase):
         ubicacion = cuerpo.ubicaciones.first()
         with self.assertRaises(ValidationError):
             UbicacionesService.desactivar_ubicacion(ubicacion, self.user)
+
+
+class NivelServiceTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(username='tester4')
+        self.galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        self.rack = UbicacionesService.crear_rack(self.galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+        self.cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        self.ubicacion = self.cuerpo.ubicaciones.order_by('codigo').first()
+        self.nivel = self.ubicacion.niveles.get(numero=1)
+
+    def test_editar_nivel_cambia_tipo_y_descripcion(self):
+        UbicacionesService.editar_nivel(self.nivel, Nivel.ALMACENAJE, 'Nota', self.user)
+        self.nivel.refresh_from_db()
+        self.assertEqual(self.nivel.tipo, Nivel.ALMACENAJE)
+        self.assertEqual(self.nivel.descripcion, 'Nota')
+
+    def test_editar_nivel_fusionado_falla(self):
+        otro_nivel = self.ubicacion.niveles.get(numero=2)
+        self.nivel.fusionado_en = otro_nivel
+        self.nivel.save(update_fields=['fusionado_en'])
+        with self.assertRaises(ValidationError):
+            UbicacionesService.editar_nivel(self.nivel, Nivel.ALMACENAJE, '', self.user)
+
+    def test_desactivar_nivel_con_productos_falla(self):
+        ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel, cantidad=1)
+        with self.assertRaises(ValidationError):
+            UbicacionesService.desactivar_nivel(self.nivel, self.user)
+
+    def test_desactivar_nivel_sin_productos_ok(self):
+        UbicacionesService.desactivar_nivel(self.nivel, self.user)
+        self.nivel.refresh_from_db()
+        self.assertFalse(self.nivel.activo)
