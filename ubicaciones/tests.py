@@ -435,3 +435,41 @@ class RackFormTest(TestCase):
         from ubicaciones.forms import RackForm
         form = RackForm()
         self.assertFalse(form.fields['max_niveles'].disabled)
+
+
+class CuerpoUbicacionNivelViewsTest(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from django.test import Client
+
+        self.user = User.objects.create_user(username='webuser2', password='x')
+        grupo, _ = Group.objects.get_or_create(name='Pedidos Ubicaciones')
+        self.user.groups.add(grupo)
+        self.client = Client()
+        self.client.login(username='webuser2', password='x')
+        self.galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        self.rack = UbicacionesService.crear_rack(self.galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+
+    def test_crear_cuerpo_via_web_redirige(self):
+        resp = self.client.post(f'/ubicaciones/racks/{self.rack.pk}/cuerpos/crear/', {'descripcion': ''})
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self.rack.cuerpos.count(), 1)
+
+    def test_editar_nivel_via_web_redirige(self):
+        cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        nivel = cuerpo.ubicaciones.first().niveles.get(numero=1)
+        resp = self.client.post(f'/ubicaciones/niveles/{nivel.pk}/editar/', {
+            'tipo': Nivel.ALMACENAJE, 'descripcion': 'Nota',
+        })
+        self.assertEqual(resp.status_code, 302)
+        nivel.refresh_from_db()
+        self.assertEqual(nivel.tipo, Nivel.ALMACENAJE)
+
+    def test_desactivar_nivel_con_productos_redirige_con_error(self):
+        cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        nivel = cuerpo.ubicaciones.first().niveles.get(numero=1)
+        ProductoUbicacion.objects.create(codigo_producto='X', nivel=nivel, cantidad=1)
+        resp = self.client.post(f'/ubicaciones/niveles/{nivel.pk}/desactivar/')
+        self.assertEqual(resp.status_code, 302)
+        nivel.refresh_from_db()
+        self.assertTrue(nivel.activo)

@@ -5,8 +5,8 @@ from django.contrib.auth.decorators import login_required, user_passes_test
 from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 
-from .forms import GalponForm, RackForm
-from .models import Galpon, Rack
+from .forms import CuerpoForm, GalponForm, NivelForm, RackForm, UbicacionForm
+from .models import Cuerpo, Galpon, Nivel, Rack, Ubicacion
 from .services import UbicacionesService
 
 logger = logging.getLogger(__name__)
@@ -191,4 +191,169 @@ def desactivar_rack(request, pk: int):
             return redirect('ubicaciones-racks-detalle', pk=pk)
     return render(request, 'ubicaciones-confirmar-desactivar.html', {
         'objeto': rack, 'tipo': 'rack', 'nombre': rack.codigo,
+    })
+
+
+# ------------------------------------------------------------------ Cuerpos
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def crear_cuerpo(request, rack_pk: int):
+    rack = get_object_or_404(Rack, pk=rack_pk)
+    if request.method == 'POST':
+        form = CuerpoForm(request.POST)
+        if form.is_valid():
+            try:
+                cuerpo = UbicacionesService.crear_cuerpo(
+                    rack=rack, descripcion=form.cleaned_data['descripcion'], usuario=request.user,
+                )
+                messages.success(request, f"Cuerpo '{cuerpo.codigo}' creado con sus ubicaciones y niveles.")
+                return redirect('ubicaciones-racks-detalle', pk=rack.pk)
+            except ValidationError as e:
+                messages.error(request, e.message)
+    else:
+        form = CuerpoForm()
+    return render(request, 'ubicaciones-cuerpos-crear.html', {'form': form, 'rack': rack})
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def detalle_cuerpo(request, pk: int):
+    cuerpo = get_object_or_404(Cuerpo.objects.select_related('rack__galpon'), pk=pk)
+    ubicaciones = cuerpo.ubicaciones.prefetch_related('niveles')
+    return render(request, 'ubicaciones-cuerpos-detalle.html', {
+        'cuerpo': cuerpo,
+        'ubicaciones': ubicaciones,
+    })
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def editar_cuerpo(request, pk: int):
+    cuerpo = get_object_or_404(Cuerpo.objects.select_related('rack__galpon'), pk=pk)
+    if request.method == 'POST':
+        form = CuerpoForm(request.POST, instance=cuerpo)
+        if form.is_valid():
+            cuerpo.descripcion = form.cleaned_data['descripcion']
+            cuerpo.save(update_fields=['descripcion', 'fecha_modificacion'])
+            messages.success(request, f"Cuerpo '{cuerpo.codigo}' actualizado.")
+            return redirect('ubicaciones-cuerpos-detalle', pk=cuerpo.pk)
+    else:
+        form = CuerpoForm(instance=cuerpo)
+    return render(request, 'ubicaciones-cuerpos-editar.html', {'form': form, 'cuerpo': cuerpo})
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def desactivar_cuerpo(request, pk: int):
+    cuerpo = get_object_or_404(Cuerpo.objects.select_related('rack__galpon'), pk=pk)
+    if request.method == 'POST':
+        try:
+            UbicacionesService.desactivar_cuerpo(cuerpo, request.user)
+            messages.success(request, f"Cuerpo '{cuerpo.codigo}' desactivado.")
+            return redirect('ubicaciones-racks-detalle', pk=cuerpo.rack_id)
+        except ValidationError as e:
+            messages.error(request, e.message)
+            return redirect('ubicaciones-cuerpos-detalle', pk=pk)
+    return render(request, 'ubicaciones-confirmar-desactivar.html', {
+        'objeto': cuerpo, 'tipo': 'cuerpo', 'nombre': cuerpo.codigo,
+    })
+
+
+# ------------------------------------------------------------------ Ubicaciones
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def detalle_ubicacion(request, pk: int):
+    ubicacion = get_object_or_404(Ubicacion.objects.select_related('cuerpo__rack__galpon'), pk=pk)
+    niveles = ubicacion.niveles.select_related('fusionado_en').prefetch_related('productos')
+    return render(request, 'ubicaciones-ubicaciones-detalle.html', {
+        'ubicacion': ubicacion,
+        'niveles': niveles,
+    })
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def editar_ubicacion(request, pk: int):
+    ubicacion = get_object_or_404(Ubicacion.objects.select_related('cuerpo__rack__galpon'), pk=pk)
+    if request.method == 'POST':
+        form = UbicacionForm(request.POST, instance=ubicacion)
+        if form.is_valid():
+            ubicacion.descripcion = form.cleaned_data['descripcion']
+            ubicacion.save(update_fields=['descripcion', 'fecha_modificacion'])
+            messages.success(request, f"Ubicación '{ubicacion.codigo}' actualizada.")
+            return redirect('ubicaciones-ubicaciones-detalle', pk=ubicacion.pk)
+    else:
+        form = UbicacionForm(instance=ubicacion)
+    return render(request, 'ubicaciones-ubicaciones-editar.html', {'form': form, 'ubicacion': ubicacion})
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def desactivar_ubicacion(request, pk: int):
+    ubicacion = get_object_or_404(Ubicacion.objects.select_related('cuerpo__rack__galpon'), pk=pk)
+    if request.method == 'POST':
+        try:
+            UbicacionesService.desactivar_ubicacion(ubicacion, request.user)
+            messages.success(request, f"Ubicación '{ubicacion.codigo}' desactivada.")
+            return redirect('ubicaciones-cuerpos-detalle', pk=ubicacion.cuerpo_id)
+        except ValidationError as e:
+            messages.error(request, e.message)
+            return redirect('ubicaciones-ubicaciones-detalle', pk=pk)
+    return render(request, 'ubicaciones-confirmar-desactivar.html', {
+        'objeto': ubicacion, 'tipo': 'ubicación', 'nombre': ubicacion.codigo,
+    })
+
+
+# ------------------------------------------------------------------ Niveles
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def detalle_nivel(request, pk: int):
+    nivel = get_object_or_404(
+        Nivel.objects.select_related('ubicacion__cuerpo__rack__galpon', 'fusionado_en'), pk=pk,
+    )
+    productos = nivel.productos.all()
+    return render(request, 'ubicaciones-niveles-detalle.html', {
+        'nivel': nivel,
+        'productos': productos,
+    })
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def editar_nivel(request, pk: int):
+    nivel = get_object_or_404(Nivel.objects.select_related('ubicacion__cuerpo__rack__galpon'), pk=pk)
+    if request.method == 'POST':
+        form = NivelForm(request.POST, instance=nivel)
+        if form.is_valid():
+            try:
+                UbicacionesService.editar_nivel(
+                    nivel=nivel, tipo=form.cleaned_data['tipo'],
+                    descripcion=form.cleaned_data['descripcion'], usuario=request.user,
+                )
+                messages.success(request, f"Nivel '{nivel.codigo_completo}' actualizado.")
+                return redirect('ubicaciones-niveles-detalle', pk=nivel.pk)
+            except ValidationError as e:
+                messages.error(request, e.message)
+    else:
+        form = NivelForm(instance=nivel)
+    return render(request, 'ubicaciones-niveles-editar.html', {'form': form, 'nivel': nivel})
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def desactivar_nivel(request, pk: int):
+    nivel = get_object_or_404(Nivel.objects.select_related('ubicacion__cuerpo__rack__galpon'), pk=pk)
+    if request.method == 'POST':
+        try:
+            UbicacionesService.desactivar_nivel(nivel, request.user)
+            messages.success(request, f"Nivel '{nivel.codigo_completo}' desactivado.")
+            return redirect('ubicaciones-ubicaciones-detalle', pk=nivel.ubicacion_id)
+        except ValidationError as e:
+            messages.error(request, e.message)
+            return redirect('ubicaciones-niveles-detalle', pk=pk)
+    return render(request, 'ubicaciones-confirmar-desactivar.html', {
+        'objeto': nivel, 'tipo': 'nivel', 'nombre': nivel.codigo_completo,
     })

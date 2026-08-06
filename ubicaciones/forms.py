@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import Galpon, Rack
+from .models import Cuerpo, Galpon, Nivel, Rack, Ubicacion
 
 
 class GalponForm(forms.ModelForm):
@@ -35,3 +35,31 @@ class RackForm(forms.ModelForm):
         if bloquear_max_niveles:
             self.fields['max_niveles'].disabled = True
             self.fields['max_niveles'].help_text = 'No editable: el rack ya tiene cuerpos creados.'
+
+
+class CuerpoForm(forms.ModelForm):
+    class Meta:
+        model = Cuerpo
+        fields = ['descripcion']
+        widgets = {
+            'descripcion': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Descripción opcional'}),
+        }
+
+
+class UbicacionForm(forms.ModelForm):
+    class Meta:
+        model = Ubicacion
+        fields = ['descripcion']
+        widgets = {
+            'descripcion': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Descripción opcional'}),
+        }
+
+
+class NivelForm(forms.ModelForm):
+    class Meta:
+        model = Nivel
+        fields = ['tipo', 'descripcion']
+        widgets = {
+            'tipo': forms.Select(attrs={'class': 'form-select'}),
+            'descripcion': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Descripción opcional'}),
+        }
