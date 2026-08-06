@@ -51,4 +51,7 @@ urlpatterns = [
     # Fragmentos htmx
     path('ubicaciones/buscar-nivel/', views.buscar_nivel_fragment, name='ubicaciones-buscar-nivel'),
     path('ubicaciones/buscar-producto/', views.buscar_producto_dbisam_fragment, name='ubicaciones-buscar-producto'),
+
+    # Alertas
+    path('ubicaciones/alertas/', views.alertas_stock, name='ubicaciones-alertas'),
 ]

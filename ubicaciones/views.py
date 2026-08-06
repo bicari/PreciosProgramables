@@ -3,6 +3,7 @@ import logging
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.core.exceptions import ValidationError
+from django.db.models import F
 from django.shortcuts import get_object_or_404, redirect, render
 
 from PedidosAlmacen.dbisam import DEPOSITO_ALMACEN, PedidosDBISAM
@@ -592,3 +593,18 @@ def buscar_producto_dbisam_fragment(request):
         except Exception:
             logger.exception("Error en buscar_producto_dbisam_fragment")
     return render(request, '_ubicaciones-buscar-producto-fragment.html', {'resultados': resultados})
+
+
+# ------------------------------------------------------------------ Alertas
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def alertas_stock(request):
+    alertas = (
+        ProductoUbicacion.objects
+        .filter(nivel__tipo=Nivel.PICKING, nivel__activo=True, stock_minimo__isnull=False)
+        .filter(cantidad__lt=F('stock_minimo'))
+        .select_related('nivel__ubicacion__cuerpo__rack__galpon')
+        .order_by('nivel__ubicacion__cuerpo__rack__galpon__codigo', 'nivel__ubicacion__cuerpo__rack__codigo')
+    )
+    return render(request, 'ubicaciones-alertas.html', {'alertas': alertas})

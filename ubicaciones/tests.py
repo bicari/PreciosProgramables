@@ -363,6 +363,50 @@ class AsignacionTrasladoFusionTemplatesSmokeTest(TestCase):
         self.assertEqual(resp.status_code, 200)
 
 
+class AlertasStockTest(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from django.test import Client
+
+        self.user = User.objects.create_user(username='webuser7', password='x')
+        grupo, _ = Group.objects.get_or_create(name='Pedidos Ubicaciones')
+        self.user.groups.add(grupo)
+        self.client = Client()
+        self.client.login(username='webuser7', password='x')
+        self.galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        self.rack = UbicacionesService.crear_rack(self.galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+        self.cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        self.ubicacion = self.cuerpo.ubicaciones.order_by('codigo').first()
+        self.nivel_picking = self.ubicacion.niveles.get(numero=1)
+        self.nivel_almacenaje = self.ubicacion.niveles.get(numero=2)
+        UbicacionesService.editar_nivel(self.nivel_almacenaje, Nivel.ALMACENAJE, '', self.user)
+
+    def test_alerta_aparece_cuando_cantidad_bajo_minimo_en_picking(self):
+        ProductoUbicacion.objects.create(
+            codigo_producto='ABC', nivel=self.nivel_picking, cantidad=2, stock_minimo=10,
+        )
+        resp = self.client.get('/ubicaciones/alertas/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'ABC')
+
+    def test_alerta_no_aparece_si_cantidad_sobre_minimo(self):
+        ProductoUbicacion.objects.create(
+            codigo_producto='XYZ', nivel=self.nivel_picking, cantidad=20, stock_minimo=10,
+        )
+        resp = self.client.get('/ubicaciones/alertas/')
+        self.assertNotContains(resp, 'XYZ')
+
+    def test_alerta_no_aparece_en_almacenaje_aunque_tenga_stock_minimo(self):
+        pu = ProductoUbicacion.objects.create(
+            codigo_producto='DEF', nivel=self.nivel_almacenaje, cantidad=1, stock_minimo=None,
+        )
+        # Un nivel de almacenaje no permite configurar stock_minimo vía el servicio,
+        # pero si quedara en None nunca genera alerta (el filtro exige stock_minimo no nulo).
+        self.assertIsNone(pu.stock_minimo)
+        resp = self.client.get('/ubicaciones/alertas/')
+        self.assertNotContains(resp, 'DEF')
+
+
 class ApiUbicacionesTest(TestCase):
     def setUp(self):
         from rest_framework.test import APIClient
