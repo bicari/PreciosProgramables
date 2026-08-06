@@ -5,8 +5,20 @@ from django.contrib.auth.decorators import login_required, user_passes_test
 from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 
-from .forms import CuerpoForm, GalponForm, NivelForm, RackForm, UbicacionForm
-from .models import Cuerpo, Galpon, Nivel, Rack, Ubicacion
+from PedidosAlmacen.dbisam import DEPOSITO_ALMACEN, PedidosDBISAM
+
+from .forms import (
+    AsignarProductoAccionForm,
+    CuerpoForm,
+    EditarCantidadForm,
+    FusionarForm,
+    GalponForm,
+    NivelForm,
+    RackForm,
+    TrasladarForm,
+    UbicacionForm,
+)
+from .models import Cuerpo, Galpon, MovimientoUbicacion, Nivel, ProductoUbicacion, Rack, Ubicacion
 from .services import UbicacionesService
 
 logger = logging.getLogger(__name__)
@@ -357,3 +369,226 @@ def desactivar_nivel(request, pk: int):
     return render(request, 'ubicaciones-confirmar-desactivar.html', {
         'objeto': nivel, 'tipo': 'nivel', 'nombre': nivel.codigo_completo,
     })
+
+
+# ------------------------------------------------------------------ Asignaciones
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def asignar_producto(request, pk: int):
+    nivel = get_object_or_404(Nivel.objects.select_related('ubicacion__cuerpo__rack__galpon'), pk=pk)
+    resultados_busqueda = []
+    query = ''
+
+    if request.method == 'POST' and 'buscar' in request.POST:
+        query = request.POST.get('codigo_producto', '').strip()
+        if query:
+            try:
+                db = PedidosDBISAM()
+                prod = db.buscar_producto(query.upper())
+                if prod:
+                    existencia = db.consultar_stock(query.upper(), deposito=DEPOSITO_ALMACEN)
+                    resultados_busqueda = [{
+                        'codigo': prod[0], 'descripcion': prod[1],
+                        'referencia': prod[2], 'puesto': prod[3], 'existencia': existencia,
+                    }]
+                else:
+                    prods = db.buscar_por_descripcion(query)
+                    codigos = [p[0] for p in prods]
+                    stocks = db.consultar_stock_multiple(codigos, deposito=DEPOSITO_ALMACEN) if codigos else {}
+                    resultados_busqueda = [
+                        {'codigo': p[0], 'descripcion': p[1], 'referencia': p[2], 'puesto': p[3],
+                         'existencia': stocks.get(p[0], 0)}
+                        for p in prods
+                    ]
+            except Exception:
+                logger.exception("Error al buscar producto en DBISAM")
+                messages.error(request, "Error al conectar con DBISAM.")
+
+    elif request.method == 'POST' and 'asignar' in request.POST:
+        form = AsignarProductoAccionForm(request.POST)
+        if form.is_valid():
+            try:
+                UbicacionesService.asignar_producto(
+                    codigo=form.cleaned_data['codigo_producto'],
+                    nivel=nivel,
+                    cantidad=form.cleaned_data['cantidad'],
+                    stock_minimo=form.cleaned_data.get('stock_minimo'),
+                    usuario=request.user,
+                )
+                messages.success(request, f"Producto asignado a '{nivel.codigo_completo}'.")
+                return redirect('ubicaciones-niveles-detalle', pk=nivel.pk)
+            except ValidationError as e:
+                messages.error(request, e.message)
+
+    return render(request, 'ubicaciones-asignar.html', {
+        'nivel': nivel,
+        'resultados_busqueda': resultados_busqueda,
+        'query': query,
+    })
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def editar_cantidad(request, pu_id: int):
+    pu = get_object_or_404(ProductoUbicacion.objects.select_related('nivel'), pk=pu_id)
+    if request.method == 'POST':
+        form = EditarCantidadForm(request.POST)
+        if form.is_valid():
+            try:
+                UbicacionesService.editar_cantidad(
+                    pu, form.cleaned_data['cantidad'], form.cleaned_data.get('stock_minimo'), request.user,
+                )
+                messages.success(request, "Cantidad actualizada.")
+            except ValidationError as e:
+                messages.error(request, e.message)
+    return redirect('ubicaciones-niveles-detalle', pk=pu.nivel_id)
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def quitar_producto(request, pu_id: int):
+    pu = get_object_or_404(ProductoUbicacion, pk=pu_id)
+    nivel_id = pu.nivel_id
+    if request.method == 'POST':
+        try:
+            UbicacionesService.quitar_producto(pu_id, request.user)
+            messages.success(request, "Producto desasignado correctamente.")
+        except Exception as e:
+            messages.error(request, str(e))
+    return redirect('ubicaciones-niveles-detalle', pk=nivel_id)
+
+
+# ------------------------------------------------------------------ Traslado / Fusión
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def trasladar(request):
+    form = TrasladarForm(request.POST or None)
+    if request.method == 'POST' and form.is_valid():
+        try:
+            UbicacionesService.trasladar_producto(
+                codigo=form.cleaned_data['codigo_producto'],
+                nivel_origen=form.cleaned_data['nivel_origen'],
+                nivel_destino=form.cleaned_data['nivel_destino'],
+                usuario=request.user,
+                notas=form.cleaned_data.get('notas', ''),
+            )
+            messages.success(request, "Traslado realizado correctamente.")
+            return redirect('ubicaciones-movimientos')
+        except ValidationError as e:
+            messages.error(request, e.message)
+    return render(request, 'ubicaciones-trasladar.html', {'form': form})
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def fusionar(request):
+    form = FusionarForm(request.POST or None)
+    if request.method == 'POST' and form.is_valid():
+        try:
+            transferidos = UbicacionesService.fusionar_niveles(
+                niveles=list(form.cleaned_data['niveles']),
+                maestro=form.cleaned_data['maestro'],
+                usuario=request.user,
+                notas=form.cleaned_data.get('notas', ''),
+            )
+            messages.success(request, f"Fusión completada: {transferidos} asignación(es) consolidadas.")
+            return redirect('ubicaciones-movimientos')
+        except ValidationError as e:
+            messages.error(request, e.message)
+    return render(request, 'ubicaciones-fusionar.html', {'form': form})
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def desfusionar(request, pk: int):
+    nivel = get_object_or_404(Nivel, pk=pk)
+    if request.method == 'POST':
+        try:
+            UbicacionesService.desfusionar_nivel(nivel, request.user)
+            messages.success(request, f"Nivel '{nivel.codigo_completo}' desfusionado.")
+        except ValidationError as e:
+            messages.error(request, e.message)
+    return redirect('ubicaciones-niveles-detalle', pk=pk)
+
+
+# ------------------------------------------------------------------ Histórico
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def lista_movimientos(request):
+    qs = MovimientoUbicacion.objects.select_related('usuario', 'rack', 'nivel_origen', 'nivel_destino')
+    tipo = request.GET.get('tipo', '')
+    codigo = request.GET.get('codigo', '').strip()
+    if tipo:
+        qs = qs.filter(tipo=tipo)
+    if codigo:
+        qs = qs.filter(codigo_producto__icontains=codigo)
+    return render(request, 'ubicaciones-movimientos.html', {
+        'movimientos': qs[:500],
+        'tipo_filter': tipo,
+        'codigo_filter': codigo,
+        'tipos': MovimientoUbicacion.TIPO_CHOICES,
+    })
+
+
+# ------------------------------------------------------------------ Producto → Ubicaciones
+
+@login_required(login_url='/login/')
+@user_passes_test(is_ubicaciones, login_url='/dashboard/')
+def producto_ubicaciones(request, codigo: str):
+    codigo = codigo.strip().upper()
+    asignaciones = (
+        ProductoUbicacion.objects
+        .filter(codigo_producto=codigo)
+        .select_related('nivel__ubicacion__cuerpo__rack__galpon')
+    )
+    existencia = 0
+    descripcion = ''
+    try:
+        db = PedidosDBISAM()
+        prod = db.buscar_producto(codigo)
+        if prod:
+            descripcion = prod[1]
+            existencia = db.consultar_stock(codigo, deposito=DEPOSITO_ALMACEN)
+    except Exception:
+        logger.exception("Error al consultar DBISAM en producto_ubicaciones")
+
+    return render(request, 'ubicaciones-producto-detalle.html', {
+        'codigo': codigo, 'descripcion': descripcion, 'existencia': existencia,
+        'asignaciones': asignaciones,
+    })
+
+
+# ------------------------------------------------------------------ Fragmentos htmx
+
+@login_required(login_url='/login/')
+def buscar_nivel_fragment(request):
+    """Autocomplete de niveles para formularios de traslado/fusión."""
+    q = request.GET.get('q', '').strip()
+    qs = Nivel.objects.filter(activo=True, fusionado_en__isnull=True).select_related('ubicacion__cuerpo__rack')
+    if q:
+        qs = qs.filter(ubicacion__cuerpo__rack__codigo__icontains=q)
+    return render(request, '_ubicaciones-buscar-nivel-fragment.html', {'niveles': qs[:20]})
+
+
+@login_required(login_url='/login/')
+def buscar_producto_dbisam_fragment(request):
+    """Búsqueda de producto en DBISAM para el modal de asignación."""
+    q = request.GET.get('q', '').strip()
+    resultados = []
+    if len(q) >= 2:
+        try:
+            db = PedidosDBISAM()
+            prods = db.buscar_por_descripcion(q)
+            codigos = [p[0] for p in prods]
+            stocks = db.consultar_stock_multiple(codigos, deposito=DEPOSITO_ALMACEN) if codigos else {}
+            resultados = [
+                {'codigo': p[0], 'descripcion': p[1], 'referencia': p[2], 'puesto': p[3],
+                 'existencia': stocks.get(p[0], 0)}
+                for p in prods
+            ]
+        except Exception:
+            logger.exception("Error en buscar_producto_dbisam_fragment")
+    return render(request, '_ubicaciones-buscar-producto-fragment.html', {'resultados': resultados})

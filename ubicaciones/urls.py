@@ -31,4 +31,24 @@ urlpatterns = [
     path('ubicaciones/niveles/<int:pk>/', views.detalle_nivel, name='ubicaciones-niveles-detalle'),
     path('ubicaciones/niveles/<int:pk>/editar/', views.editar_nivel, name='ubicaciones-niveles-editar'),
     path('ubicaciones/niveles/<int:pk>/desactivar/', views.desactivar_nivel, name='ubicaciones-niveles-desactivar'),
+
+    # Asignaciones
+    path('ubicaciones/niveles/<int:pk>/asignar/', views.asignar_producto, name='ubicaciones-asignar'),
+    path('ubicaciones/producto-ubicaciones/<int:pu_id>/editar-cantidad/', views.editar_cantidad, name='ubicaciones-editar-cantidad'),
+    path('ubicaciones/producto-ubicaciones/<int:pu_id>/quitar/', views.quitar_producto, name='ubicaciones-quitar'),
+
+    # Traslado / Fusión
+    path('ubicaciones/trasladar/', views.trasladar, name='ubicaciones-trasladar'),
+    path('ubicaciones/fusionar/', views.fusionar, name='ubicaciones-fusionar'),
+    path('ubicaciones/niveles/<int:pk>/desfusionar/', views.desfusionar, name='ubicaciones-desfusionar'),
+
+    # Histórico
+    path('ubicaciones/movimientos/', views.lista_movimientos, name='ubicaciones-movimientos'),
+
+    # Producto → sus ubicaciones
+    path('ubicaciones/productos/<str:codigo>/', views.producto_ubicaciones, name='ubicaciones-producto-detalle'),
+
+    # Fragmentos htmx
+    path('ubicaciones/buscar-nivel/', views.buscar_nivel_fragment, name='ubicaciones-buscar-nivel'),
+    path('ubicaciones/buscar-producto/', views.buscar_producto_dbisam_fragment, name='ubicaciones-buscar-producto'),
 ]

@@ -473,3 +473,76 @@ class CuerpoUbicacionNivelViewsTest(TestCase):
         self.assertEqual(resp.status_code, 302)
         nivel.refresh_from_db()
         self.assertTrue(nivel.activo)
+
+
+class AsignacionTrasladoFusionViewsTest(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from django.test import Client
+
+        self.user = User.objects.create_user(username='webuser3', password='x')
+        grupo, _ = Group.objects.get_or_create(name='Pedidos Ubicaciones')
+        self.user.groups.add(grupo)
+        self.client = Client()
+        self.client.login(username='webuser3', password='x')
+        self.galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        self.rack = UbicacionesService.crear_rack(self.galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+        self.cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        self.ubicacion = self.cuerpo.ubicaciones.order_by('codigo').first()
+        self.nivel1 = self.ubicacion.niveles.get(numero=1)
+        self.nivel2 = self.ubicacion.niveles.get(numero=2)
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_asignar_producto_via_web_redirige(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 50
+        resp = self.client.post(f'/ubicaciones/niveles/{self.nivel1.pk}/asignar/', {
+            'asignar': '1', 'codigo_producto': 'ABC', 'cantidad': 10,
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(ProductoUbicacion.objects.filter(codigo_producto='ABC', nivel=self.nivel1).exists())
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_trasladar_via_web_redirige(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 50
+        UbicacionesService.asignar_producto('ABC', self.nivel1, 10, None, self.user)
+        resp = self.client.post('/ubicaciones/trasladar/', {
+            'codigo_producto': 'ABC', 'nivel_origen': self.nivel1.pk, 'nivel_destino': self.nivel2.pk,
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(ProductoUbicacion.objects.filter(codigo_producto='ABC', nivel=self.nivel2).exists())
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_fusionar_via_web_redirige(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 50
+        resp = self.client.post('/ubicaciones/fusionar/', {
+            'niveles': [self.nivel1.pk, self.nivel2.pk], 'maestro': self.nivel1.pk,
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.nivel2.refresh_from_db()
+        self.assertEqual(self.nivel2.fusionado_en_id, self.nivel1.pk)
+
+    def test_desfusionar_via_web_redirige(self):
+        UbicacionesService.fusionar_niveles([self.nivel1, self.nivel2], self.nivel1, self.user)
+        resp = self.client.post(f'/ubicaciones/niveles/{self.nivel2.pk}/desfusionar/')
+        self.assertEqual(resp.status_code, 302)
+        self.nivel2.refresh_from_db()
+        self.assertIsNone(self.nivel2.fusionado_en_id)
+
+
+class FusionarFormTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(username='formtester')
+        self.galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        self.rack = UbicacionesService.crear_rack(self.galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+        self.cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        self.ubicacion = self.cuerpo.ubicaciones.order_by('codigo').first()
+        self.nivel1 = self.ubicacion.niveles.get(numero=1)
+
+    def test_maestro_debe_estar_entre_niveles_seleccionados(self):
+        from ubicaciones.forms import FusionarForm
+        otro_nivel = self.ubicacion.niveles.get(numero=2)
+        tercer_nivel = self.ubicacion.niveles.get(numero=3)
+        form = FusionarForm(data={
+            'niveles': [self.nivel1.pk, otro_nivel.pk], 'maestro': tercer_nivel.pk,
+        })
+        self.assertFalse(form.is_valid())
