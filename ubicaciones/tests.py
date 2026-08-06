@@ -378,3 +378,60 @@ class ApiUbicacionesTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         nivel2.refresh_from_db()
         self.assertEqual(nivel2.fusionado_en_id, self.nivel.pk)
+
+
+class GalponRackViewsTest(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from django.test import Client
+
+        self.user = User.objects.create_user(username='webuser', password='x')
+        grupo, _ = Group.objects.get_or_create(name='Pedidos Ubicaciones')
+        self.user.groups.add(grupo)
+        self.client = Client()
+        self.client.login(username='webuser', password='x')
+
+    def test_crear_galpon_via_web_redirige(self):
+        resp = self.client.post('/ubicaciones/galpones/crear/', {
+            'codigo': '1', 'nombre': 'Galpón 1', 'grid_filas': 10, 'grid_columnas': 10,
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(Galpon.objects.filter(codigo='1').exists())
+
+    def test_lista_galpones_requiere_grupo(self):
+        from django.test import Client
+        User.objects.create_user(username='sin_grupo', password='x')
+        client = Client()
+        client.login(username='sin_grupo', password='x')
+        resp = client.get('/ubicaciones/galpones/')
+        self.assertEqual(resp.status_code, 302)
+
+    def test_crear_rack_via_web_redirige(self):
+        galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        resp = self.client.post(f'/ubicaciones/galpones/{galpon.pk}/racks/crear/', {
+            'codigo': 'A', 'descripcion': '', 'grid_fila': 1, 'grid_columna': 1,
+            'ancho': 1, 'alto': 1, 'max_niveles': 6,
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(Rack.objects.filter(galpon=galpon, codigo='A').exists())
+
+    def test_desactivar_rack_con_cuerpos_redirige_con_error(self):
+        galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        rack = UbicacionesService.crear_rack(galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+        UbicacionesService.crear_cuerpo(rack, '', self.user)
+        resp = self.client.post(f'/ubicaciones/racks/{rack.pk}/desactivar/')
+        self.assertEqual(resp.status_code, 302)
+        rack.refresh_from_db()
+        self.assertTrue(rack.activo)
+
+
+class RackFormTest(TestCase):
+    def test_max_niveles_disabled_cuando_bloqueado(self):
+        from ubicaciones.forms import RackForm
+        form = RackForm(bloquear_max_niveles=True)
+        self.assertTrue(form.fields['max_niveles'].disabled)
+
+    def test_max_niveles_habilitado_por_defecto(self):
+        from ubicaciones.forms import RackForm
+        form = RackForm()
+        self.assertFalse(form.fields['max_niveles'].disabled)
