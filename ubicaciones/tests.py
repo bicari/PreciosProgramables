@@ -546,3 +546,31 @@ class FusionarFormTest(TestCase):
             'niveles': [self.nivel1.pk, otro_nivel.pk], 'maestro': tercer_nivel.pk,
         })
         self.assertFalse(form.is_valid())
+
+
+class GalponRackTemplatesSmokeTest(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from django.test import Client
+
+        self.user = User.objects.create_user(username='webuser4', password='x')
+        grupo, _ = Group.objects.get_or_create(name='Pedidos Ubicaciones')
+        self.user.groups.add(grupo)
+        self.client = Client()
+        self.client.login(username='webuser4', password='x')
+        self.galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        self.rack = UbicacionesService.crear_rack(self.galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+
+    def test_paginas_de_galpon_y_rack_devuelven_200(self):
+        urls = [
+            '/ubicaciones/galpones/',
+            '/ubicaciones/galpones/crear/',
+            f'/ubicaciones/galpones/{self.galpon.pk}/',
+            f'/ubicaciones/galpones/{self.galpon.pk}/editar/',
+            f'/ubicaciones/galpones/{self.rack.galpon_id}/racks/crear/',
+            f'/ubicaciones/racks/{self.rack.pk}/',
+            f'/ubicaciones/racks/{self.rack.pk}/editar/',
+        ]
+        for url in urls:
+            resp = self.client.get(url)
+            self.assertEqual(resp.status_code, 200, f"{url} devolvió {resp.status_code}")

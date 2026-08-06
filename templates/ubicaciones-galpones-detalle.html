@@ -1,0 +1,82 @@
+{% extends "dashboard.html" %}
+{% block content %}
+{% load static %}
+<link rel="stylesheet" href="{% static 'vendor/datatables/css/dataTables.bootstrap5.min.css' %}">
+<script src="{% static 'vendor/jquery/jquery-3.6.0.min.js' %}"></script>
+<script src="{% static 'vendor/datatables/js/jquery.dataTables.min.js' %}"></script>
+<script src="{% static 'vendor/datatables/js/dataTables.bootstrap5.min.js' %}"></script>
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3 page-header-mobile">
+        <h2><i class="fas fa-warehouse"></i> Galpón: {{ galpon.codigo }}</h2>
+        <div class="d-flex gap-2 flex-wrap btn-group-header">
+            <a href="{% url 'ubicaciones-galpones-editar' galpon.pk %}" class="btn btn-outline-secondary">
+                <i class="fas fa-edit"></i> Editar
+            </a>
+            {% if galpon.activo %}
+            <a href="{% url 'ubicaciones-galpones-desactivar' galpon.pk %}" class="btn btn-outline-danger">
+                <i class="fas fa-ban"></i> Desactivar
+            </a>
+            {% endif %}
+            <a href="{% url 'ubicaciones-galpones-lista' %}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left"></i> Volver
+            </a>
+        </div>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show">
+            {{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h4>Racks</h4>
+        <a href="{% url 'ubicaciones-racks-crear' galpon.pk %}" class="btn btn-primary">
+            <i class="fas fa-plus"></i> Nuevo Rack
+        </a>
+    </div>
+
+    <div class="table-responsive">
+    <table id="tablaGalponRacks" class="table table-striped table-hover" style="width:100%">
+        <thead>
+            <tr><th>Código</th><th>Descripción</th><th>Cuerpos</th><th>Máx. Niveles</th><th>Estado</th><th>Acciones</th></tr>
+        </thead>
+        <tbody>
+            {% for rack in racks %}
+            <tr>
+                <td><strong>{{ rack.codigo }}</strong></td>
+                <td>{{ rack.descripcion|default:"—" }}</td>
+                <td><span class="badge bg-info text-dark">{{ rack.total_cuerpos }}</span></td>
+                <td>{{ rack.max_niveles }}</td>
+                <td>
+                    {% if rack.activo %}<span class="badge bg-success">Activo</span>
+                    {% else %}<span class="badge bg-secondary">Inactivo</span>{% endif %}
+                </td>
+                <td>
+                    <a href="{% url 'ubicaciones-racks-detalle' rack.pk %}" class="btn btn-sm btn-outline-primary"><i class="fas fa-eye"></i></a>
+                    <a href="{% url 'ubicaciones-racks-editar' rack.pk %}" class="btn btn-sm btn-outline-secondary"><i class="fas fa-edit"></i></a>
+                    {% if rack.activo %}
+                    <a href="{% url 'ubicaciones-racks-desactivar' rack.pk %}" class="btn btn-sm btn-outline-danger"><i class="fas fa-ban"></i></a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="text-center text-muted">No hay racks en este galpón.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<script>
+$(document).ready(function() {
+    $('#tablaGalponRacks').DataTable({
+        language: { url: "/static/vendor/datatables/i18n/es-ES.json" },
+        paging: false, searching: false, ordering: true, info: false,
+    });
+});
+</script>
+{% endblock content %}
