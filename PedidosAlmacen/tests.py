@@ -3989,3 +3989,47 @@ class PedidosPreviosMismoDepositoTest(TestCase):
         with self.assertNumQueries(0):
             resultado = pedidos_previos_mismo_deposito(2, [])
         self.assertEqual(resultado, {})
+
+
+class BuscarProductoUbicacionesInternasTest(TestCase):
+    """buscar_producto (web y API) enriquece resultados con el Nivel del nuevo modelo de ubicaciones."""
+
+    def setUp(self):
+        from django.test import Client
+        from users.models import User
+        from ubicaciones.services import UbicacionesService
+        from ubicaciones.models import ProductoUbicacion
+
+        self.user = User.objects.create_superuser(username='integr_user', password='x')
+        self.client = Client()
+        self.client.login(username='integr_user', password='x')
+
+        galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        rack = UbicacionesService.crear_rack(galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+        cuerpo = UbicacionesService.crear_cuerpo(rack, '', self.user)
+        self.nivel = cuerpo.ubicaciones.order_by('codigo').first().niveles.get(numero=4)
+        ProductoUbicacion.objects.create(codigo_producto='SKU1', nivel=self.nivel, cantidad=5)
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_buscar_producto_web_muestra_codigo_completo_del_nivel(self, mock_db):
+        mock_db.return_value.buscar_en_categoria.return_value = [
+            ('SKU1', 'Producto Uno', 'REF1', 'P1', 10, 'PROV1'),
+        ]
+        resp = self.client.get(
+            '/pedidos/buscar-producto/',
+            {'q': 'SKU1', 'tipo': 'codigo', 'categoria': 'FERRETERIA'},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, self.nivel.codigo_completo)
+
+    @patch('PedidosAlmacen.api_views.PedidosDBISAM')
+    def test_api_buscar_producto_incluye_ubicaciones_internas(self, mock_db):
+        from rest_framework.test import APIClient
+        mock_db.return_value.buscar_producto_por_campo.return_value = (
+            'SKU1', 'Producto Uno', 'REF1', 'P1', 'PROV1',
+        )
+        api = APIClient()
+        api.force_authenticate(user=self.user)
+        resp = api.get('/api/productos/SKU1/', HTTP_X_CAMPO='sku')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['ubicaciones_internas'][0]['codigo'], self.nivel.codigo_completo)

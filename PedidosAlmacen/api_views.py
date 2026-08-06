@@ -355,17 +355,18 @@ def api_buscar_producto(request, codigo):
             ProductoUbicacion.objects
             .filter(
                 codigo_producto=codigo_prod,
-                ubicacion__activo=True,
-                ubicacion__nivel__activo=True,
-                ubicacion__nivel__rack__activo=True,
+                nivel__activo=True,
+                nivel__ubicacion__activo=True,
+                nivel__ubicacion__cuerpo__activo=True,
+                nivel__ubicacion__cuerpo__rack__activo=True,
             )
-            .select_related('ubicacion__nivel__rack')
+            .select_related('nivel__ubicacion__cuerpo__rack__galpon')
         )
         ubicaciones_internas = [
             {
-                'codigo': pu.ubicacion.codigo_completo,
-                'tipo_nivel': pu.ubicacion.nivel.tipo,
-                'tipo_nivel_display': pu.ubicacion.nivel.get_tipo_display(),
+                'codigo': pu.nivel.codigo_completo,
+                'tipo_nivel': pu.nivel.tipo,
+                'tipo_nivel_display': pu.nivel.get_tipo_display(),
             }
             for pu in qs
         ]

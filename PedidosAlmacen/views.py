@@ -1555,17 +1555,18 @@ def buscar_producto(request):
                 ProductoUbicacion.objects
                 .filter(
                     codigo_producto__in=codigos,
-                    ubicacion__activo=True,
-                    ubicacion__nivel__activo=True,
-                    ubicacion__nivel__rack__activo=True,
+                    nivel__activo=True,
+                    nivel__ubicacion__activo=True,
+                    nivel__ubicacion__cuerpo__activo=True,
+                    nivel__ubicacion__cuerpo__rack__activo=True,
                 )
-                .select_related('ubicacion__nivel__rack')
+                .select_related('nivel__ubicacion__cuerpo__rack__galpon')
             )
             for pu in qs:
                 ubicaciones_map.setdefault(pu.codigo_producto, []).append({
-                    'codigo': pu.ubicacion.codigo_completo,
-                    'tipo_nivel': pu.ubicacion.nivel.tipo,
-                    'tipo_nivel_display': pu.ubicacion.nivel.get_tipo_display(),
+                    'codigo': pu.nivel.codigo_completo,
+                    'tipo_nivel': pu.nivel.tipo,
+                    'tipo_nivel_display': pu.nivel.get_tipo_display(),
                 })
         except Exception:
             logger.exception("Error al consultar ubicaciones internas en buscar_producto")
