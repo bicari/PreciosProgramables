@@ -36,7 +36,6 @@
             <tr>
                 <th>Tipo</th>
                 <th>Rack</th>
-                <th>Nivel</th>
                 <th>Origen</th>
                 <th>Destino</th>
                 <th>Producto</th>
@@ -53,7 +52,7 @@
                         {% if 'CREACION' in mov.tipo %}bg-success
                         {% elif 'DESACTIVACION' in mov.tipo %}bg-secondary
                         {% elif mov.tipo == 'TRASLADO' %}bg-info text-dark
-                        {% elif mov.tipo == 'FUSION' %}bg-warning text-dark
+                        {% elif 'FUSION' in mov.tipo %}bg-warning text-dark
                         {% elif mov.tipo == 'ASIGNACION' %}bg-primary
                         {% elif mov.tipo == 'DESASIGNACION' %}bg-danger
                         {% else %}bg-secondary{% endif %}">
@@ -61,9 +60,8 @@
                     </span>
                 </td>
                 <td>{{ mov.rack.codigo|default:"—" }}</td>
-                <td>{{ mov.nivel.codigo|default:"—" }}</td>
-                <td>{% if mov.ubicacion_origen %}{{ mov.ubicacion_origen.codigo_completo }}{% else %}—{% endif %}</td>
-                <td>{% if mov.ubicacion_destino %}{{ mov.ubicacion_destino.codigo_completo }}{% else %}—{% endif %}</td>
+                <td>{% if mov.nivel_origen %}{{ mov.nivel_origen.codigo_completo }}{% else %}—{% endif %}</td>
+                <td>{% if mov.nivel_destino %}{{ mov.nivel_destino.codigo_completo }}{% else %}—{% endif %}</td>
                 <td>
                     {% if mov.codigo_producto %}
                     <a href="{% url 'ubicaciones-producto-detalle' mov.codigo_producto %}">
@@ -76,7 +74,7 @@
                 <td>{{ mov.notas|truncatechars:40|default:"—" }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="9" class="text-center text-muted">No hay movimientos registrados.</td></tr>
+            <tr><td colspan="8" class="text-center text-muted">No hay movimientos registrados.</td></tr>
             {% endfor %}
         </tbody>
     </table>
@@ -88,7 +86,7 @@ $(document).ready(function() {
     $('#tablaMovimientos').DataTable({
         language: { url: "/static/vendor/datatables/i18n/es-ES.json" },
         paging: true, searching: true, ordering: true,
-        order: [[7, 'desc']], scrollX: true,
+        order: [[6, 'desc']], scrollX: true,
         lengthChange: false, pageLength: 50,
     });
 });

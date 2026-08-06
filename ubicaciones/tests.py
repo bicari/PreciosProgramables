@@ -325,6 +325,44 @@ class FusionServiceTest(TestCase):
             UbicacionesService.desfusionar_nivel(self.nivel1, self.user)
 
 
+class AsignacionTrasladoFusionTemplatesSmokeTest(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from django.test import Client
+
+        self.user = User.objects.create_user(username='webuser6', password='x')
+        grupo, _ = Group.objects.get_or_create(name='Pedidos Ubicaciones')
+        self.user.groups.add(grupo)
+        self.client = Client()
+        self.client.login(username='webuser6', password='x')
+        self.galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        self.rack = UbicacionesService.crear_rack(self.galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+        self.cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        self.nivel = self.cuerpo.ubicaciones.order_by('codigo').first().niveles.get(numero=1)
+
+    def test_paginas_devuelven_200(self):
+        urls = [
+            f'/ubicaciones/niveles/{self.nivel.pk}/asignar/',
+            '/ubicaciones/trasladar/',
+            '/ubicaciones/fusionar/',
+            '/ubicaciones/movimientos/',
+            '/ubicaciones/buscar-nivel/',
+            '/ubicaciones/buscar-producto/',
+        ]
+        for url in urls:
+            resp = self.client.get(url)
+            self.assertEqual(resp.status_code, 200, f"{url} devolvió {resp.status_code}")
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_producto_detalle_devuelve_200(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 50
+        UbicacionesService.asignar_producto('ABC', self.nivel, 10, None, self.user)
+        with patch('ubicaciones.views.PedidosDBISAM') as mock_views_db:
+            mock_views_db.return_value.buscar_producto.return_value = None
+            resp = self.client.get('/ubicaciones/productos/ABC/')
+        self.assertEqual(resp.status_code, 200)
+
+
 class ApiUbicacionesTest(TestCase):
     def setUp(self):
         from rest_framework.test import APIClient

@@ -16,7 +16,7 @@
         {% else %}
             <span class="badge bg-danger fs-6">0</span>
         {% endif %}
-        <small class="text-muted ms-2">(esta cifra no se segmenta por slot; es el total SINVDEP depósito 1)</small>
+        <small class="text-muted ms-2">(depósito 1; la suma de cantidades asignadas abajo nunca la excede)</small>
     </p>
 
     {% if asignaciones %}
@@ -24,22 +24,23 @@
         {% for pu in asignaciones %}
         <div class="col-md-4">
             <div class="card h-100 border
-                {% if pu.ubicacion.nivel.tipo == 'PICKING' %}border-info{% else %}border-secondary{% endif %}">
+                {% if pu.nivel.tipo == 'PICKING' %}border-info{% else %}border-secondary{% endif %}">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <strong>{{ pu.ubicacion.codigo_completo }}</strong>
-                    <span class="badge {% if pu.ubicacion.nivel.tipo == 'PICKING' %}bg-info text-dark{% else %}bg-secondary{% endif %}">
-                        {{ pu.ubicacion.nivel.get_tipo_display }}
+                    <strong>{{ pu.nivel.codigo_completo }}</strong>
+                    <span class="badge {% if pu.nivel.tipo == 'PICKING' %}bg-info text-dark{% else %}bg-secondary{% endif %}">
+                        {{ pu.nivel.get_tipo_display }}
                     </span>
                 </div>
                 <div class="card-body">
-                    <small class="text-muted">Rack:</small> {{ pu.ubicacion.rack.codigo }}<br>
-                    <small class="text-muted">Nivel:</small> {{ pu.ubicacion.nivel.codigo }}<br>
-                    <small class="text-muted">Ubicación:</small> {{ pu.ubicacion.codigo }}<br>
+                    <small class="text-muted">Cantidad:</small> {{ pu.cantidad }}<br>
+                    {% if pu.stock_minimo is not None %}
+                    <small class="text-muted">Stock mínimo:</small> {{ pu.stock_minimo }}<br>
+                    {% endif %}
                     <small class="text-muted">Asignado:</small> {{ pu.fecha_asignacion|date:"d/m/Y" }}
                 </div>
                 <div class="card-footer bg-transparent">
-                    <a href="{% url 'ubicaciones-ubicaciones-detalle' pu.ubicacion.pk %}" class="btn btn-sm btn-outline-primary">
-                        <i class="fas fa-eye"></i> Ver ubicación
+                    <a href="{% url 'ubicaciones-niveles-detalle' pu.nivel.pk %}" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-eye"></i> Ver nivel
                     </a>
                 </div>
             </div>

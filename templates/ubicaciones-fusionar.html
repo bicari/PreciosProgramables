@@ -2,13 +2,17 @@
 {% block content %}
 <div class="container mt-4" style="max-width:700px;">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2><i class="fas fa-compress-arrows-alt"></i> Fusionar Ubicaciones</h2>
+        <h2><i class="fas fa-compress-arrows-alt"></i> Fusionar Niveles</h2>
         <a href="{% url 'ubicaciones-movimientos' %}" class="btn btn-outline-secondary">
             <i class="fas fa-history"></i> Histórico
         </a>
     </div>
 
-    <p class="text-muted">Todo el contenido de la <strong>Ubicación A</strong> se transferirá a la <strong>Ubicación B</strong> y A quedará inactiva.</p>
+    <p class="text-muted">
+        Todo el contenido de los niveles seleccionados se consolidará en el <strong>nivel maestro</strong>
+        (debe estar entre los seleccionados); los demás quedan marcados como fusionados y no admiten
+        asignaciones directas hasta desfusionarlos.
+    </p>
 
     {% if messages %}
         {% for message in messages %}
@@ -18,9 +22,9 @@
         {% endfor %}
     {% endif %}
 
-    <div class="card mb-3">
+    <div class="card">
         <div class="card-body">
-            <form method="post" id="formFusionar">
+            <form method="post" onsubmit="return confirm('¿Confirmar la fusión de los niveles seleccionados?');">
                 {% csrf_token %}
                 {% for field in form %}
                 <div class="mb-3">
@@ -34,30 +38,11 @@
                     {% for error in form.non_field_errors %}{{ error }}{% endfor %}
                 </div>
                 {% endif %}
-                <button type="submit" name="preview" class="btn btn-outline-warning">
-                    <i class="fas fa-eye"></i> Ver resumen
+                <button type="submit" class="btn btn-danger">
+                    <i class="fas fa-check"></i> Confirmar Fusión
                 </button>
             </form>
         </div>
     </div>
-
-    {% if preview %}
-    <div class="alert alert-warning">
-        <h5><i class="fas fa-exclamation-triangle"></i> Confirmar fusión</h5>
-        <p>La ubicación <strong>{{ preview.ubicacion_a.codigo_completo }}</strong> tiene
-            <strong>{{ preview.total_productos }}</strong> producto(s) asignado(s).</p>
-        <p>Todos pasarán a la ubicación B y <strong>{{ preview.ubicacion_a.codigo_completo }} quedará inactiva</strong>.</p>
-        <form method="post">
-            {% csrf_token %}
-            {% for field in form %}
-                <input type="hidden" name="{{ field.html_name }}" value="{{ field.value }}">
-            {% endfor %}
-            <button type="submit" name="confirmar" class="btn btn-danger">
-                <i class="fas fa-check"></i> Confirmar Fusión
-            </button>
-            <a href="{% url 'ubicaciones-fusionar' %}" class="btn btn-outline-secondary ms-2">Cancelar</a>
-        </form>
-    </div>
-    {% endif %}
 </div>
 {% endblock content %}

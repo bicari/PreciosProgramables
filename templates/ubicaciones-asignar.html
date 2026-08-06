@@ -3,15 +3,15 @@
 <div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2><i class="fas fa-plus-circle"></i> Asignar Producto</h2>
-        <a href="{% url 'ubicaciones-ubicaciones-detalle' ubicacion.pk %}" class="btn btn-outline-secondary">
+        <a href="{% url 'ubicaciones-niveles-detalle' nivel.pk %}" class="btn btn-outline-secondary">
             <i class="fas fa-arrow-left"></i> Volver
         </a>
     </div>
 
     <div class="alert alert-info">
-        Asignando producto a: <strong>{{ ubicacion.codigo_completo }}</strong>
-        <span class="badge ms-2 {% if ubicacion.nivel.tipo == 'PICKING' %}bg-info text-dark{% else %}bg-secondary{% endif %}">
-            {{ ubicacion.nivel.get_tipo_display }}
+        Asignando producto a: <strong>{{ nivel.codigo_completo }}</strong>
+        <span class="badge ms-2 {% if nivel.tipo == 'PICKING' %}bg-info text-dark{% else %}bg-secondary{% endif %}">
+            {{ nivel.get_tipo_display }}
         </span>
     </div>
 
@@ -41,15 +41,13 @@
             <div class="table-responsive">
             <table class="table table-sm table-hover">
                 <thead>
-                    <tr><th>Código</th><th>Descripción</th><th>Referencia</th><th>Puesto DBISAM</th><th>Existencia</th><th></th></tr>
+                    <tr><th>Código</th><th>Descripción</th><th>Existencia</th><th>Cantidad a asignar</th><th></th></tr>
                 </thead>
                 <tbody>
                     {% for prod in resultados_busqueda %}
                     <tr>
                         <td>{{ prod.codigo }}</td>
                         <td>{{ prod.descripcion }}</td>
-                        <td>{{ prod.referencia }}</td>
-                        <td>{{ prod.puesto|default:"—" }}</td>
                         <td>
                             {% if prod.existencia > 0 %}
                                 <span class="badge bg-success">{{ prod.existencia|floatformat:0 }}</span>
@@ -57,10 +55,16 @@
                                 <span class="badge bg-danger">0</span>
                             {% endif %}
                         </td>
-                        <td>
-                            <form method="post">
+                        <td colspan="2">
+                            <form method="post" class="d-flex gap-1 align-items-center">
                                 {% csrf_token %}
-                                <input type="hidden" name="codigo_asignar" value="{{ prod.codigo }}">
+                                <input type="hidden" name="codigo_producto" value="{{ prod.codigo }}">
+                                <input type="number" name="cantidad" min="0" value="0" required
+                                    class="form-control form-control-sm" style="width:90px;">
+                                {% if nivel.tipo == 'PICKING' %}
+                                <input type="number" name="stock_minimo" min="0" placeholder="mín."
+                                    class="form-control form-control-sm" style="width:80px;">
+                                {% endif %}
                                 <button type="submit" name="asignar" class="btn btn-sm btn-success">
                                     <i class="fas fa-check"></i> Asignar
                                 </button>

@@ -1,0 +1,11 @@
+{% for nivel in niveles %}
+<div class="list-group-item list-group-item-action" style="cursor:pointer;"
+     onclick="seleccionarNivel('{{ nivel.pk }}', '{{ nivel.codigo_completo|escapejs }}')">
+    {{ nivel.codigo_completo }}
+    <span class="badge ms-1 {% if nivel.tipo == 'PICKING' %}bg-info text-dark{% else %}bg-secondary{% endif %}">
+        {{ nivel.get_tipo_display }}
+    </span>
+</div>
+{% empty %}
+<div class="list-group-item text-muted">No se encontraron niveles.</div>
+{% endfor %}
