@@ -103,3 +103,47 @@ class GalponRackServiceTest(TestCase):
         UbicacionesService.crear_rack(galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
         with self.assertRaises(ValidationError):
             UbicacionesService.desactivar_galpon(galpon, self.user)
+
+
+class CuerpoUbicacionServiceTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(username='tester3')
+        self.galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        self.rack = UbicacionesService.crear_rack(self.galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+
+    def test_crear_cuerpo_autogenera_2_ubicaciones_con_numeracion_global(self):
+        cuerpo1 = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        self.assertEqual(cuerpo1.codigo, '01')
+        ubics1 = list(cuerpo1.ubicaciones.order_by('codigo'))
+        self.assertEqual([u.codigo for u in ubics1], ['01', '02'])
+
+        cuerpo2 = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        self.assertEqual(cuerpo2.codigo, '02')
+        ubics2 = list(cuerpo2.ubicaciones.order_by('codigo'))
+        self.assertEqual([u.codigo for u in ubics2], ['03', '04'])
+
+    def test_crear_cuerpo_autogenera_niveles_segun_max_niveles_del_rack(self):
+        cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        for ubicacion in cuerpo.ubicaciones.all():
+            self.assertEqual(list(ubicacion.niveles.order_by('numero').values_list('numero', flat=True)), [1, 2, 3, 4, 5, 6])
+
+    def test_crear_cuerpo_codigo_completo_del_nivel_reproduce_formato_fisico(self):
+        cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        ubicacion = cuerpo.ubicaciones.order_by('codigo').first()
+        nivel4 = ubicacion.niveles.get(numero=4)
+        self.assertEqual(nivel4.codigo_completo, '1A0101.4')
+
+    def test_crear_cuerpo_registra_un_solo_movimiento(self):
+        UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        self.assertEqual(MovimientoUbicacion.objects.filter(tipo='CREACION_CUERPO').count(), 1)
+
+    def test_desactivar_cuerpo_con_ubicaciones_activas_falla(self):
+        cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        with self.assertRaises(ValidationError):
+            UbicacionesService.desactivar_cuerpo(cuerpo, self.user)
+
+    def test_desactivar_ubicacion_con_niveles_activos_falla(self):
+        cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        ubicacion = cuerpo.ubicaciones.first()
+        with self.assertRaises(ValidationError):
+            UbicacionesService.desactivar_ubicacion(ubicacion, self.user)

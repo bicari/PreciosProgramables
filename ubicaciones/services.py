@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from .models import Cuerpo, Galpon, MovimientoUbicacion, Rack
+from .models import Cuerpo, Galpon, MovimientoUbicacion, Nivel, Rack, Ubicacion
 
 
 def _registrar(tipo: str, usuario, **kwargs) -> None:
@@ -113,3 +113,63 @@ class UbicacionesService:
         rack.activo = False
         rack.save(update_fields=['activo', 'fecha_modificacion'])
         _registrar('DESACTIVACION_RACK', usuario, galpon=rack.galpon, rack=rack)
+
+    # ------------------------------------------------------------------ Cuerpo
+
+    @staticmethod
+    @transaction.atomic
+    def crear_cuerpo(rack: Rack, descripcion: str, usuario) -> Cuerpo:
+        """
+        Crea un cuerpo en el rack, autogenerando sus 2 Ubicaciones (numeración
+        global no reiniciada por cuerpo, para calzar con las etiquetas físicas
+        ya impresas) y, para cada una, sus Niveles según `rack.max_niveles`.
+        """
+        if not rack.activo:
+            raise ValidationError(f"El rack '{rack.codigo}' está desactivado.")
+        siguiente_num = rack.cuerpos.count() + 1
+        cuerpo = Cuerpo.objects.create(
+            rack=rack, codigo=f"{siguiente_num:02d}",
+            descripcion=descripcion, creado_por=usuario,
+        )
+        for offset in (0, 1):
+            ubicacion_num = 2 * siguiente_num - 1 + offset
+            ubicacion = Ubicacion.objects.create(
+                cuerpo=cuerpo, codigo=f"{ubicacion_num:02d}", creado_por=usuario,
+            )
+            Nivel.objects.bulk_create([
+                Nivel(ubicacion=ubicacion, numero=n, creado_por=usuario)
+                for n in range(1, rack.max_niveles + 1)
+            ])
+        _registrar('CREACION_CUERPO', usuario, galpon=rack.galpon, rack=rack, cuerpo=cuerpo)
+        return cuerpo
+
+    @staticmethod
+    @transaction.atomic
+    def desactivar_cuerpo(cuerpo: Cuerpo, usuario) -> None:
+        """Soft-delete de cuerpo. Rechaza si tiene ubicaciones activas."""
+        if cuerpo.ubicaciones.filter(activo=True).exists():
+            raise ValidationError(
+                f"El cuerpo '{cuerpo.codigo}' tiene ubicaciones activas. "
+                "Desactívalas antes de desactivar el cuerpo."
+            )
+        cuerpo.activo = False
+        cuerpo.save(update_fields=['activo', 'fecha_modificacion'])
+        _registrar('DESACTIVACION_CUERPO', usuario, galpon=cuerpo.rack.galpon, rack=cuerpo.rack, cuerpo=cuerpo)
+
+    # ------------------------------------------------------------------ Ubicación
+
+    @staticmethod
+    @transaction.atomic
+    def desactivar_ubicacion(ubicacion: Ubicacion, usuario) -> None:
+        """Soft-delete de ubicación. Rechaza si tiene niveles activos."""
+        if ubicacion.niveles.filter(activo=True).exists():
+            raise ValidationError(
+                f"La ubicación '{ubicacion.codigo}' tiene niveles activos. "
+                "Desactívalos antes de desactivar la ubicación."
+            )
+        ubicacion.activo = False
+        ubicacion.save(update_fields=['activo', 'fecha_modificacion'])
+        _registrar(
+            'DESACTIVACION_UBICACION', usuario,
+            galpon=ubicacion.rack.galpon, rack=ubicacion.rack, ubicacion=ubicacion,
+        )
