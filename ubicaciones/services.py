@@ -322,3 +322,72 @@ class UbicacionesService:
             nivel_origen=nivel_origen, nivel_destino=nivel_destino,
             codigo_producto=codigo, notas=notas,
         )
+
+    # ------------------------------------------------------------------ Fusión
+
+    @staticmethod
+    @transaction.atomic
+    def fusionar_niveles(niveles: list[Nivel], maestro: Nivel, usuario, notas: str = '') -> int:
+        """
+        Fusiona `niveles` hacia `maestro` (debe estar incluido en la lista):
+        consolida las cantidades de ProductoUbicacion de los miembros en el
+        maestro y marca `fusionado_en` en cada miembro. Retorna la cantidad
+        de asignaciones de producto consolidadas (transferidas o sumadas).
+        """
+        if maestro.pk not in {n.pk for n in niveles}:
+            raise ValidationError("El maestro debe estar incluido en la lista de niveles a fusionar.")
+        racks = {n.rack.pk for n in niveles}
+        if len(racks) > 1:
+            raise ValidationError("Solo se pueden fusionar niveles del mismo Rack.")
+        if maestro.esta_fusionado:
+            raise ValidationError(f"El maestro '{maestro.codigo_completo}' ya está fusionado.")
+
+        miembros = [n for n in niveles if n.pk != maestro.pk]
+        for miembro in miembros:
+            if miembro.esta_fusionado:
+                raise ValidationError(f"El nivel '{miembro.codigo_completo}' ya está fusionado.")
+
+        transferidos = 0
+        for miembro in miembros:
+            for pu in ProductoUbicacion.objects.select_for_update().filter(nivel=miembro):
+                destino_pu, created = ProductoUbicacion.objects.select_for_update().get_or_create(
+                    codigo_producto=pu.codigo_producto, nivel=maestro,
+                    defaults={'cantidad': pu.cantidad, 'stock_minimo': pu.stock_minimo, 'asignado_por': usuario},
+                )
+                if not created:
+                    destino_pu.cantidad += pu.cantidad
+                    destino_pu.stock_minimo = destino_pu.stock_minimo or pu.stock_minimo
+                    destino_pu.save(update_fields=['cantidad', 'stock_minimo'])
+                pu.delete()
+                transferidos += 1
+
+            miembro_actualizado = Nivel.objects.select_for_update(of=('self',)).get(pk=miembro.pk)
+            miembro_actualizado.fusionado_en = maestro
+            miembro_actualizado.save(update_fields=['fusionado_en', 'fecha_modificacion'])
+            _registrar(
+                'FUSION_NIVEL', usuario, galpon=maestro.galpon, rack=maestro.rack,
+                nivel_origen=miembro, nivel_destino=maestro, notas=notas,
+            )
+        return transferidos
+
+    @staticmethod
+    @transaction.atomic
+    def desfusionar_nivel(nivel_miembro: Nivel, usuario) -> None:
+        if not nivel_miembro.esta_fusionado:
+            raise ValidationError(f"El nivel '{nivel_miembro.codigo_completo}' no está fusionado.")
+
+        maestro = nivel_miembro.fusionado_en
+        hermanos_fusionados = Nivel.objects.filter(fusionado_en=maestro).exclude(pk=nivel_miembro.pk)
+        maestro_tiene_stock = ProductoUbicacion.objects.filter(nivel=maestro).exists()
+        if maestro_tiene_stock and hermanos_fusionados.exists():
+            raise ValidationError(
+                f"El maestro '{maestro.codigo_completo}' tiene stock y quedan otros niveles fusionados; "
+                "redistribuye manualmente las cantidades antes de desfusionar."
+            )
+
+        nivel_miembro.fusionado_en = None
+        nivel_miembro.save(update_fields=['fusionado_en', 'fecha_modificacion'])
+        _registrar(
+            'DESFUSION_NIVEL', usuario, galpon=maestro.galpon, rack=maestro.rack,
+            nivel_origen=maestro, nivel_destino=nivel_miembro,
+        )

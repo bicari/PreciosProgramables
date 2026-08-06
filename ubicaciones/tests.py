@@ -253,3 +253,73 @@ class AsignacionServiceTest(TestCase):
         self.otro_nivel.save(update_fields=['fusionado_en'])
         with self.assertRaises(ValidationError):
             UbicacionesService.trasladar_producto('ABC', self.nivel, self.otro_nivel, self.user)
+
+
+class FusionServiceTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(username='tester6')
+        self.galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        self.rack_a = UbicacionesService.crear_rack(self.galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+        self.rack_b = UbicacionesService.crear_rack(self.galpon, 'B', '', 2, 1, 1, 1, 6, self.user)
+        cuerpo = UbicacionesService.crear_cuerpo(self.rack_a, '', self.user)
+        ubicacion = cuerpo.ubicaciones.order_by('codigo').first()
+        self.nivel1 = ubicacion.niveles.get(numero=1)
+        self.nivel2 = ubicacion.niveles.get(numero=2)
+        self.nivel3 = ubicacion.niveles.get(numero=3)
+        cuerpo_b = UbicacionesService.crear_cuerpo(self.rack_b, '', self.user)
+        self.nivel_otro_rack = cuerpo_b.ubicaciones.order_by('codigo').first().niveles.get(numero=1)
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_fusionar_niveles_consolida_cantidades_en_el_maestro(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 100
+        UbicacionesService.asignar_producto('ABC', self.nivel1, 10, None, self.user)
+        UbicacionesService.asignar_producto('ABC', self.nivel2, 15, None, self.user)
+
+        transferidos = UbicacionesService.fusionar_niveles(
+            [self.nivel1, self.nivel2], self.nivel1, self.user,
+        )
+
+        self.assertEqual(transferidos, 1)
+        self.nivel2.refresh_from_db()
+        self.assertEqual(self.nivel2.fusionado_en_id, self.nivel1.pk)
+        pu = ProductoUbicacion.objects.get(nivel=self.nivel1, codigo_producto='ABC')
+        self.assertEqual(pu.cantidad, 25)
+        self.assertFalse(ProductoUbicacion.objects.filter(nivel=self.nivel2).exists())
+
+    def test_fusionar_niveles_de_distinto_rack_falla(self):
+        with self.assertRaises(ValidationError):
+            UbicacionesService.fusionar_niveles(
+                [self.nivel1, self.nivel_otro_rack], self.nivel1, self.user,
+            )
+
+    def test_fusionar_nivel_ya_fusionado_falla(self):
+        UbicacionesService.fusionar_niveles([self.nivel1, self.nivel2], self.nivel1, self.user)
+        self.nivel2.refresh_from_db()
+        with self.assertRaises(ValidationError):
+            UbicacionesService.fusionar_niveles([self.nivel1, self.nivel2, self.nivel3], self.nivel1, self.user)
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_desfusionar_ultimo_miembro_con_stock_en_maestro_ok(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 100
+        UbicacionesService.asignar_producto('ABC', self.nivel1, 10, None, self.user)
+        UbicacionesService.fusionar_niveles([self.nivel1, self.nivel2], self.nivel1, self.user)
+        self.nivel2.refresh_from_db()
+
+        UbicacionesService.desfusionar_nivel(self.nivel2, self.user)
+
+        self.nivel2.refresh_from_db()
+        self.assertIsNone(self.nivel2.fusionado_en_id)
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_desfusionar_con_stock_y_otros_miembros_fusionados_falla(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 100
+        UbicacionesService.asignar_producto('ABC', self.nivel1, 10, None, self.user)
+        UbicacionesService.fusionar_niveles([self.nivel1, self.nivel2, self.nivel3], self.nivel1, self.user)
+        self.nivel2.refresh_from_db()
+
+        with self.assertRaises(ValidationError):
+            UbicacionesService.desfusionar_nivel(self.nivel2, self.user)
+
+    def test_desfusionar_nivel_no_fusionado_falla(self):
+        with self.assertRaises(ValidationError):
+            UbicacionesService.desfusionar_nivel(self.nivel1, self.user)
