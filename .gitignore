@@ -142,3 +142,6 @@ GitHub.sublime-settings
 
 # Superpowers subagent-driven-development scratch workspace
 .superpowers/
+
+# Superpowers isolated worktrees
+.worktrees/
