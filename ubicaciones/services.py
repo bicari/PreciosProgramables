@@ -1,7 +1,10 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Sum
 
-from .models import Cuerpo, Galpon, MovimientoUbicacion, Nivel, Rack, Ubicacion
+from PedidosAlmacen.dbisam import DEPOSITO_ALMACEN, PedidosDBISAM
+
+from .models import Cuerpo, Galpon, MovimientoUbicacion, Nivel, ProductoUbicacion, Rack, Ubicacion
 
 
 def _registrar(tipo: str, usuario, **kwargs) -> None:
@@ -202,3 +205,120 @@ class UbicacionesService:
         nivel.activo = False
         nivel.save(update_fields=['activo', 'fecha_modificacion'])
         _registrar('DESACTIVACION_NIVEL', usuario, galpon=nivel.galpon, rack=nivel.rack, nivel=nivel)
+
+    # ------------------------------------------------------------------ Asignaciones
+
+    @staticmethod
+    def _validar_cantidad_contra_a2(codigo: str, cantidad_nueva: int, excluir_pu_id: int | None = None) -> None:
+        ya_asignado = ProductoUbicacion.objects.filter(codigo_producto=codigo)
+        if excluir_pu_id:
+            ya_asignado = ya_asignado.exclude(pk=excluir_pu_id)
+        suma_actual = ya_asignado.aggregate(total=Sum('cantidad'))['total'] or 0
+        total_pedido = suma_actual + cantidad_nueva
+        existencia = PedidosDBISAM().consultar_stock(codigo, deposito=DEPOSITO_ALMACEN)
+        if total_pedido > existencia:
+            raise ValidationError(
+                f"La cantidad total asignada de '{codigo}' ({total_pedido}) "
+                f"excede la existencia en depósito ({existencia})."
+            )
+
+    @staticmethod
+    @transaction.atomic
+    def asignar_producto(
+        codigo: str, nivel: Nivel, cantidad: int, stock_minimo: int | None, usuario,
+    ) -> ProductoUbicacion:
+        """Asigna un producto (código DBISAM) a un nivel, validando cantidad contra a2."""
+        codigo = codigo.strip().upper()
+        if not nivel.activo:
+            raise ValidationError(f"El nivel '{nivel.codigo_completo}' está desactivado.")
+        if nivel.esta_fusionado:
+            raise ValidationError(
+                f"El nivel '{nivel.codigo_completo}' está fusionado con "
+                f"'{nivel.fusionado_en.codigo_completo}'; asigna el producto al nivel maestro."
+            )
+        if ProductoUbicacion.objects.filter(codigo_producto=codigo, nivel=nivel).exists():
+            raise ValidationError(f"El producto '{codigo}' ya está asignado a '{nivel.codigo_completo}'.")
+        UbicacionesService._validar_cantidad_contra_a2(codigo, cantidad)
+        pu = ProductoUbicacion.objects.create(
+            codigo_producto=codigo, nivel=nivel, cantidad=cantidad,
+            stock_minimo=stock_minimo if nivel.tipo == Nivel.PICKING else None,
+            asignado_por=usuario,
+        )
+        _registrar(
+            'ASIGNACION', usuario, galpon=nivel.galpon, rack=nivel.rack,
+            nivel_destino=nivel, codigo_producto=codigo,
+        )
+        return pu
+
+    @staticmethod
+    @transaction.atomic
+    def editar_cantidad(
+        producto_ubicacion: ProductoUbicacion, cantidad: int, stock_minimo: int | None, usuario,
+    ) -> ProductoUbicacion:
+        UbicacionesService._validar_cantidad_contra_a2(
+            producto_ubicacion.codigo_producto, cantidad, excluir_pu_id=producto_ubicacion.pk,
+        )
+        producto_ubicacion.cantidad = cantidad
+        if producto_ubicacion.nivel.tipo == Nivel.PICKING:
+            producto_ubicacion.stock_minimo = stock_minimo
+        producto_ubicacion.save(update_fields=['cantidad', 'stock_minimo'])
+        _registrar(
+            'EDICION_CANTIDAD', usuario,
+            galpon=producto_ubicacion.nivel.galpon, rack=producto_ubicacion.nivel.rack,
+            nivel_destino=producto_ubicacion.nivel, codigo_producto=producto_ubicacion.codigo_producto,
+        )
+        return producto_ubicacion
+
+    @staticmethod
+    @transaction.atomic
+    def quitar_producto(producto_ubicacion_id: int, usuario) -> None:
+        pu = ProductoUbicacion.objects.select_related('nivel').get(pk=producto_ubicacion_id)
+        codigo = pu.codigo_producto
+        nivel = pu.nivel
+        pu.delete()
+        _registrar(
+            'DESASIGNACION', usuario, galpon=nivel.galpon, rack=nivel.rack,
+            nivel_origen=nivel, codigo_producto=codigo,
+        )
+
+    # ------------------------------------------------------------------ Traslado
+
+    @staticmethod
+    @transaction.atomic
+    def trasladar_producto(
+        codigo: str, nivel_origen: Nivel, nivel_destino: Nivel, usuario, notas: str = '',
+    ) -> None:
+        """Mueve la asignación de `codigo` de nivel_origen a nivel_destino."""
+        codigo = codigo.strip().upper()
+        if nivel_origen.pk == nivel_destino.pk:
+            raise ValidationError("El origen y el destino deben ser niveles distintos.")
+        if not nivel_destino.activo:
+            raise ValidationError(f"El nivel destino '{nivel_destino.codigo_completo}' está desactivado.")
+        if nivel_destino.esta_fusionado:
+            raise ValidationError(
+                f"El nivel destino '{nivel_destino.codigo_completo}' está fusionado; "
+                f"traslada al nivel maestro '{nivel_destino.fusionado_en.codigo_completo}'."
+            )
+
+        pu_origen = ProductoUbicacion.objects.select_for_update().filter(
+            codigo_producto=codigo, nivel=nivel_origen,
+        ).first()
+        if not pu_origen:
+            raise ValidationError(f"El producto '{codigo}' no está asignado a '{nivel_origen.codigo_completo}'.")
+
+        cantidad = pu_origen.cantidad
+        pu_origen.delete()
+
+        pu_destino, created = ProductoUbicacion.objects.get_or_create(
+            codigo_producto=codigo, nivel=nivel_destino,
+            defaults={'cantidad': cantidad, 'asignado_por': usuario},
+        )
+        if not created:
+            pu_destino.cantidad += cantidad
+            pu_destino.save(update_fields=['cantidad'])
+
+        _registrar(
+            'TRASLADO', usuario, galpon=nivel_origen.galpon, rack=nivel_origen.rack,
+            nivel_origen=nivel_origen, nivel_destino=nivel_destino,
+            codigo_producto=codigo, notas=notas,
+        )

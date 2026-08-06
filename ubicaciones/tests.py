@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -180,3 +182,74 @@ class NivelServiceTest(TestCase):
         UbicacionesService.desactivar_nivel(self.nivel, self.user)
         self.nivel.refresh_from_db()
         self.assertFalse(self.nivel.activo)
+
+
+class AsignacionServiceTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(username='tester5')
+        self.galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        self.rack = UbicacionesService.crear_rack(self.galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+        self.cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        self.ubicacion = self.cuerpo.ubicaciones.order_by('codigo').first()
+        self.nivel = self.ubicacion.niveles.get(numero=1)
+        self.otro_nivel = self.ubicacion.niveles.get(numero=2)
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_asignar_producto_dentro_de_existencia_ok(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 100
+        pu = UbicacionesService.asignar_producto('ABC', self.nivel, 40, None, self.user)
+        self.assertEqual(pu.cantidad, 40)
+        mock_db.return_value.consultar_stock.assert_called_once_with('ABC', deposito=1)
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_asignar_producto_excede_existencia_falla(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 30
+        with self.assertRaises(ValidationError):
+            UbicacionesService.asignar_producto('ABC', self.nivel, 40, None, self.user)
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_asignar_producto_suma_asignaciones_existentes(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 50
+        UbicacionesService.asignar_producto('ABC', self.nivel, 30, None, self.user)
+        with self.assertRaises(ValidationError):
+            UbicacionesService.asignar_producto('ABC', self.otro_nivel, 25, None, self.user)
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_asignar_producto_en_nivel_fusionado_falla(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 100
+        self.nivel.fusionado_en = self.otro_nivel
+        self.nivel.save(update_fields=['fusionado_en'])
+        with self.assertRaises(ValidationError):
+            UbicacionesService.asignar_producto('ABC', self.nivel, 10, None, self.user)
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_editar_cantidad_excluye_su_propia_fila_de_la_suma(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 50
+        pu = UbicacionesService.asignar_producto('ABC', self.nivel, 30, None, self.user)
+        UbicacionesService.editar_cantidad(pu, 50, None, self.user)
+        pu.refresh_from_db()
+        self.assertEqual(pu.cantidad, 50)
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_quitar_producto(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 50
+        pu = UbicacionesService.asignar_producto('ABC', self.nivel, 30, None, self.user)
+        UbicacionesService.quitar_producto(pu.pk, self.user)
+        self.assertFalse(ProductoUbicacion.objects.filter(pk=pu.pk).exists())
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_trasladar_producto_mueve_la_asignacion(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 50
+        UbicacionesService.asignar_producto('ABC', self.nivel, 30, None, self.user)
+        UbicacionesService.trasladar_producto('ABC', self.nivel, self.otro_nivel, self.user)
+        self.assertFalse(ProductoUbicacion.objects.filter(nivel=self.nivel, codigo_producto='ABC').exists())
+        self.assertTrue(ProductoUbicacion.objects.filter(nivel=self.otro_nivel, codigo_producto='ABC').exists())
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_trasladar_producto_a_nivel_fusionado_falla(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 50
+        UbicacionesService.asignar_producto('ABC', self.nivel, 30, None, self.user)
+        self.otro_nivel.fusionado_en = self.nivel
+        self.otro_nivel.save(update_fields=['fusionado_en'])
+        with self.assertRaises(ValidationError):
+            UbicacionesService.trasladar_producto('ABC', self.nivel, self.otro_nivel, self.user)
