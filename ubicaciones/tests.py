@@ -445,6 +445,53 @@ class MapaTest(TestCase):
         self.assertContains(resp, 'bg-warning')
 
 
+class ImportMaestroCommandTest(TestCase):
+    def _escribir_csv(self, filas):
+        import csv
+        import tempfile
+
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='', encoding='utf-8')
+        writer = csv.writer(f)
+        writer.writerow(['G', 'R', 'C', 'U', 'P', 'N'])
+        writer.writerows(filas)
+        f.close()
+        return f.name
+
+    def test_importa_estructura_completa(self):
+        from django.core.management import call_command
+
+        filas = (
+            [['1', 'A', '01', '01', '.', n] for n in range(1, 7)]
+            + [['1', 'A', '01', '02', '.', n] for n in range(1, 7)]
+        )
+        path = self._escribir_csv(filas)
+        call_command('import_maestro_ubicaciones', path)
+
+        self.assertEqual(Galpon.objects.count(), 1)
+        self.assertEqual(Rack.objects.count(), 1)
+        self.assertEqual(Cuerpo.objects.count(), 1)
+        self.assertEqual(Ubicacion.objects.count(), 2)
+        self.assertEqual(Nivel.objects.count(), 12)
+
+        nivel = Nivel.objects.get(ubicacion__codigo='01', numero=4)
+        self.assertEqual(nivel.codigo_completo, '1A0101.4')
+
+    def test_importar_dos_veces_es_idempotente(self):
+        from django.core.management import call_command
+
+        filas = [['1', 'A', '01', '01', '.', n] for n in range(1, 7)]
+        path = self._escribir_csv(filas)
+        call_command('import_maestro_ubicaciones', path)
+        call_command('import_maestro_ubicaciones', path)
+        self.assertEqual(Nivel.objects.count(), 6)
+
+    def test_archivo_inexistente_lanza_command_error(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        with self.assertRaises(CommandError):
+            call_command('import_maestro_ubicaciones', 'ruta/que/no/existe.csv')
+
+
 class ApiUbicacionesTest(TestCase):
     def setUp(self):
         from rest_framework.test import APIClient
