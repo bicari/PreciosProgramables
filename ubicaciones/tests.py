@@ -323,3 +323,58 @@ class FusionServiceTest(TestCase):
     def test_desfusionar_nivel_no_fusionado_falla(self):
         with self.assertRaises(ValidationError):
             UbicacionesService.desfusionar_nivel(self.nivel1, self.user)
+
+
+class ApiUbicacionesTest(TestCase):
+    def setUp(self):
+        from rest_framework.test import APIClient
+
+        self.user = User.objects.create_superuser(username='api_tester', password='x')
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.galpon = UbicacionesService.crear_galpon('1', 'Galpón 1', 10, 10, self.user)
+        self.rack = UbicacionesService.crear_rack(self.galpon, 'A', '', 1, 1, 1, 1, 6, self.user)
+        self.cuerpo = UbicacionesService.crear_cuerpo(self.rack, '', self.user)
+        self.ubicacion = self.cuerpo.ubicaciones.order_by('codigo').first()
+        self.nivel = self.ubicacion.niveles.get(numero=1)
+
+    def test_listar_galpones(self):
+        resp = self.api.get('/api/galpones/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.data), 1)
+
+    def test_detalle_rack_incluye_cuerpos(self):
+        resp = self.api.get(f'/api/racks/{self.rack.pk}/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.data['cuerpos']), 1)
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_asignar_producto_via_api(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 50
+        resp = self.api.post(
+            f'/api/niveles/{self.nivel.pk}/asignar/',
+            data={'codigo_producto': 'ABC', 'cantidad': 10}, format='json',
+        )
+        self.assertEqual(resp.status_code, 201)
+        self.assertTrue(ProductoUbicacion.objects.filter(codigo_producto='ABC', nivel=self.nivel).exists())
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_asignar_producto_excede_existencia_via_api(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 5
+        resp = self.api.post(
+            f'/api/niveles/{self.nivel.pk}/asignar/',
+            data={'codigo_producto': 'ABC', 'cantidad': 10}, format='json',
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    @patch('ubicaciones.services.PedidosDBISAM')
+    def test_fusionar_via_api(self, mock_db):
+        mock_db.return_value.consultar_stock.return_value = 50
+        nivel2 = self.ubicacion.niveles.get(numero=2)
+        resp = self.api.post(
+            '/api/niveles/fusionar/',
+            data={'niveles': [self.nivel.pk, nivel2.pk], 'maestro': self.nivel.pk}, format='json',
+        )
+        self.assertEqual(resp.status_code, 200)
+        nivel2.refresh_from_db()
+        self.assertEqual(nivel2.fusionado_en_id, self.nivel.pk)
