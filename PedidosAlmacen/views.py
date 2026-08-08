@@ -17,7 +17,7 @@ from .models import (
 )
 from .forms import PedidoForm
 from .dbisam import PedidosDBISAM, DEPOSITO_ALMACEN
-from .disponibilidad import calcular_disponibilidad, pedidos_previos_mismo_deposito
+from .disponibilidad import calcular_disponibilidad
 from .notifications import notificar_nuevo_pedido, notificar_despacho, notificar_despacho_parcial
 from .pdf import (
     generar_reporte_pedidos_pdf, generar_reporte_pickers_pdf,
@@ -291,8 +291,7 @@ def crear_pedido(request):
         # Revalidar disponibilidad real (existencia en depósito 1 menos lo ya
         # comprometido por pedidos activos aún no despachados) en el servidor.
         # El frontend bloquea el botón "Agregar" para existencia=0, pero la validación
-        # aquí cubre manipulaciones del form, cambios de stock entre búsqueda y envío,
-        # y pedidos previos de otros depósitos que ya reservaron ese stock.
+        # aquí cubre manipulaciones del form y cambios de stock entre búsqueda y envío.
         codigos_pedido = [item['codigo'] for item in items_data]
 
         deposito_codigo_int = None
@@ -300,11 +299,6 @@ def crear_pedido(request):
             deposito_codigo_int = int(deposito_codigo)
         except (ValueError, TypeError):
             pass
-
-        # El mismo depósito de destino pidiendo de nuevo un ítem que ya tiene
-        # en curso (sin despachar por completo) bloquea sin importar cantidad
-        # ni stock global: es un aviso de pedido duplicado, no de existencia.
-        duplicados = pedidos_previos_mismo_deposito(deposito_codigo_int, codigos_pedido)
 
         stock_pedido = {}
         dbisam_consulta_ok = False
@@ -315,11 +309,6 @@ def crear_pedido(request):
             messages.warning(request, f'No se pudo verificar el stock en almacén: {e}')
 
         disponibilidad = calcular_disponibilidad(codigos_pedido, stock_pedido) if dbisam_consulta_ok else {}
-        for codigo in duplicados:
-            # Fuerza el bloqueo (reutiliza el mecanismo de "supera lo disponible")
-            # aunque el stock global alcanzaría o DBISAM no haya respondido.
-            disponibilidad.setdefault(codigo, {'existencia': stock_pedido.get(codigo, 0), 'comprometido': 0, 'pedidos': []})
-            disponibilidad[codigo]['disponible'] = 0
 
         if disponibilidad:
             conflictos = [
@@ -328,40 +317,15 @@ def crear_pedido(request):
                 if item['codigo'] in disponibilidad and int(item['cantidad']) > disponibilidad[item['codigo']]['disponible']
             ]
             if conflictos:
-                detalles = []
-                for item, info in conflictos:
-                    codigo = item['codigo']
-                    if codigo in duplicados:
-                        pedidos_str = ', '.join(
-                            f"#{p['numero_pedido']} ({p['pendiente']} pendiente(s))"
-                            for p in duplicados[codigo][:3]
-                        )
-                        if len(duplicados[codigo]) > 3:
-                            pedidos_str += f' y {len(duplicados[codigo]) - 3} más'
-                        detalles.append(
-                            f"{codigo}: este depósito ya tiene pedido(s) {pedidos_str} "
-                            f"de este ítem sin despachar por completo"
-                        )
-                    elif info['comprometido'] > 0:
-                        pedidos_str = ', '.join(f'#{p}' for p in info['pedidos'][:3])
-                        if len(info['pedidos']) > 3:
-                            pedidos_str += f' y {len(info["pedidos"]) - 3} más'
-                        detalles.append(
-                            f"{codigo}: existencia {info['existencia']}, "
-                            f"{info['comprometido']} comprometidas en pedido(s) {pedidos_str} "
-                            f"→ disponible {info['disponible']} (solicita {item['cantidad']})"
-                        )
-                    else:
-                        detalles.append(
-                            f"{codigo}: stock disponible {info['disponible']} "
-                            f"(solicita {item['cantidad']})"
-                        )
+                detalles = [
+                    f"{item['codigo']} (disponible {int(info['disponible'])}, "
+                    f"solicitado {item['cantidad']})"
+                    for item, info in conflictos
+                ]
                 messages.warning(
                     request,
-                    'Hay ítems cuya cantidad supera lo disponible en almacén, '
-                    'o que ya tienen un pedido anterior de este depósito sin despachar. '
-                    'Corrija las cantidades marcadas en rojo antes de enviar el pedido. '
-                    + '; '.join(detalles),
+                    'No hay suficiente stock para algunos ítems. '
+                    'Corrija las cantidades marcadas en rojo: ' + ', '.join(detalles),
                 )
                 ctx.update({
                     'items_json_inicial': items_json,

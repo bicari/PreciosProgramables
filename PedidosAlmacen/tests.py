@@ -940,8 +940,7 @@ class CrearPedidoDisponibilidadTest(TestCase):
         self.assertEqual(self.Pedido.objects.exclude(pk=previo.pk).count(), 0)
         self.assertEqual(resp.status_code, 200)
         mensajes = [str(m) for m in resp.context['messages']]
-        self.assertTrue(any(f'#{previo.numero_pedido}' in m for m in mensajes))
-        self.assertTrue(any('30' in m for m in mensajes))
+        self.assertTrue(any('disponible 30' in m for m in mensajes))
 
     def test_pedido_previo_pendiente_permite_si_no_excede_disponible(self):
         """Mismo compromiso de 70, pero pedir solo 30 (el disponible) sí se crea."""
@@ -979,84 +978,6 @@ class CrearPedidoDisponibilidadTest(TestCase):
                 'deposito': '2', 'deposito_nombre': 'Tienda Norte',
                 'items_json': json.dumps(items),
             })
-        self.assertEqual(resp.status_code, 302)
-
-
-class CrearPedidoDuplicadoMismoDepositoTest(TestCase):
-    """crear_pedido bloquea (sin importar cantidad ni stock global) cuando el
-    mismo depósito de destino ya tiene un pedido activo sin despachar de ese SKU."""
-
-    def setUp(self):
-        from users.models import User
-        from django.urls import reverse
-        from .models import Pedido, PedidoItem
-        self.Pedido = Pedido
-        self.PedidoItem = PedidoItem
-        self.user = User.objects.create_superuser(username='dup_view_u', password='x')
-        self.client.force_login(self.user)
-        self.url = reverse('pedidos-crear')
-
-    def _pedido_previo(self, deposito_codigo, cantidad_solicitada=50,
-                        cantidad_despachada=0, estado_item='PENDIENTE', estado_pedido='PENDIENTE'):
-        pedido = self.Pedido.objects.create(
-            solicitante=self.user, estado=estado_pedido, deposito_codigo=deposito_codigo,
-        )
-        self.PedidoItem.objects.create(
-            pedido=pedido, codigo='SKU1', descripcion='Producto Uno',
-            cantidad_solicitada=cantidad_solicitada, cantidad_despachada=cantidad_despachada,
-            estado=estado_item,
-        )
-        return pedido
-
-    def _post(self, deposito_codigo, cantidad, mock_stock):
-        items = [{'codigo': 'SKU1', 'descripcion': 'Producto Uno', 'cantidad': str(cantidad),
-                  'referencia': '', 'puesto': '', 'ref_proveedor': ''}]
-        form_data = {
-            'categoria': 'CAT1', 'categoria_nombre': 'Categoría 1', 'condicion': 'URGENTE',
-            'deposito': str(deposito_codigo), 'deposito_nombre': 'Tienda',
-            'items_json': json.dumps(items),
-        }
-        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
-            mock_db.return_value.obtener_categorias.return_value = []
-            mock_db.return_value.consultar_stock_multiple.return_value = mock_stock
-            resp = self.client.post(self.url, form_data)
-        return resp
-
-    def test_escenario_usuario_deposito_2_repite_pedido_pese_a_alcanzar_stock(self):
-        """Existencia 100. Dep.2 pidió 50 (pendiente). Dep.10 pidió 40 (pendiente).
-        Disponible global = 10. Dep.2 vuelve a pedir 10 (SI alcanzaría el disponible
-        global) -> debe bloquearse igual, por tener un pedido anterior sin despachar."""
-        previo_dep2 = self._pedido_previo(deposito_codigo=2, cantidad_solicitada=50)
-        self._pedido_previo(deposito_codigo=10, cantidad_solicitada=40)
-        resp = self._post(deposito_codigo=2, cantidad=10, mock_stock={'SKU1': 100})
-        self.assertEqual(
-            self.Pedido.objects.filter(deposito_codigo=2).count(), 1,
-            'No debió crearse el segundo pedido del depósito 2',
-        )
-        self.assertEqual(resp.status_code, 200)
-        mensajes = [str(m) for m in resp.context['messages']]
-        self.assertTrue(any(f'#{previo_dep2.numero_pedido}' in m for m in mensajes))
-
-    def test_otro_deposito_no_se_bloquea_por_pedido_de_deposito_distinto(self):
-        """El pedido pendiente del depósito 2 no debe bloquear al depósito 10."""
-        self._pedido_previo(deposito_codigo=2, cantidad_solicitada=50)
-        resp = self._post(deposito_codigo=10, cantidad=10, mock_stock={'SKU1': 100})
-        self.assertEqual(resp.status_code, 302)
-
-    def test_pedido_previo_anulado_no_bloquea(self):
-        self._pedido_previo(deposito_codigo=2, cantidad_solicitada=50, estado_pedido='ANULADO')
-        resp = self._post(deposito_codigo=2, cantidad=10, mock_stock={'SKU1': 100})
-        self.assertEqual(resp.status_code, 302)
-
-    def test_pedido_previo_ya_despachado_por_completo_no_bloquea(self):
-        self._pedido_previo(
-            deposito_codigo=2, cantidad_solicitada=50, cantidad_despachada=50, estado_item='DESPACHADO',
-        )
-        resp = self._post(deposito_codigo=2, cantidad=10, mock_stock={'SKU1': 100})
-        self.assertEqual(resp.status_code, 302)
-
-    def test_sin_pedido_previo_no_bloquea(self):
-        resp = self._post(deposito_codigo=2, cantidad=10, mock_stock={'SKU1': 100})
         self.assertEqual(resp.status_code, 302)
 
 
@@ -3918,77 +3839,6 @@ class CalcularDisponibilidadTest(TestCase):
         from .disponibilidad import calcular_disponibilidad
         resultado = calcular_disponibilidad(['SKU1'], {'SKU1': 50})  # 50 existencia, 70 comprometidos
         self.assertEqual(resultado['SKU1']['disponible'], 0)
-
-
-class PedidosPreviosMismoDepositoTest(TestCase):
-    """pedidos_previos_mismo_deposito detecta pedidos activos del mismo depósito
-    de destino que ya tienen ese SKU pedido y no despachado por completo."""
-
-    def setUp(self):
-        from users.models import User
-        self.user = User.objects.create_superuser(username='dup_u', password='x')
-
-    def _pedido(self, deposito_codigo, estado_pedido='PENDIENTE'):
-        from .models import Pedido
-        return Pedido.objects.create(
-            solicitante=self.user, estado=estado_pedido, deposito_codigo=deposito_codigo,
-        )
-
-    def _item(self, pedido, **kwargs):
-        from .models import PedidoItem
-        base = dict(
-            pedido=pedido, codigo='SKU1', descripcion='Producto Uno',
-            cantidad_solicitada=50, cantidad_despachada=0, estado='PENDIENTE',
-        )
-        base.update(kwargs)
-        return PedidoItem.objects.create(**base)
-
-    def test_mismo_deposito_con_pedido_pendiente_aparece(self):
-        from .disponibilidad import pedidos_previos_mismo_deposito
-        pedido = self._pedido(deposito_codigo=2)
-        self._item(pedido, cantidad_solicitada=50)
-        resultado = pedidos_previos_mismo_deposito(2, ['SKU1'])
-        self.assertEqual(resultado['SKU1'], [{'numero_pedido': pedido.numero_pedido, 'pendiente': 50}])
-
-    def test_deposito_distinto_no_aparece(self):
-        from .disponibilidad import pedidos_previos_mismo_deposito
-        pedido = self._pedido(deposito_codigo=10)
-        self._item(pedido, cantidad_solicitada=40)
-        resultado = pedidos_previos_mismo_deposito(2, ['SKU1'])
-        self.assertNotIn('SKU1', resultado)
-
-    def test_pedido_anulado_no_aparece(self):
-        from .disponibilidad import pedidos_previos_mismo_deposito
-        pedido = self._pedido(deposito_codigo=2, estado_pedido='ANULADO')
-        self._item(pedido, cantidad_solicitada=50)
-        resultado = pedidos_previos_mismo_deposito(2, ['SKU1'])
-        self.assertNotIn('SKU1', resultado)
-
-    def test_item_ya_despachado_por_completo_no_aparece(self):
-        from .disponibilidad import pedidos_previos_mismo_deposito
-        pedido = self._pedido(deposito_codigo=2)
-        self._item(pedido, cantidad_solicitada=50, cantidad_despachada=50, estado='DESPACHADO')
-        resultado = pedidos_previos_mismo_deposito(2, ['SKU1'])
-        self.assertNotIn('SKU1', resultado)
-
-    def test_item_parcial_reporta_solo_lo_pendiente(self):
-        from .disponibilidad import pedidos_previos_mismo_deposito
-        pedido = self._pedido(deposito_codigo=2)
-        self._item(pedido, cantidad_solicitada=50, cantidad_despachada=30, estado='PARCIAL')
-        resultado = pedidos_previos_mismo_deposito(2, ['SKU1'])
-        self.assertEqual(resultado['SKU1'], [{'numero_pedido': pedido.numero_pedido, 'pendiente': 20}])
-
-    def test_deposito_none_no_consulta_bd(self):
-        from .disponibilidad import pedidos_previos_mismo_deposito
-        with self.assertNumQueries(0):
-            resultado = pedidos_previos_mismo_deposito(None, ['SKU1'])
-        self.assertEqual(resultado, {})
-
-    def test_codigos_vacios_no_consulta_bd(self):
-        from .disponibilidad import pedidos_previos_mismo_deposito
-        with self.assertNumQueries(0):
-            resultado = pedidos_previos_mismo_deposito(2, [])
-        self.assertEqual(resultado, {})
 
 
 class BuscarProductoUbicacionesInternasTest(TestCase):
