@@ -23,11 +23,11 @@ _CAMPOS_VALIDOS = {'sku', 'codBarra', 'refProveedor'}
 def api_pedidos_list(request):
     print('despachos', request)
     if is_pedidos_supervisor(request.user):
-        qs = Pedido.objects.select_related('solicitante', 'despachador').prefetch_related('items')
+        qs = Pedido.objects.select_related('solicitante', 'picker').prefetch_related('items')
     elif is_pedidos_almacen(request.user):
-        qs = Pedido.objects.exclude(estado='CERRADO').select_related('solicitante', 'despachador').prefetch_related('items')
+        qs = Pedido.objects.exclude(estado='CERRADO').select_related('solicitante', 'picker').prefetch_related('items')
     else:
-        qs = Pedido.objects.filter(picker=request.user).select_related('picker', 'despachador').prefetch_related('items')
+        qs = Pedido.objects.filter(picker=request.user).select_related('picker').prefetch_related('items')
 
     estado = request.query_params.get('estado', '')
     if estado:
@@ -46,7 +46,7 @@ def api_pedidos_list(request):
 @permission_classes([IsAuthenticated])
 def api_pedido_detail(request, pk):
     pedido = get_object_or_404(
-        Pedido.objects.select_related('solicitante', 'despachador', 'picker').prefetch_related('items'),
+        Pedido.objects.select_related('solicitante', 'picker').prefetch_related('items'),
         numero_pedido=pk,
     )
     print(pedido)

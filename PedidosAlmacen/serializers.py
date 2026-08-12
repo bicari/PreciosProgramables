@@ -16,14 +16,14 @@ class PedidoItemSerializer(serializers.ModelSerializer):
 
 class PedidoListSerializer(serializers.ModelSerializer):
     solicitante = UserMinSerializer(read_only=True)
-    despachador = UserMinSerializer(read_only=True)
+    picker = UserMinSerializer(read_only=True)
     total_items = serializers.SerializerMethodField()
     items_listos = serializers.SerializerMethodField()
 
     class Meta:
         model = Pedido
         fields = [
-            'numero_pedido', 'solicitante', 'despachador', 'estado',
+            'numero_pedido', 'solicitante', 'picker', 'estado',
             'condicion', 'deposito', 'observaciones', 'fecha_creacion',
             'fecha_despacho', 'categoria', 'categoria_nombre',
             'deposito_codigo', 'total_items', 'items_listos',
