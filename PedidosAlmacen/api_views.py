@@ -442,6 +442,39 @@ def api_ficha_producto(request, codigo):
     except pyodbc.DatabaseError as e:
         return Response({'error': f'Error consultando DBISAM: {e}'}, status=502)
 
+    items_relacionados = (
+        PedidoItem.objects
+        .filter(codigo=codigo_prod, estado__in=['PENDIENTE', 'PARCIAL', 'BACK_ORDER'])
+        .exclude(pedido__estado__in=['ANULADO', 'CERRADO'])
+        .select_related('pedido')
+        .order_by('pedido__fecha_creacion')
+    )
+
+    pedidos_pendientes, pedidos_parciales, pedidos_backorder = [], [], []
+    for item in items_relacionados:
+        p = item.pedido
+        fila = {
+            'numero_pedido': p.numero_pedido,
+            'deposito': p.deposito,
+            'estado_pedido': p.estado,
+            'condicion': p.condicion,
+            'cantidad_solicitada': item.cantidad_solicitada,
+            'fecha_creacion': p.fecha_creacion,
+        }
+        if item.estado == 'PENDIENTE':
+            pedidos_pendientes.append(fila)
+        elif item.estado == 'PARCIAL':
+            pedidos_parciales.append({
+                **fila,
+                'cantidad_despachada': item.cantidad_despachada,
+                'cantidad_back_order': item.cantidad_back_order,
+            })
+        else:  # BACK_ORDER
+            pedidos_backorder.append({
+                **fila,
+                'cantidad_back_order': item.cantidad_back_order,
+            })
+
     return Response({
         'codigo': codigo_prod,
         'descripcion': descripcion,
@@ -450,4 +483,7 @@ def api_ficha_producto(request, codigo):
         'ref_proveedor': ref_proveedor,
         'ubicaciones_internas': ubicaciones_internas,
         'existencia_almacen': existencia_almacen,
+        'pedidos_pendientes': pedidos_pendientes,
+        'pedidos_parciales': pedidos_parciales,
+        'pedidos_backorder': pedidos_backorder,
     })

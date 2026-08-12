@@ -3945,3 +3945,141 @@ class ApiFichaProductoTest(TestCase):
         mock_db.return_value.consultar_stock.side_effect = pyodbc.DatabaseError('odbc down')
         resp = self.api.get('/api/productos/SKU1/ficha/', HTTP_X_CAMPO='sku')
         self.assertEqual(resp.status_code, 502)
+
+
+class ApiFichaProductoPedidosRelacionadosTest(TestCase):
+    """La ficha agrupa PedidoItem del mismo código en 3 listas por estado,
+    excluyendo pedidos ANULADO/CERRADO aunque el item no haya cambiado de estado."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from users.models import User
+        from .models import Pedido, PedidoItem
+
+        self.user = User.objects.create_user(username='ficha_rel_user', password='x')
+        self.solicitante = User.objects.create_user(username='ficha_rel_sol', password='x')
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+        self.pedido_pendiente = Pedido.objects.create(
+            solicitante=self.solicitante, estado='ASIGNADO',
+            deposito='CENTRO CERAMICO', condicion='URGENTE',
+        )
+        PedidoItem.objects.create(
+            pedido=self.pedido_pendiente, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=5, estado='PENDIENTE',
+        )
+
+        self.pedido_parcial = Pedido.objects.create(
+            solicitante=self.solicitante, estado='PARCIAL', deposito='ALMACEN NORTE',
+        )
+        PedidoItem.objects.create(
+            pedido=self.pedido_parcial, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=10, cantidad_despachada=6, cantidad_back_order=4,
+            estado='PARCIAL',
+        )
+
+        self.pedido_backorder = Pedido.objects.create(
+            solicitante=self.solicitante, estado='PARCIAL', deposito='TIENDA SUR',
+        )
+        PedidoItem.objects.create(
+            pedido=self.pedido_backorder, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=8, cantidad_back_order=3, estado='BACK_ORDER',
+        )
+
+        # Pedido anulado: anular_pedido() NO cambia PedidoItem.estado, así que
+        # el item queda PENDIENTE aunque el pedido ya no esté vigente.
+        self.pedido_anulado = Pedido.objects.create(
+            solicitante=self.solicitante, estado='ANULADO', deposito='TIENDA SUR',
+        )
+        PedidoItem.objects.create(
+            pedido=self.pedido_anulado, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=2, estado='PENDIENTE',
+        )
+
+        # Pedido cerrado con un item que quedó PARCIAL (caso borde: cerrar_pedido
+        # marca CERRADO a los items en la mayoría de los casos, pero el filtro
+        # por pedido.estado debe excluirlo igual si no fue así).
+        self.pedido_cerrado = Pedido.objects.create(
+            solicitante=self.solicitante, estado='CERRADO', deposito='TIENDA SUR',
+        )
+        PedidoItem.objects.create(
+            pedido=self.pedido_cerrado, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=1, cantidad_back_order=1, estado='PARCIAL',
+        )
+
+    def _get_ficha(self, codigo='SKU1'):
+        with patch('PedidosAlmacen.api_views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.buscar_producto_por_campo.return_value = (
+                codigo, 'Producto Uno', 'REF1', 'P1', 'PROV1',
+            )
+            mock_db.return_value.consultar_stock.return_value = 20
+            resp = self.api.get(f'/api/productos/{codigo}/ficha/', HTTP_X_CAMPO='sku')
+        return resp
+
+    def test_item_pendiente_aparece_en_pendientes(self):
+        resp = self._get_ficha()
+        self.assertEqual(resp.status_code, 200)
+        numeros = [p['numero_pedido'] for p in resp.data['pedidos_pendientes']]
+        self.assertEqual(numeros, [self.pedido_pendiente.numero_pedido])
+        fila = resp.data['pedidos_pendientes'][0]
+        self.assertEqual(fila['deposito'], 'CENTRO CERAMICO')
+        self.assertEqual(fila['estado_pedido'], 'ASIGNADO')
+        self.assertEqual(fila['condicion'], 'URGENTE')
+        self.assertEqual(fila['cantidad_solicitada'], 5)
+
+    def test_item_parcial_aparece_en_parciales_con_cantidades(self):
+        resp = self._get_ficha()
+        numeros = [p['numero_pedido'] for p in resp.data['pedidos_parciales']]
+        self.assertEqual(numeros, [self.pedido_parcial.numero_pedido])
+        fila = resp.data['pedidos_parciales'][0]
+        self.assertEqual(fila['cantidad_despachada'], 6)
+        self.assertEqual(fila['cantidad_back_order'], 4)
+
+    def test_item_backorder_aparece_en_backorder(self):
+        resp = self._get_ficha()
+        numeros = [p['numero_pedido'] for p in resp.data['pedidos_backorder']]
+        self.assertEqual(numeros, [self.pedido_backorder.numero_pedido])
+        self.assertEqual(resp.data['pedidos_backorder'][0]['cantidad_back_order'], 3)
+
+    def test_pedido_anulado_no_aparece(self):
+        resp = self._get_ficha()
+        todos = (
+            resp.data['pedidos_pendientes']
+            + resp.data['pedidos_parciales']
+            + resp.data['pedidos_backorder']
+        )
+        numeros = [p['numero_pedido'] for p in todos]
+        self.assertNotIn(self.pedido_anulado.numero_pedido, numeros)
+
+    def test_pedido_cerrado_no_aparece(self):
+        resp = self._get_ficha()
+        todos = (
+            resp.data['pedidos_pendientes']
+            + resp.data['pedidos_parciales']
+            + resp.data['pedidos_backorder']
+        )
+        numeros = [p['numero_pedido'] for p in todos]
+        self.assertNotIn(self.pedido_cerrado.numero_pedido, numeros)
+
+    def test_incluye_pedidos_de_todos_los_depositos(self):
+        from .models import Pedido, PedidoItem
+        otro_pedido = Pedido.objects.create(
+            solicitante=self.solicitante, estado='ASIGNADO', deposito='DEPOSITO OTRO',
+        )
+        PedidoItem.objects.create(
+            pedido=otro_pedido, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=3, estado='PENDIENTE',
+        )
+        resp = self._get_ficha()
+        numeros = {p['numero_pedido'] for p in resp.data['pedidos_pendientes']}
+        self.assertEqual(
+            numeros,
+            {self.pedido_pendiente.numero_pedido, otro_pedido.numero_pedido},
+        )
+
+    def test_producto_sin_pedidos_relacionados_devuelve_listas_vacias(self):
+        resp = self._get_ficha(codigo='SKU_SIN_PEDIDOS')
+        self.assertEqual(resp.data['pedidos_pendientes'], [])
+        self.assertEqual(resp.data['pedidos_parciales'], [])
+        self.assertEqual(resp.data['pedidos_backorder'], [])
