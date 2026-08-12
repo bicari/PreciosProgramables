@@ -135,14 +135,15 @@ def api_preparar_pedido(request, pk):
                 {'error': 'Solo se puede iniciar un pedido en estado ASIGNADO'},
                 status=400,
             )
-        otro_en_picking = Pedido.objects.filter(
-            picker=pedido.picker, estado='PICKING'
-        ).exclude(pk=pedido.pk).exists()
-        if otro_en_picking:
-            return Response(
-                {'error': 'Ya tienes otro pedido en Picking. Finalízalo antes de iniciar este.'},
-                status=409,
-            )
+        if pedido.condicion not in ('URGENTE', 'CLIENTE_RETIRA'):
+            otro_en_picking = Pedido.objects.filter(
+                picker=pedido.picker, estado='PICKING'
+            ).exclude(pk=pedido.pk).exists()
+            if otro_en_picking:
+                return Response(
+                    {'error': 'Ya tienes otro pedido en Picking. Finalízalo antes de iniciar este.'},
+                    status=409,
+                )
         pedido.estado = 'PICKING'
         pedido.fecha_inicio_picking = timezone.now()
         pedido.fecha_fin_picking = None
