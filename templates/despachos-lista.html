@@ -62,6 +62,7 @@
                 <th>Estado</th>
                 <th>Despacho</th>
                 <th>Recepción</th>
+                {% if es_superuser %}<th>a2</th>{% endif %}
                 <th>Acciones</th>
             </tr>
         </thead>
@@ -108,6 +109,17 @@
                     <small class="text-muted">{{ despacho.fecha_recepcion|date:"H:i" }}</small>
                     {% else %}<span class="text-muted">—</span>{% endif %}
                 </td>
+                {% if es_superuser %}
+                <td>
+                    {% if despacho.traslado_a2_registrado %}
+                        <span class="badge bg-success" title="Traslado registrado en a2"><i class="fas fa-check"></i> Registrado</span>
+                    {% elif despacho.estado == 'PENDIENTE_APROBACION' or despacho.estado == 'PREPARANDO' %}
+                        <span class="text-muted">—</span>
+                    {% else %}
+                        <span class="badge bg-danger" title="No se registró el traslado en a2"><i class="fas fa-exclamation-triangle"></i> Sin registrar</span>
+                    {% endif %}
+                </td>
+                {% endif %}
                 <td>
                     <div class="d-flex gap-1 flex-wrap">
                         <a href="{% url 'pedidos-detalle' despacho.pedido.numero_pedido %}" class="btn btn-sm btn-outline-primary" title="Ver pedido">

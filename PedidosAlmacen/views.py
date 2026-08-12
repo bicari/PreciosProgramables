@@ -899,6 +899,7 @@ def lista_despachos(request):
         'despachos': despachos,
         'estado_filter': estado_filter,
         'estados': Despacho.ESTADO_CHOICES,
+        'es_superuser': request.user.is_superuser,
     })
 
 
