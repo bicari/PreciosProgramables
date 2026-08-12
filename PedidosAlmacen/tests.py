@@ -3883,3 +3883,65 @@ class BuscarProductoUbicacionesInternasTest(TestCase):
         resp = api.get('/api/productos/SKU1/', HTTP_X_CAMPO='sku')
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data['ubicaciones_internas'][0]['codigo'], self.nivel.codigo_completo)
+
+
+class ApiFichaProductoTest(TestCase):
+    """GET /api/productos/<codigo>/ficha/ — ficha completa bajo demanda (botón ojito)."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from users.models import User
+        self.user = User.objects.create_user(username='ficha_user', password='x')
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+    @patch('PedidosAlmacen.api_views.PedidosDBISAM')
+    def test_devuelve_ficha_y_existencia_del_almacen_principal(self, mock_db):
+        from .dbisam import DEPOSITO_ALMACEN
+        mock_db.return_value.buscar_producto_por_campo.return_value = (
+            'SKU1', 'Producto Uno', 'REF1', 'P1', 'PROV1',
+        )
+        mock_db.return_value.consultar_stock.return_value = 42
+
+        resp = self.api.get('/api/productos/SKU1/ficha/', HTTP_X_CAMPO='sku')
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['codigo'], 'SKU1')
+        self.assertEqual(resp.data['descripcion'], 'Producto Uno')
+        self.assertEqual(resp.data['ref_proveedor'], 'PROV1')
+        self.assertEqual(resp.data['ubicaciones_internas'], [])
+        self.assertEqual(resp.data['existencia_almacen'], 42)
+        mock_db.return_value.consultar_stock.assert_called_once_with(
+            'SKU1', deposito=DEPOSITO_ALMACEN,
+        )
+
+    def test_sin_header_x_campo_devuelve_400(self):
+        resp = self.api.get('/api/productos/SKU1/ficha/')
+        self.assertEqual(resp.status_code, 400)
+
+    def test_header_invalido_devuelve_400(self):
+        resp = self.api.get('/api/productos/SKU1/ficha/', HTTP_X_CAMPO='otro')
+        self.assertEqual(resp.status_code, 400)
+
+    @patch('PedidosAlmacen.api_views.PedidosDBISAM')
+    def test_producto_no_encontrado_devuelve_404(self, mock_db):
+        mock_db.return_value.buscar_producto_por_campo.return_value = None
+        resp = self.api.get('/api/productos/NOEXISTE/ficha/', HTTP_X_CAMPO='sku')
+        self.assertEqual(resp.status_code, 404)
+
+    @patch('PedidosAlmacen.api_views.PedidosDBISAM')
+    def test_error_dbisam_al_buscar_producto_devuelve_502(self, mock_db):
+        import pyodbc
+        mock_db.return_value.buscar_producto_por_campo.side_effect = pyodbc.DatabaseError('odbc down')
+        resp = self.api.get('/api/productos/SKU1/ficha/', HTTP_X_CAMPO='sku')
+        self.assertEqual(resp.status_code, 502)
+
+    @patch('PedidosAlmacen.api_views.PedidosDBISAM')
+    def test_error_dbisam_al_consultar_stock_devuelve_502(self, mock_db):
+        import pyodbc
+        mock_db.return_value.buscar_producto_por_campo.return_value = (
+            'SKU1', 'Producto Uno', 'REF1', 'P1', 'PROV1',
+        )
+        mock_db.return_value.consultar_stock.side_effect = pyodbc.DatabaseError('odbc down')
+        resp = self.api.get('/api/productos/SKU1/ficha/', HTTP_X_CAMPO='sku')
+        self.assertEqual(resp.status_code, 502)

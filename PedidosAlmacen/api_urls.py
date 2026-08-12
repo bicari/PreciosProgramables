@@ -11,4 +11,5 @@ urlpatterns = [
     path('despachos/crear/', api_views.api_crear_despacho, name='api-despachos-crear'),
     path('alerts/', api_views.api_alerts_list, name='api-alerts-list'),
     path('productos/<str:codigo>/', api_views.api_buscar_producto, name='api-buscar-producto'),
+    path('productos/<str:codigo>/ficha/', api_views.api_ficha_producto, name='api-producto-ficha'),
 ]

@@ -381,3 +381,73 @@ def api_buscar_producto(request, codigo):
         'ref_proveedor': ref_proveedor,
         'ubicaciones_internas': ubicaciones_internas,
     })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def api_ficha_producto(request, codigo):
+    """GET /api/productos/<codigo>/ficha/ — ficha completa bajo demanda (botón "ojito").
+
+    A diferencia de api_buscar_producto (llamado en cada escaneo), este
+    endpoint solo se llama cuando el usuario pide ver el detalle: agrega
+    existencia del almacén principal y pedidos relacionados en otros pedidos.
+    Requiere header X-Campo: sku | codBarra | refProveedor.
+    """
+    campo = request.headers.get('X-Campo')
+    if not campo:
+        return Response({'error': 'Header X-Campo requerido'}, status=400)
+    if campo not in _CAMPOS_VALIDOS:
+        return Response(
+            {'error': 'X-Campo inválido. Use: sku, codBarra, refProveedor'},
+            status=400,
+        )
+
+    try:
+        row = PedidosDBISAM().buscar_producto_por_campo(codigo, campo)
+    except pyodbc.DatabaseError as e:
+        return Response({'error': f'Error consultando DBISAM: {e}'}, status=502)
+
+    if row is None:
+        return Response({'error': 'Producto no encontrado'}, status=404)
+
+    codigo_prod, descripcion, referencia, puesto, ref_proveedor = row
+
+    from ubicaciones.models import ProductoUbicacion
+    ubicaciones_internas = []
+    try:
+        qs = (
+            ProductoUbicacion.objects
+            .filter(
+                codigo_producto=codigo_prod,
+                nivel__activo=True,
+                nivel__ubicacion__activo=True,
+                nivel__ubicacion__cuerpo__activo=True,
+                nivel__ubicacion__cuerpo__rack__activo=True,
+            )
+            .select_related('nivel__ubicacion__cuerpo__rack__galpon')
+        )
+        ubicaciones_internas = [
+            {
+                'codigo': pu.nivel.codigo_completo,
+                'tipo_nivel': pu.nivel.tipo,
+                'tipo_nivel_display': pu.nivel.get_tipo_display(),
+            }
+            for pu in qs
+        ]
+    except Exception:
+        logger.exception("Error al consultar ubicaciones internas en api_ficha_producto")
+
+    try:
+        existencia_almacen = PedidosDBISAM().consultar_stock(codigo_prod, deposito=DEPOSITO_ALMACEN)
+    except pyodbc.DatabaseError as e:
+        return Response({'error': f'Error consultando DBISAM: {e}'}, status=502)
+
+    return Response({
+        'codigo': codigo_prod,
+        'descripcion': descripcion,
+        'referencia': referencia,
+        'puesto': puesto,
+        'ref_proveedor': ref_proveedor,
+        'ubicaciones_internas': ubicaciones_internas,
+        'existencia_almacen': existencia_almacen,
+    })
