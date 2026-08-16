@@ -1573,7 +1573,7 @@ def reporte_pedidos(request):
     if fecha_fin:
         pedidos = pedidos.filter(fecha_creacion__date__lte=fecha_fin)
     if categoria_filtro:
-        pedidos = pedidos.filter(categoria=categoria_filtro)
+        pedidos = pedidos.filter(items__categoria=categoria_filtro).distinct()
     if condicion_filtro:
         pedidos = pedidos.filter(condicion=condicion_filtro)
 
@@ -1606,9 +1606,9 @@ def reporte_pedidos(request):
             tiempo_minutos = (int(promedio_seg) % 3600) // 60
 
     categoria_top = (
-        pedidos.exclude(categoria='')
+        PedidoItem.objects.filter(pedido__in=pedidos).exclude(categoria='')
         .values('categoria', 'categoria_nombre')
-        .annotate(total=Count('numero_pedido'))
+        .annotate(total=Count('pedido_id', distinct=True))
         .order_by('-total')
         .first()
     )
@@ -1628,9 +1628,9 @@ def reporte_pedidos(request):
     )
 
     por_categoria = (
-        pedidos.exclude(categoria='')
+        PedidoItem.objects.filter(pedido__in=pedidos).exclude(categoria='')
         .values('categoria', 'categoria_nombre')
-        .annotate(total=Count('numero_pedido'))
+        .annotate(total=Count('pedido_id', distinct=True))
         .order_by('-total')[:10]
     )
 
@@ -1647,7 +1647,7 @@ def reporte_pedidos(request):
     pct_incidencias = round(pedidos_con_incidencia / total_pedidos * 100, 1) if total_pedidos else 0
 
     categorias_disponibles = (
-        Pedido.objects.exclude(categoria='')
+        PedidoItem.objects.exclude(categoria='')
         .values('categoria')
         .annotate(nombre=Max('categoria_nombre'))
         .order_by('categoria')
@@ -1692,7 +1692,7 @@ def exportar_reporte_pdf(request):
     if fecha_fin:
         pedidos = pedidos.filter(fecha_creacion__date__lte=fecha_fin)
     if categoria_filtro:
-        pedidos = pedidos.filter(categoria=categoria_filtro)
+        pedidos = pedidos.filter(items__categoria=categoria_filtro).distinct()
     if condicion_filtro:
         pedidos = pedidos.filter(condicion=condicion_filtro)
 
@@ -1732,8 +1732,8 @@ def exportar_reporte_pdf(request):
         'tiempo_horas': tiempo_horas,
         'tiempo_minutos': tiempo_minutos,
         'categoria_top': (
-            pedidos.exclude(categoria='')
-            .values('categoria', 'categoria_nombre').annotate(total=Count('numero_pedido'))
+            PedidoItem.objects.filter(pedido__in=pedidos).exclude(categoria='')
+            .values('categoria', 'categoria_nombre').annotate(total=Count('pedido_id', distinct=True))
             .order_by('-total').first()
         ),
         'condicion_top': (
@@ -1749,8 +1749,9 @@ def exportar_reporte_pdf(request):
             .annotate(total=Count('numero_pedido')).order_by('-total')
         ),
         'por_categoria': list(
-            pedidos.exclude(categoria='').values('categoria', 'categoria_nombre')
-            .annotate(total=Count('numero_pedido')).order_by('-total')[:10]
+            PedidoItem.objects.filter(pedido__in=pedidos).exclude(categoria='')
+            .values('categoria', 'categoria_nombre')
+            .annotate(total=Count('pedido_id', distinct=True)).order_by('-total')[:10]
         ),
         'fecha_inicio': fecha_inicio,
         'fecha_fin': fecha_fin,

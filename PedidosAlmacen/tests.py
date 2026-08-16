@@ -679,6 +679,51 @@ class ReporteExcluyeAnuladosTest(TestCase):
         self.assertEqual(resp.context['total_anulados'], 1)
 
 
+class ReportePorCategoriaMixtoTest(TestCase):
+    """El reporte cuenta un pedido mixto en cada categoría de sus ítems (una sola
+    vez por categoría), y el filtro por categoría lo encuentra por cualquiera de ellas."""
+
+    def setUp(self):
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        from django.urls import reverse
+        self.reverse = reverse
+        self.sup = User.objects.create_superuser(username='sup_rep_mixto', password='x')
+        self.pedido = Pedido.objects.create(
+            solicitante=self.sup, estado='PENDIENTE', es_mixto=True,
+            categoria='CAT1', categoria_nombre='Categoría 1',
+        )
+        PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='Uno', cantidad_solicitada=1,
+            categoria='CAT1', categoria_nombre='Categoría 1',
+        )
+        PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU2', descripcion='Dos', cantidad_solicitada=1,
+            categoria='CAT2', categoria_nombre='Categoría 2',
+        )
+        self.client.force_login(self.sup)
+
+    def test_por_categoria_cuenta_el_pedido_en_ambas_categorias(self):
+        resp = self.client.get(self.reverse('pedidos-reporte'))
+        conteos = {fila['categoria']: fila['total'] for fila in resp.context['por_categoria']}
+        self.assertEqual(conteos.get('CAT1'), 1)
+        self.assertEqual(conteos.get('CAT2'), 1)
+
+    def test_filtro_por_segunda_categoria_encuentra_el_pedido(self):
+        resp = self.client.get(self.reverse('pedidos-reporte'), {'categoria': 'CAT2'})
+        self.assertEqual(resp.context['total_pedidos'], 1)
+
+    def test_categoria_con_dos_items_no_se_duplica(self):
+        from .models import PedidoItem
+        PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU3', descripcion='Tres', cantidad_solicitada=1,
+            categoria='CAT1', categoria_nombre='Categoría 1',
+        )
+        resp = self.client.get(self.reverse('pedidos-reporte'))
+        conteos = {fila['categoria']: fila['total'] for fila in resp.context['por_categoria']}
+        self.assertEqual(conteos.get('CAT1'), 1)
+
+
 class AnularDetalleTemplateTest(TestCase):
     def setUp(self):
         from users.models import User
