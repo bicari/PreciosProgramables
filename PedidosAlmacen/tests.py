@@ -4257,3 +4257,25 @@ class PedidoMixtoModeloTest(TestCase):
         )
         self.assertEqual(item.categoria, '')
         self.assertEqual(item.categoria_nombre, '')
+
+
+class BadgeMixtoTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from .models import Pedido
+        from django.urls import reverse
+        self.reverse = reverse
+        self.sup = User.objects.create_superuser(username='sup_badge_mixto', password='x')
+        self.pedido = Pedido.objects.create(
+            solicitante=self.sup, estado='PENDIENTE', es_mixto=True,
+            categoria='CAT1', categoria_nombre='Categoría 1',
+        )
+        self.client.force_login(self.sup)
+
+    def test_lista_muestra_badge_mixto(self):
+        resp = self.client.get(self.reverse('pedidos-lista'))
+        self.assertContains(resp, 'Mixto')
+
+    def test_detalle_muestra_badge_mixto(self):
+        resp = self.client.get(self.reverse('pedidos-detalle', args=[self.pedido.numero_pedido]))
+        self.assertContains(resp, 'Mixto')

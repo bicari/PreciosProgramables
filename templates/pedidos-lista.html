@@ -85,7 +85,9 @@
                 <td>{{ pedido.solicitante.username|capfirst }}</td>
                 {% endif %}
                 <td>
-                    {% if pedido.categoria %}
+                    {% if pedido.es_mixto %}
+                        <span class="badge bg-warning text-dark"><i class="fas fa-layer-group me-1"></i>Mixto</span>
+                    {% elif pedido.categoria %}
                         <span class="fw-semibold">{{ pedido.categoria }}</span>
                         {% if pedido.categoria_nombre %}<br><small class="text-muted">{{ pedido.categoria_nombre }}</small>{% endif %}
                     {% else %}<span class="text-muted">—</span>{% endif %}

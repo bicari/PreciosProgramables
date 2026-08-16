@@ -134,8 +134,12 @@
             <div class="pd-meta-row">
                 <dt class="pd-meta-label">Categoría</dt>
                 <dd class="pd-meta-value">
-                    <span class="badge bg-secondary">{{ pedido.categoria|default:"-" }}</span>
-                    {% if pedido.categoria_nombre %}<small class="text-muted ms-1">{{ pedido.categoria_nombre }}</small>{% endif %}
+                    {% if pedido.es_mixto %}
+                        <span class="badge bg-warning text-dark"><i class="fas fa-layer-group me-1"></i>Mixto</span>
+                    {% else %}
+                        <span class="badge bg-secondary">{{ pedido.categoria|default:"-" }}</span>
+                        {% if pedido.categoria_nombre %}<small class="text-muted ms-1">{{ pedido.categoria_nombre }}</small>{% endif %}
+                    {% endif %}
                 </dd>
             </div>
             <div class="pd-meta-row">
