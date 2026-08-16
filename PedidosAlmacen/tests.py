@@ -981,6 +981,65 @@ class CrearPedidoDisponibilidadTest(TestCase):
         self.assertEqual(resp.status_code, 302)
 
 
+class CrearPedidoMixtoTest(TestCase):
+    """crear_pedido persiste es_mixto y la categoría de cada PedidoItem según lo agregado."""
+
+    def setUp(self):
+        from users.models import User
+        from django.urls import reverse
+        self.reverse = reverse
+        self.user = User.objects.create_superuser(username='mixto_u', password='x')
+        self.client.force_login(self.user)
+        self.url = self.reverse('pedidos-crear')
+
+    def _post(self, items, es_mixto, mock_stock):
+        form_data = {
+            'categoria': items[0]['categoria'],
+            'categoria_nombre': items[0]['categoria_nombre'],
+            'condicion': 'URGENTE',
+            'deposito': '2',
+            'deposito_nombre': 'Tienda Norte',
+            'items_json': json.dumps(items),
+        }
+        if es_mixto:
+            form_data['es_mixto'] = 'on'
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.obtener_categorias.return_value = []
+            mock_db.return_value.consultar_stock_multiple.return_value = mock_stock
+            return self.client.post(self.url, form_data)
+
+    def test_pedido_mixto_guarda_categoria_por_item(self):
+        from .models import Pedido
+        items = [
+            {'codigo': 'SKU1', 'descripcion': 'Producto Uno', 'cantidad': '2',
+             'referencia': '', 'puesto': '', 'ref_proveedor': '',
+             'categoria': 'CAT1', 'categoria_nombre': 'Categoría 1'},
+            {'codigo': 'SKU2', 'descripcion': 'Producto Dos', 'cantidad': '3',
+             'referencia': '', 'puesto': '', 'ref_proveedor': '',
+             'categoria': 'CAT2', 'categoria_nombre': 'Categoría 2'},
+        ]
+        resp = self._post(items, es_mixto=True, mock_stock={'SKU1': 10, 'SKU2': 10})
+        self.assertEqual(resp.status_code, 302)
+        pedido = Pedido.objects.get()
+        self.assertTrue(pedido.es_mixto)
+        self.assertEqual(pedido.categoria, 'CAT1')
+        self.assertEqual(pedido.items.get(codigo='SKU1').categoria, 'CAT1')
+        self.assertEqual(pedido.items.get(codigo='SKU2').categoria, 'CAT2')
+
+    def test_pedido_no_mixto_no_marca_es_mixto(self):
+        from .models import Pedido
+        items = [
+            {'codigo': 'SKU1', 'descripcion': 'Producto Uno', 'cantidad': '2',
+             'referencia': '', 'puesto': '', 'ref_proveedor': '',
+             'categoria': 'CAT1', 'categoria_nombre': 'Categoría 1'},
+        ]
+        resp = self._post(items, es_mixto=False, mock_stock={'SKU1': 10})
+        self.assertEqual(resp.status_code, 302)
+        pedido = Pedido.objects.get()
+        self.assertFalse(pedido.es_mixto)
+        self.assertEqual(pedido.items.get().categoria, 'CAT1')
+
+
 class ApiCrearDespachoStockTest(TestCase):
     """api_crear_despacho valida stock en depósito 1 igual que la vista clásica."""
 

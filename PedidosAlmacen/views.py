@@ -266,6 +266,7 @@ def crear_pedido(request):
         condicion = request.POST.get('condicion', '').strip()
         deposito_codigo = request.POST.get('deposito', '').strip()
         deposito_nombre = request.POST.get('deposito_nombre', '').strip()
+        es_mixto = request.POST.get('es_mixto') == 'on'
 
         try:
             items_data = json.loads(items_json)
@@ -339,17 +340,20 @@ def crear_pedido(request):
                     'condicion_inicial': condicion,
                     'deposito_inicial': deposito_codigo,
                     'deposito_nombre_inicial': deposito_nombre or deposito_codigo,
+                    'es_mixto_inicial': es_mixto,
                 })
                 return render(request, 'pedidos-crear.html', ctx)
 
+        primer_item = items_data[0]
         pedido = Pedido.objects.create(
             solicitante=request.user,
             observaciones=form.data.get('observaciones', ''),
-            categoria=categoria_codigo,
-            categoria_nombre=categoria_nombre,
+            categoria=primer_item.get('categoria') or categoria_codigo,
+            categoria_nombre=primer_item.get('categoria_nombre') or categoria_nombre,
             condicion=condicion,
             deposito=deposito_nombre or deposito_codigo,
             deposito_codigo=deposito_codigo_int,
+            es_mixto=es_mixto,
         )
 
         items = [
@@ -361,6 +365,8 @@ def crear_pedido(request):
                 puesto=item.get('puesto', ''),
                 ref_proveedor=item.get('ref_proveedor', ''),
                 cantidad_solicitada=int(item['cantidad']),
+                categoria=item.get('categoria', categoria_codigo),
+                categoria_nombre=item.get('categoria_nombre', categoria_nombre),
             )
             for item in items_data
         ]
