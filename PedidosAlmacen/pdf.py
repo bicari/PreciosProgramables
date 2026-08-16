@@ -27,6 +27,7 @@ _LABEL_CONDICION = {
     "URGENTE": "Urgente",
     "SURTIDO": "Surtido",
     "CLIENTE_RETIRA": "Cliente Retira",
+    "INSUMOS": "Insumos",
 }
 
 # Sufijo de título por variante de impresión ('' = sin sufijo).

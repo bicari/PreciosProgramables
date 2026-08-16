@@ -141,6 +141,8 @@
                     <div class="pr-metric-value text-success">Surtido</div>
                 {% elif condicion_top.condicion == 'CLIENTE_RETIRA' %}
                     <div class="pr-metric-value text-info">Cliente Retira</div>
+                {% elif condicion_top.condicion == 'INSUMOS' %}
+                    <div class="pr-metric-value">Insumos</div>
                 {% else %}
                     <div class="pr-metric-value">{{ condicion_top.condicion }}</div>
                 {% endif %}
@@ -227,6 +229,7 @@
                             {% if item.condicion == 'URGENTE' %}<span class="badge bg-danger">Urgente</span>
                             {% elif item.condicion == 'SURTIDO' %}<span class="badge bg-success">Surtido</span>
                             {% elif item.condicion == 'CLIENTE_RETIRA' %}<span class="badge bg-info text-dark">Cliente Retira</span>
+                            {% elif item.condicion == 'INSUMOS' %}<span class="badge bg-secondary">Insumos</span>
                             {% else %}<span class="badge bg-secondary">{{ item.condicion|default:"—" }}</span>{% endif %}
                         </td>
                         <td class="text-end fw-bold">{{ item.total }}</td>

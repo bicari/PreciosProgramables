@@ -144,6 +144,7 @@
                     {% if pedido.condicion == 'URGENTE' %}<span class="badge bg-danger">Urgente</span>
                     {% elif pedido.condicion == 'SURTIDO' %}<span class="badge bg-success">Surtido</span>
                     {% elif pedido.condicion == 'CLIENTE_RETIRA' %}<span class="badge bg-info">Cliente Retira</span>
+                    {% elif pedido.condicion == 'INSUMOS' %}<span class="badge bg-secondary">Insumos</span>
                     {% else %}-{% endif %}
                 </dd>
             </div>

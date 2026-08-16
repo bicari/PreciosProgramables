@@ -97,6 +97,8 @@
                         <span class="badge bg-success">Surtido</span>
                     {% elif pedido.condicion == 'CLIENTE_RETIRA' %}
                         <span class="badge bg-info text-dark">Cliente Retira</span>
+                    {% elif pedido.condicion == 'INSUMOS' %}
+                        <span class="badge bg-secondary">Insumos</span>
                     {% else %}
                         <span class="text-muted">—</span>
                     {% endif %}

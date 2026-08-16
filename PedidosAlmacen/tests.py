@@ -4142,3 +4142,24 @@ class CondicionInsumosTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         pedido_urgente.refresh_from_db()
         self.assertEqual(pedido_urgente.estado, 'PICKING')
+
+
+class BadgeInsumosTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from .models import Pedido
+        from django.urls import reverse
+        self.reverse = reverse
+        self.sup = User.objects.create_superuser(username='sup_badge_insumos', password='x')
+        self.pedido = Pedido.objects.create(
+            solicitante=self.sup, estado='PENDIENTE', condicion='INSUMOS',
+        )
+        self.client.force_login(self.sup)
+
+    def test_lista_muestra_badge_insumos(self):
+        resp = self.client.get(self.reverse('pedidos-lista'))
+        self.assertContains(resp, 'Insumos')
+
+    def test_detalle_muestra_badge_insumos(self):
+        resp = self.client.get(self.reverse('pedidos-detalle', args=[self.pedido.numero_pedido]))
+        self.assertContains(resp, 'Insumos')
