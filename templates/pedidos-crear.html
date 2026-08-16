@@ -26,6 +26,12 @@
                         <option value="{{ cat.0 }}" data-nombre="{{ cat.1 }}">{{ cat.1 }}</option>
                         {% endfor %}
                     </select>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="checkbox-mixto" name="es_mixto">
+                        <label class="form-check-label small" for="checkbox-mixto">
+                            Pedido mixto (varias categorías)
+                        </label>
+                    </div>
                 </div>
                 <div class="col-md-4">
                     <label for="selector-condicion" class="form-label fw-bold">Condicion <span class="text-danger">*</span></label>
@@ -344,7 +350,8 @@ window._rehidratarPedido = {
     categoriaNombre: "{{ categoria_nombre_inicial|escapejs }}",
     condicion: "{{ condicion_inicial|escapejs }}",
     deposito: "{{ deposito_inicial|escapejs }}",
-    depositoNombre: "{{ deposito_nombre_inicial|escapejs }}"
+    depositoNombre: "{{ deposito_nombre_inicial|escapejs }}",
+    esMixto: {{ es_mixto_inicial|yesno:"true,false" }}
 };
 </script>
 {% endif %}
@@ -404,11 +411,15 @@ function seleccionarCategoria(select) {
 }
 
 function bloquearCategoria() {
+    const esMixto = document.getElementById('checkbox-mixto').checked;
     if (!categoriaFijada && itemsPedido.length > 0) {
         categoriaFijada = true;
-        document.getElementById('selector-categoria').disabled = true;
+        if (!esMixto) {
+            document.getElementById('selector-categoria').disabled = true;
+        }
         document.getElementById('selector-condicion').disabled = true;
         document.getElementById('selector-deposito').disabled = true;
+        document.getElementById('checkbox-mixto').disabled = true;
         document.getElementById('info-categoria').classList.remove('alert-warning');
         document.getElementById('info-categoria').classList.add('alert-success');
     } else if (itemsPedido.length === 0) {
@@ -416,6 +427,7 @@ function bloquearCategoria() {
         document.getElementById('selector-categoria').disabled = false;
         document.getElementById('selector-condicion').disabled = false;
         document.getElementById('selector-deposito').disabled = false;
+        document.getElementById('checkbox-mixto').disabled = false;
         document.getElementById('info-categoria').classList.remove('alert-success');
         document.getElementById('info-categoria').classList.add('alert-warning');
     }
@@ -430,7 +442,13 @@ function agregarItem(codigo, descripcion, referencia, puesto, ref_proveedor, can
         targetIdx = itemsPedido.indexOf(existe);
         renderItems();
     } else {
-        itemsPedido.push({ codigo, descripcion, referencia: referencia || '', puesto: puesto || '', ref_proveedor: ref_proveedor || '', cantidad });
+        itemsPedido.push({
+            codigo, descripcion,
+            referencia: referencia || '', puesto: puesto || '', ref_proveedor: ref_proveedor || '',
+            cantidad,
+            categoria: document.getElementById('campo-categoria').value,
+            categoria_nombre: document.getElementById('campo-categoria-nombre').value,
+        });
         targetIdx = itemsPedido.length - 1;
         renderItems();
     }
@@ -592,6 +610,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.getElementById('selector-condicion').value = datos.condicion;
     document.getElementById('selector-deposito').value = datos.deposito;
+    document.getElementById('checkbox-mixto').checked = !!datos.esMixto;
     validarFormulario();
 
     itemsPedido = datos.items.map(function(item) {

@@ -1040,6 +1040,19 @@ class CrearPedidoMixtoTest(TestCase):
         self.assertEqual(pedido.items.get().categoria, 'CAT1')
 
 
+class CrearPedidoTemplateMixtoTest(TestCase):
+    def test_checkbox_mixto_presente(self):
+        from users.models import User
+        from django.urls import reverse
+        user = User.objects.create_superuser(username='tpl_mixto_u', password='x')
+        self.client.force_login(user)
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.obtener_categorias.return_value = []
+            resp = self.client.get(reverse('pedidos-crear'))
+        self.assertContains(resp, 'id="checkbox-mixto"')
+        self.assertContains(resp, 'name="es_mixto"')
+
+
 class ApiCrearDespachoStockTest(TestCase):
     """api_crear_despacho valida stock en depósito 1 igual que la vista clásica."""
 
