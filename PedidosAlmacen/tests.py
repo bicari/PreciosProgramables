@@ -691,6 +691,7 @@ class ReportePorCategoriaMixtoTest(TestCase):
         self.sup = User.objects.create_superuser(username='sup_rep_mixto', password='x')
         self.pedido = Pedido.objects.create(
             solicitante=self.sup, estado='PENDIENTE', es_mixto=True,
+            condicion='URGENTE',
             categoria='CAT1', categoria_nombre='Categoría 1',
         )
         PedidoItem.objects.create(
@@ -722,6 +723,22 @@ class ReportePorCategoriaMixtoTest(TestCase):
         resp = self.client.get(self.reverse('pedidos-reporte'))
         conteos = {fila['categoria']: fila['total'] for fila in resp.context['por_categoria']}
         self.assertEqual(conteos.get('CAT1'), 1)
+
+    def test_filtro_por_categoria_no_infla_por_estado_ni_condicion_ni_condicion_top(self):
+        """El filtro por categoría introduce un JOIN contra PedidoItem en el queryset
+        `pedidos` compartido. Un pedido con 2+ ítems en la categoría filtrada no debe
+        inflar por_estado/por_condicion/condicion_top (que agregan sobre Pedido)."""
+        from .models import PedidoItem
+        PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU3', descripcion='Tres', cantidad_solicitada=1,
+            categoria='CAT1', categoria_nombre='Categoría 1',
+        )
+        resp = self.client.get(self.reverse('pedidos-reporte'), {'categoria': 'CAT1'})
+        estados = {fila['estado']: fila['total'] for fila in resp.context['por_estado']}
+        condiciones = {fila['condicion']: fila['total'] for fila in resp.context['por_condicion']}
+        self.assertEqual(estados.get('PENDIENTE'), 1)
+        self.assertEqual(condiciones.get('URGENTE'), 1)
+        self.assertEqual(resp.context['condicion_top']['total'], 1)
 
 
 class AnularDetalleTemplateTest(TestCase):

@@ -1616,14 +1616,14 @@ def reporte_pedidos(request):
     condicion_top = (
         pedidos.exclude(condicion='')
         .values('condicion')
-        .annotate(total=Count('numero_pedido'))
+        .annotate(total=Count('numero_pedido', distinct=True))
         .order_by('-total')
         .first()
     )
 
     por_estado = (
         pedidos.values('estado')
-        .annotate(total=Count('numero_pedido'))
+        .annotate(total=Count('numero_pedido', distinct=True))
         .order_by('-total')
     )
 
@@ -1637,7 +1637,7 @@ def reporte_pedidos(request):
     por_condicion = (
         pedidos.exclude(condicion='')
         .values('condicion')
-        .annotate(total=Count('numero_pedido'))
+        .annotate(total=Count('numero_pedido', distinct=True))
         .order_by('-total')
     )
 
@@ -1738,15 +1738,15 @@ def exportar_reporte_pdf(request):
         ),
         'condicion_top': (
             pedidos.exclude(condicion='')
-            .values('condicion').annotate(total=Count('numero_pedido'))
+            .values('condicion').annotate(total=Count('numero_pedido', distinct=True))
             .order_by('-total').first()
         ),
         'por_estado': list(
-            pedidos.values('estado').annotate(total=Count('numero_pedido')).order_by('-total')
+            pedidos.values('estado').annotate(total=Count('numero_pedido', distinct=True)).order_by('-total')
         ),
         'por_condicion': list(
             pedidos.exclude(condicion='').values('condicion')
-            .annotate(total=Count('numero_pedido')).order_by('-total')
+            .annotate(total=Count('numero_pedido', distinct=True)).order_by('-total')
         ),
         'por_categoria': list(
             PedidoItem.objects.filter(pedido__in=pedidos).exclude(categoria='')
