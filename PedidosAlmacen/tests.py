@@ -4083,3 +4083,62 @@ class ApiFichaProductoPedidosRelacionadosTest(TestCase):
         self.assertEqual(resp.data['pedidos_pendientes'], [])
         self.assertEqual(resp.data['pedidos_parciales'], [])
         self.assertEqual(resp.data['pedidos_backorder'], [])
+
+
+class CondicionInsumosTest(TestCase):
+    """INSUMOS es una condición válida y queda sujeta al límite normal de
+    Picking (igual que SURTIDO), a diferencia de URGENTE/CLIENTE_RETIRA."""
+
+    def setUp(self):
+        from django.utils import timezone
+        from users.models import User
+        self.timezone = timezone
+        self.sup = User.objects.create_superuser(username='sup_insumos', password='x')
+        self.picker = User.objects.create_user(username='picker_insumos', password='x')
+
+    def _crear_pedido(self, condicion, estado='ASIGNADO'):
+        from .models import Pedido, PedidoItem
+        pedido = Pedido.objects.create(
+            solicitante=self.sup, estado=estado, condicion=condicion,
+            picker=self.picker, fecha_asignacion=self.timezone.now(),
+        )
+        PedidoItem.objects.create(
+            pedido=pedido, codigo='SKU1', descripcion='P1',
+            cantidad_solicitada=5, estado='PENDIENTE',
+        )
+        return pedido
+
+    def test_condicion_insumos_es_valida(self):
+        pedido = self._crear_pedido('INSUMOS')
+        pedido.full_clean()
+        self.assertEqual(pedido.condicion, 'INSUMOS')
+
+    def test_insumos_no_exime_del_limite_de_picking(self):
+        from rest_framework.test import APIClient
+        self._crear_pedido('SURTIDO', estado='PICKING')
+        pedido_insumos = self._crear_pedido('INSUMOS', estado='ASIGNADO')
+
+        api = APIClient()
+        api.force_authenticate(user=self.sup)
+        resp = api.post(
+            f'/api/pedidos/{pedido_insumos.numero_pedido}/preparar/',
+            data={'accion': 'iniciar'}, format='json',
+        )
+        self.assertEqual(resp.status_code, 409)
+        pedido_insumos.refresh_from_db()
+        self.assertEqual(pedido_insumos.estado, 'ASIGNADO')
+
+    def test_urgente_si_exime_del_limite_de_picking(self):
+        from rest_framework.test import APIClient
+        self._crear_pedido('SURTIDO', estado='PICKING')
+        pedido_urgente = self._crear_pedido('URGENTE', estado='ASIGNADO')
+
+        api = APIClient()
+        api.force_authenticate(user=self.sup)
+        resp = api.post(
+            f'/api/pedidos/{pedido_urgente.numero_pedido}/preparar/',
+            data={'accion': 'iniciar'}, format='json',
+        )
+        self.assertEqual(resp.status_code, 200)
+        pedido_urgente.refresh_from_db()
+        self.assertEqual(pedido_urgente.estado, 'PICKING')

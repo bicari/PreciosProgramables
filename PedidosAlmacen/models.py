@@ -19,6 +19,7 @@ class Pedido(models.Model):
         ('URGENTE', 'Urgente'),
         ('SURTIDO', 'Surtido'),
         ('CLIENTE_RETIRA', 'Cliente Retira'),
+        ('INSUMOS', 'Insumos'),
     ]
     numero_pedido = models.AutoField(primary_key=True)
     solicitante = models.ForeignKey(User, on_delete=models.PROTECT, related_name='pedidos_solicitados')
