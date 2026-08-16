@@ -62,6 +62,9 @@ class Pedido(models.Model):
     )
     fecha_cierre = models.DateTimeField(null=True, blank=True)
     motivo_cierre = models.TextField(blank=True, default='')
+    # Permite combinar productos de más de una categoría en el mismo pedido;
+    # cada PedidoItem guarda su propia categoria/categoria_nombre.
+    es_mixto = models.BooleanField(default=False)
 
     def __str__(self):
         return f"Pedido #{self.numero_pedido} - {self.solicitante.username}"
@@ -84,6 +87,8 @@ class PedidoItem(models.Model):
     referencia = models.CharField(max_length=100, blank=True, default='')
     puesto = models.CharField(max_length=100, blank=True, default='')
     ref_proveedor = models.CharField(max_length=100, blank=True, default='')
+    categoria = models.CharField(max_length=70, blank=True, default='')
+    categoria_nombre = models.CharField(max_length=150, blank=True, default='')
     cantidad_solicitada = models.IntegerField()
     cantidad_preparada = models.IntegerField(null=True, blank=True)
     cantidad_despachada = models.IntegerField(default=0)

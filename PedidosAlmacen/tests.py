@@ -4163,3 +4163,25 @@ class BadgeInsumosTest(TestCase):
     def test_detalle_muestra_badge_insumos(self):
         resp = self.client.get(self.reverse('pedidos-detalle', args=[self.pedido.numero_pedido]))
         self.assertContains(resp, 'Insumos')
+
+
+class PedidoMixtoModeloTest(TestCase):
+    """Los campos nuevos existen y tienen los defaults esperados."""
+
+    def test_es_mixto_default_false(self):
+        from users.models import User
+        from .models import Pedido
+        sup = User.objects.create_superuser(username='sup_modelo_mixto', password='x')
+        pedido = Pedido.objects.create(solicitante=sup, estado='PENDIENTE')
+        self.assertFalse(pedido.es_mixto)
+
+    def test_pedidoitem_categoria_default_vacio(self):
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        sup = User.objects.create_superuser(username='sup_modelo_mixto2', password='x')
+        pedido = Pedido.objects.create(solicitante=sup, estado='PENDIENTE')
+        item = PedidoItem.objects.create(
+            pedido=pedido, codigo='SKU1', descripcion='P1', cantidad_solicitada=1,
+        )
+        self.assertEqual(item.categoria, '')
+        self.assertEqual(item.categoria_nombre, '')
