@@ -519,16 +519,19 @@ class PedidosDBISAM:
 
     def buscar_en_categoria(self, categoria, query, tipo='codigo', solo_existencia=False):
         try:
+            categorias = categoria if isinstance(categoria, (list, tuple)) else [categoria]
+            categorias_str = ','.join(f"'{c}'" for c in categorias)
+            filtro_categoria = f"FI_CATEGORIA IN ({categorias_str})"
             if tipo == 'descripcion':
                 query_upper = query.upper()
-                where = f"FI_CATEGORIA = '{categoria}' AND UPPER(FI_DESCRIPCION) LIKE '%{query_upper}%'"
+                where = f"{filtro_categoria} AND UPPER(FI_DESCRIPCION) LIKE '%{query_upper}%'"
             elif tipo == 'referencia':
-                where = f"FI_CATEGORIA = '{categoria}' AND FI_REFERENCIA = '{query}'"
+                where = f"{filtro_categoria} AND FI_REFERENCIA = '{query}'"
             elif tipo == 'ref_proveedor':
                 query_upper = query.upper()
-                where = f"FI_CATEGORIA = '{categoria}' AND UPPER(ZZCAMPO_001) LIKE '%{query_upper}%'"
+                where = f"{filtro_categoria} AND UPPER(ZZCAMPO_001) LIKE '%{query_upper}%'"
             else:
-                where = f"FI_CATEGORIA = '{categoria}' AND (FI_REFERENCIA = '{query}' OR FI_CODIGO = '{query}')"
+                where = f"{filtro_categoria} AND (FI_REFERENCIA = '{query}' OR FI_CODIGO = '{query}')"
             filtro_existencia = " AND FT_EXISTENCIA > 0" if solo_existencia else ""
             with self.connect() as conn:
                 with conn.cursor() as cursor:

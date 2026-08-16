@@ -90,6 +90,16 @@ class BuscarEnCategoriaFiltroTest(TestCase):
         sql = self._capturar_sql(solo_existencia=False)
         self.assertNotIn('FT_EXISTENCIA > 0', sql)
 
+    def test_lista_de_categorias_genera_clausula_in(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = (mock_connect.return_value.__enter__.return_value
+                      .cursor.return_value.__enter__.return_value)
+            cursor.execute.return_value.fetchmany.return_value = []
+            db.buscar_en_categoria(['CAT1', 'CAT2'], 'abc', 'descripcion')
+            sql = cursor.execute.call_args[0][0]
+        self.assertIn("FI_CATEGORIA IN ('CAT1','CAT2')", sql)
+
 
 class BuscarProductoVistaTest(TestCase):
     def setUp(self):
@@ -112,6 +122,22 @@ class BuscarProductoVistaTest(TestCase):
                         {'q': 'abc', 'categoria': 'CAT'})
         _, kwargs = mock_db.return_value.buscar_en_categoria.call_args
         self.assertFalse(kwargs.get('solo_existencia'))
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_vista_divide_categoria_por_coma_en_lista(self, mock_db):
+        mock_db.return_value.buscar_en_categoria.return_value = []
+        self.client.get('/pedidos/buscar-producto/',
+                        {'q': 'abc', 'categoria': 'CAT1,CAT2'})
+        args, _ = mock_db.return_value.buscar_en_categoria.call_args
+        self.assertEqual(args[0], ['CAT1', 'CAT2'])
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_vista_categoria_unica_sigue_siendo_lista_de_un_elemento(self, mock_db):
+        mock_db.return_value.buscar_en_categoria.return_value = []
+        self.client.get('/pedidos/buscar-producto/',
+                        {'q': 'abc', 'categoria': 'CAT'})
+        args, _ = mock_db.return_value.buscar_en_categoria.call_args
+        self.assertEqual(args[0], ['CAT'])
 
 
 class BotonAgregarBloqueoTest(TestCase):
@@ -193,6 +219,26 @@ class GenerarPedidoPDFVistaTest(TestCase):
     def test_vista_default_es_todos(self):
         from .pdf import generar_pedido_pdf
         pdf = generar_pedido_pdf(self.pedido, self.pedido.items.all())
+        self.assertTrue(pdf.startswith(b'%PDF'))
+
+    def test_genera_pdf_para_pedido_mixto(self):
+        from .pdf import generar_pedido_pdf
+        from .models import Pedido, PedidoItem
+        pedido_mixto = Pedido.objects.create(
+            solicitante=self.pedido.solicitante, categoria='CAT1',
+            categoria_nombre='Cat 1', es_mixto=True,
+        )
+        PedidoItem.objects.create(
+            pedido=pedido_mixto, codigo='A', descripcion='Articulo A',
+            cantidad_solicitada=1, estado='PENDIENTE',
+            categoria='CAT1', categoria_nombre='Cat 1',
+        )
+        PedidoItem.objects.create(
+            pedido=pedido_mixto, codigo='B', descripcion='Articulo B',
+            cantidad_solicitada=1, estado='PENDIENTE',
+            categoria='CAT2', categoria_nombre='Cat 2',
+        )
+        pdf = generar_pedido_pdf(pedido_mixto, pedido_mixto.items.all())
         self.assertTrue(pdf.startswith(b'%PDF'))
 
 
@@ -1112,7 +1158,9 @@ class CrearPedidoTemplateMixtoTest(TestCase):
             mock_db.return_value.obtener_categorias.return_value = []
             resp = self.client.get(reverse('pedidos-crear'))
         self.assertContains(resp, 'id="checkbox-mixto"')
-        self.assertContains(resp, 'name="es_mixto"')
+        self.assertContains(resp, '<input type="hidden" name="es_mixto"')
+        content = resp.content.decode()
+        self.assertNotIn('type="checkbox" id="checkbox-mixto" name="es_mixto"', content)
 
 
 class ApiCrearDespachoStockTest(TestCase):
@@ -1514,7 +1562,7 @@ class RecibirDespachoSkuExtraDuplicadoTest(TestCase):
         self.client.force_login(self.user)
         self.pedido = Pedido.objects.create(
             solicitante=self.user, estado='DESPACHADO', deposito_codigo=2,
-            condicion='URGENTE',
+            condicion='URGENTE', categoria='CAT1', categoria_nombre='Cat 1',
         )
         self.item = PedidoItem.objects.create(
             pedido=self.pedido, codigo='SKU1', descripcion='Producto Uno',
@@ -1599,6 +1647,26 @@ class RecibirDespachoSkuExtraDuplicadoTest(TestCase):
         self.assertContains(resp, 'CODIGOS_PEDIDO')
         self.assertContains(resp, 'SKU1')
 
+    def test_get_pedido_mixto_incluye_todas_las_categorias_en_categoria_pedido(self):
+        from .models import PedidoItem
+        PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU2', descripcion='Producto Dos',
+            cantidad_solicitada=3, cantidad_despachada=3, estado='DESPACHADO',
+            categoria='CAT2', categoria_nombre='Cat 2',
+        )
+        self.item.categoria = 'CAT1'
+        self.item.categoria_nombre = 'Cat 1'
+        self.item.save()
+
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode()
+        import re
+        match = re.search(r'const CATEGORIA_PEDIDO = "([^"]*)";', content)
+        self.assertIsNotNone(match)
+        categorias_render = match.group(1).split(',')
+        self.assertCountEqual(categorias_render, ['CAT1', 'CAT2'])
+
     def test_extra_sku_genuinamente_nuevo_sigue_funcionando(self):
         with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
             mock_db.return_value.insertar_traslado_recepcion.return_value = None
@@ -1611,6 +1679,8 @@ class RecibirDespachoSkuExtraDuplicadoTest(TestCase):
         self.assertEqual(extra.estado, 'INCIDENCIA')
         self.assertEqual(extra.cantidad_solicitada, 0)
         self.assertEqual(extra.cantidad_recibida, 2)
+        self.assertEqual(extra.categoria, self.pedido.categoria)
+        self.assertEqual(extra.categoria_nombre, self.pedido.categoria_nombre)
         mock_db.return_value.insertar_traslado_recepcion.assert_called_once_with(
             self.pedido.numero_pedido, 10, 2,
             [{'codigo': 'SKU1', 'cantidad': 5}, {'codigo': 'SKU9', 'cantidad': 2}],
@@ -3462,6 +3532,7 @@ class ReporteItemsTest(TestCase):
             pedido=self.pedido1, codigo='01120044', descripcion='Tubo PVC 1/2"',
             cantidad_solicitada=40, cantidad_preparada=40, cantidad_despachada=25,
             cantidad_recibida=25, cantidad_back_order=15, estado='PARCIAL',
+            categoria='FERR', categoria_nombre='Ferretería',
         )
         self.pedido2 = Pedido.objects.create(
             solicitante=self.supervisor, estado='PENDIENTE',
@@ -3471,6 +3542,7 @@ class ReporteItemsTest(TestCase):
             pedido=self.pedido2, codigo='01120044', descripcion='Tubo PVC 1/2"',
             cantidad_solicitada=10, cantidad_preparada=0, cantidad_despachada=0,
             cantidad_recibida=0, cantidad_back_order=0, estado='PENDIENTE',
+            categoria='FERR', categoria_nombre='Ferretería',
         )
         # Código 02030011: 1 solo pedido, categoría distinta -> no debe agruparse
         self.pedido3 = Pedido.objects.create(
@@ -3481,6 +3553,7 @@ class ReporteItemsTest(TestCase):
             pedido=self.pedido3, codigo='02030011', descripcion='Cemento gris',
             cantidad_solicitada=80, cantidad_preparada=80, cantidad_despachada=80,
             cantidad_recibida=80, cantidad_back_order=0, estado='RECIBIDO',
+            categoria='PLOM', categoria_nombre='Plomería',
         )
         # Pedido anulado -> su item nunca debe aparecer
         self.pedido_anulado = Pedido.objects.create(
@@ -3542,6 +3615,38 @@ class ReporteItemsTest(TestCase):
         resp = self.client.get(self.reverse('pedidos-reporte-items'), {'categoria': 'PLOM'})
         codigos = [g['codigo'] for g in resp.context['grupos']]
         self.assertEqual(codigos, ['02030011'])
+
+    def test_filtro_por_categoria_en_pedido_mixto_usa_categoria_de_la_linea(self):
+        """Un pedido mixto tiene items con categorías distintas entre sí; el
+        filtro debe mirar la categoría de cada línea (PedidoItem.categoria),
+        no la categoría de cabecera del pedido (Pedido.categoria)."""
+        from .models import Pedido, PedidoItem
+        pedido_mixto = Pedido.objects.create(
+            solicitante=self.supervisor, estado='PENDIENTE',
+            categoria='FERR', categoria_nombre='Ferretería', es_mixto=True,
+        )
+        PedidoItem.objects.create(
+            pedido=pedido_mixto, codigo='LINEA-FERR', descripcion='Linea Ferretería',
+            cantidad_solicitada=5, estado='PENDIENTE',
+            categoria='FERR', categoria_nombre='Ferretería',
+        )
+        PedidoItem.objects.create(
+            pedido=pedido_mixto, codigo='LINEA-PLOM', descripcion='Linea Plomería',
+            cantidad_solicitada=5, estado='PENDIENTE',
+            categoria='PLOM', categoria_nombre='Plomería',
+        )
+
+        self.client.force_login(self.supervisor)
+
+        resp_plom = self.client.get(self.reverse('pedidos-reporte-items'), {'categoria': 'PLOM'})
+        codigos_plom = [g['codigo'] for g in resp_plom.context['grupos']]
+        self.assertIn('LINEA-PLOM', codigos_plom)
+        self.assertNotIn('LINEA-FERR', codigos_plom)
+
+        resp_ferr = self.client.get(self.reverse('pedidos-reporte-items'), {'categoria': 'FERR'})
+        codigos_ferr = [g['codigo'] for g in resp_ferr.context['grupos']]
+        self.assertIn('LINEA-FERR', codigos_ferr)
+        self.assertNotIn('LINEA-PLOM', codigos_ferr)
 
     def test_filtro_por_estado(self):
         self.client.force_login(self.supervisor)
@@ -3768,6 +3873,7 @@ class ExportarReporteItemsTest(TestCase):
             pedido=self.pedido1, codigo='01120044', descripcion='Tubo PVC 1/2"',
             cantidad_solicitada=40, cantidad_preparada=40, cantidad_despachada=25,
             cantidad_recibida=25, cantidad_back_order=15, estado='PARCIAL',
+            categoria='FERR', categoria_nombre='Ferretería',
         )
         self.pedido2 = Pedido.objects.create(
             solicitante=self.supervisor, estado='PENDIENTE',
@@ -3777,6 +3883,7 @@ class ExportarReporteItemsTest(TestCase):
             pedido=self.pedido2, codigo='01120044', descripcion='Tubo PVC 1/2"',
             cantidad_solicitada=10, cantidad_preparada=0, cantidad_despachada=0,
             cantidad_recibida=0, cantidad_back_order=0, estado='PENDIENTE',
+            categoria='FERR', categoria_nombre='Ferretería',
         )
         self.pedido3 = Pedido.objects.create(
             solicitante=self.supervisor, estado='RECIBIDO',
@@ -3786,6 +3893,7 @@ class ExportarReporteItemsTest(TestCase):
             pedido=self.pedido3, codigo='02030011', descripcion='Cemento gris',
             cantidad_solicitada=80, cantidad_preparada=80, cantidad_despachada=80,
             cantidad_recibida=80, cantidad_back_order=0, estado='RECIBIDO',
+            categoria='PLOM', categoria_nombre='Plomería',
         )
 
     def test_no_supervisor_redirige_csv(self):

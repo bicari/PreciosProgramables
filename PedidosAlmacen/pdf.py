@@ -475,7 +475,7 @@ def generar_pedido_pdf(pedido, items, vista: str = "todos", mostrar_cantidades: 
     col_izq = [
         _fila("Solicitante:", solicitante),
         _fila("Despachador:", despachador),
-        _fila("Categoria:", pedido.categoria or "-"),
+        _fila("Categoria:", "Mixto" if pedido.es_mixto else (pedido.categoria or "-")),
         _fila("Deposito origen:", pedido.deposito or "-"),
     ]
     col_der = [

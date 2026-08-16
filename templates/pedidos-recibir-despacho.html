@@ -343,7 +343,7 @@
 <script>
 const URL_VERIFICAR = "{% url 'pedidos-verificar-autorizacion' %}";
 const URL_BUSCAR    = "{% url 'pedidos-buscar-producto' %}";
-const CATEGORIA_PEDIDO = "{{ pedido.categoria|escapejs }}";
+const CATEGORIA_PEDIDO = "{{ categorias_pedido|escapejs }}";
 const CATEGORIA_NOMBRE = "{{ pedido.categoria_nombre|escapejs }}";
 const CODIGOS_PEDIDO = [{% for di in despacho_items %}{% if di.pedido_item %}"{{ di.pedido_item.codigo|escapejs }}",{% endif %}{% endfor %}].map(c => c.trim().toUpperCase());
 const CSRF = document.querySelector('[name=csrfmiddlewaretoken]').value;

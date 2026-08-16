@@ -27,7 +27,7 @@
                         {% endfor %}
                     </select>
                     <div class="form-check mt-2">
-                        <input class="form-check-input" type="checkbox" id="checkbox-mixto" name="es_mixto">
+                        <input class="form-check-input" type="checkbox" id="checkbox-mixto" onchange="sincronizarMixto()">
                         <label class="form-check-label small" for="checkbox-mixto">
                             Pedido mixto (varias categorías)
                         </label>
@@ -155,6 +155,7 @@
         <input type="hidden" name="condicion" id="campo-condicion" value="">
         <input type="hidden" name="deposito" id="campo-deposito" value="">
         <input type="hidden" name="deposito_nombre" id="campo-deposito-nombre" value="">
+        <input type="hidden" name="es_mixto" id="campo-es-mixto" value="">
 
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -410,6 +411,11 @@ function seleccionarCategoria(select) {
     habilitarBusqueda();
 }
 
+function sincronizarMixto() {
+    document.getElementById('campo-es-mixto').value =
+        document.getElementById('checkbox-mixto').checked ? 'on' : '';
+}
+
 function bloquearCategoria() {
     const esMixto = document.getElementById('checkbox-mixto').checked;
     if (!categoriaFijada && itemsPedido.length > 0) {
@@ -419,6 +425,7 @@ function bloquearCategoria() {
         }
         document.getElementById('selector-condicion').disabled = true;
         document.getElementById('selector-deposito').disabled = true;
+        sincronizarMixto();
         document.getElementById('checkbox-mixto').disabled = true;
         document.getElementById('info-categoria').classList.remove('alert-warning');
         document.getElementById('info-categoria').classList.add('alert-success');
@@ -611,6 +618,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('selector-condicion').value = datos.condicion;
     document.getElementById('selector-deposito').value = datos.deposito;
     document.getElementById('checkbox-mixto').checked = !!datos.esMixto;
+    sincronizarMixto();
     validarFormulario();
 
     itemsPedido = datos.items.map(function(item) {

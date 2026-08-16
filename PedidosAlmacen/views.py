@@ -1288,6 +1288,8 @@ def recibir_despacho(request, pk, despacho_id):
                             cantidad_recibida=cantidad,
                             estado='INCIDENCIA',
                             observacion='SKU no contemplado en el pedido original',
+                            categoria=pedido.categoria,
+                            categoria_nombre=pedido.categoria_nombre,
                         )
                         di_extra = DespachoItem(
                             despacho=despacho,
@@ -1384,12 +1386,18 @@ def recibir_despacho(request, pk, despacho_id):
         messages.success(request, f'Recepción del Despacho #{despacho_id} registrada correctamente')
         return redirect('pedidos-detalle', pk=pk)
 
+    categorias_pedido = list(
+        pedido.items.exclude(categoria='').values_list('categoria', flat=True).distinct()
+    )
+    categorias_pedido_str = ','.join(categorias_pedido) if categorias_pedido else pedido.categoria
+
     return render(request, 'pedidos-recibir-despacho.html', {
         'pedido': pedido,
         'despacho': despacho,
         'despacho_items': despacho_items,
         'ver_despachado': is_pedidos_supervisor(request.user) or is_pedidos_almacen(request.user),
         'items_fuera_despacho': _items_pedido_fuera_despacho(pedido, despacho),
+        'categorias_pedido': categorias_pedido_str,
     })
 
 
@@ -1509,10 +1517,12 @@ def buscar_producto(request):
     if len(query) < 2:
         return HttpResponse('')
 
+    categorias_lista = [c.strip() for c in categoria.split(',') if c.strip()]
+
     try:
         dbisam = PedidosDBISAM()
         resultados_raw = dbisam.buscar_en_categoria(
-            categoria, query, tipo, solo_existencia=solo_existencia)
+            categorias_lista, query, tipo, solo_existencia=solo_existencia)
     except Exception:
         resultados_raw = []
 
@@ -1982,7 +1992,7 @@ def _construir_grupos_reporte_items(request, emitir_mensajes=True):
         codigos_lista = [c.strip() for c in codigos_raw.split(',') if c.strip()]
         items = items.filter(codigo__in=codigos_lista)
     if categoria_filtro:
-        items = items.filter(pedido__categoria=categoria_filtro)
+        items = items.filter(categoria=categoria_filtro)
     if estado_filtro == 'BACK_ORDER':
         items = items.filter(cantidad_back_order__gt=0).exclude(estado='CERRADO')
     elif estado_filtro:
@@ -2079,8 +2089,8 @@ def reporte_items(request):
     grupos, filtros = _construir_grupos_reporte_items(request, emitir_mensajes=True)
 
     categorias_disponibles = (
-        Pedido.objects.exclude(categoria='')
-        .exclude(estado='ANULADO')
+        PedidoItem.objects.filter(pedido__in=Pedido.objects.exclude(estado='ANULADO'))
+        .exclude(categoria='')
         .values('categoria')
         .annotate(nombre=Max('categoria_nombre'))
         .order_by('categoria')
