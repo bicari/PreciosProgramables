@@ -181,6 +181,22 @@ def _puede_vista_pedido(user, vista: str) -> bool:
     return True
 
 
+def _resolver_vistas_pedido(claves):
+    """Normaliza la lista de variantes pedidas (?vista=... repetido).
+
+    - Descarta claves que no existen en VISTAS_PEDIDO.
+    - Deduplica preservando el orden canonico de VISTAS_PEDIDO (no el de
+      llegada), para que titulo/nombre de archivo/orden de filas sean
+      deterministas sin importar como el usuario marco los checkboxes.
+    - Si 'todos' esta entre las elegidas, es superconjunto: colapsa a ['todos'].
+    - Si no queda ninguna clave valida, cae a ['todos'].
+    """
+    validas = {c for c in claves if c in VISTAS_PEDIDO}
+    if not validas or 'todos' in validas:
+        return ['todos']
+    return [clave for clave in VISTAS_PEDIDO if clave in validas]
+
+
 def _pickers_disponibles():
     """Pickers activos anotados con su carga actual (pedidos ASIGNADO/PICKING en cola), ordenados por menor carga."""
     from users.models import User as UserModel
@@ -1882,21 +1898,25 @@ def exportar_pedido_pdf(request, pk):
         messages.error(request, 'No tienes permiso para descargar este pedido')
         return redirect('pedidos-lista')
 
-    vista = request.GET.get('vista', 'todos')
-    if vista not in VISTAS_PEDIDO:
-        vista = 'todos'
-    if not _puede_vista_pedido(request.user, vista):
+    vistas = _resolver_vistas_pedido(request.GET.getlist('vista') or ['todos'])
+    if not all(_puede_vista_pedido(request.user, v) for v in vistas):
         messages.error(request, 'No tienes permiso para imprimir esa variante del pedido')
         return redirect('pedidos-detalle', pk=pk)
 
     items = pedido.items.all()
-    estado_filtro = VISTAS_PEDIDO[vista]['estado']
-    if estado_filtro is not None:
-        items = items.filter(estado=estado_filtro)
+    if vistas != ['todos']:
+        estados_filtro = [VISTAS_PEDIDO[v]['estado'] for v in vistas]
+        items = items.filter(estado__in=estados_filtro)
+        # Orden por el orden canonico de las vistas elegidas, no alfabetico.
+        orden_estado = Case(
+            *[When(estado=estado, then=Value(i)) for i, estado in enumerate(estados_filtro)],
+            output_field=IntegerField(),
+        )
+        items = items.order_by(orden_estado, 'id')
 
     mostrar_cantidades = is_pedidos_almacen(request.user) or is_pedidos_supervisor(request.user)
     pdf_bytes = None
-    if vista == 'todos':
+    if vistas == ['todos']:
         from formatos import contratos
         from formatos.generacion import generar_pdf as generar_pdf_formato
         pdf_bytes = generar_pdf_formato(
@@ -1904,9 +1924,9 @@ def exportar_pedido_pdf(request, pk):
             contratos.datos_pedido(pedido, items, mostrar_cantidades=mostrar_cantidades),
         )
     if pdf_bytes is None:
-        pdf_bytes = generar_pedido_pdf(pedido, items, vista=vista, mostrar_cantidades=mostrar_cantidades)
+        pdf_bytes = generar_pedido_pdf(pedido, items, vistas=vistas, mostrar_cantidades=mostrar_cantidades)
 
-    sufijo = '' if vista == 'todos' else f'_{vista}'
+    sufijo = '' if vistas == ['todos'] else '_' + '-'.join(vistas)
     nombre_archivo = f"pedido_{pedido.numero_pedido}{sufijo}.pdf"
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'

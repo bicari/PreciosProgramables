@@ -28,10 +28,51 @@
                         {% endif %}
                     {% endfor %}
                 </div>
+
+                <hr class="my-3">
+
+                <p class="text-muted small mb-2">O combina varios estados en un solo PDF:</p>
+                <form method="get" action="{% url 'pedidos-pdf' pedido.numero_pedido %}" id="formPdfCombinado">
+                    {% for v in vistas_pdf %}
+                        {% if v.clave != 'todos' %}
+                        <div class="form-check d-flex justify-content-between align-items-center">
+                            <span>
+                                <input class="form-check-input pdf-combinado-check" type="checkbox"
+                                       name="vista" value="{{ v.clave }}" id="pdfCombinado-{{ v.clave }}"
+                                       {% if v.count == 0 %}disabled{% endif %}>
+                                <label class="form-check-label" for="pdfCombinado-{{ v.clave }}">
+                                    {{ v.label }}
+                                </label>
+                            </span>
+                            <span class="badge bg-{% if v.count > 0 %}secondary{% else %}light text-muted{% endif %} rounded-pill">{{ v.count }}</span>
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                    <div class="d-flex justify-content-end mt-3">
+                        <button type="submit" class="btn btn-primary btn-sm" id="btnPdfCombinado" disabled>
+                            <i class="fas fa-file-pdf"></i> Generar PDF combinado
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
 </div>
+<script>
+(function () {
+    var checks = document.querySelectorAll('.pdf-combinado-check');
+    var boton = document.getElementById('btnPdfCombinado');
+    if (!boton) return;
+    function actualizarBoton() {
+        var marcados = Array.prototype.filter.call(checks, function (c) { return c.checked; });
+        boton.disabled = marcados.length === 0;
+    }
+    Array.prototype.forEach.call(checks, function (c) {
+        c.addEventListener('change', actualizarBoton);
+    });
+    actualizarBoton();
+})();
+</script>
 
 <!-- HEADER OSCURO DEL PEDIDO -->
 <div class="pd-header">

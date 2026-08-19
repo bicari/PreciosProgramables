@@ -213,7 +213,7 @@ class GenerarPedidoPDFVistaTest(TestCase):
     def test_genera_pdf_para_cada_vista(self):
         from .pdf import generar_pedido_pdf
         for vista in ['todos', 'despachado', 'back_order', 'recibido', 'parcial']:
-            pdf = generar_pedido_pdf(self.pedido, self.pedido.items.all(), vista=vista)
+            pdf = generar_pedido_pdf(self.pedido, self.pedido.items.all(), vistas=[vista])
             self.assertTrue(pdf.startswith(b'%PDF'), f'vista={vista} no produjo PDF')
 
     def test_vista_default_es_todos(self):
@@ -239,6 +239,41 @@ class GenerarPedidoPDFVistaTest(TestCase):
             categoria='CAT2', categoria_nombre='Cat 2',
         )
         pdf = generar_pedido_pdf(pedido_mixto, pedido_mixto.items.all())
+        self.assertTrue(pdf.startswith(b'%PDF'))
+
+    def test_acepta_lista_de_vistas_para_combinar_estados(self):
+        from .pdf import generar_pedido_pdf
+        from .models import Pedido, PedidoItem
+        pedido = Pedido.objects.create(solicitante=self.pedido.solicitante)
+        PedidoItem.objects.create(
+            pedido=pedido, codigo='A', descripcion='Articulo A',
+            cantidad_solicitada=5, estado='DESPACHADO', cantidad_despachada=5,
+        )
+        PedidoItem.objects.create(
+            pedido=pedido, codigo='B', descripcion='Articulo B',
+            cantidad_solicitada=3, estado='BACK_ORDER', cantidad_back_order=3,
+        )
+        pdf = generar_pedido_pdf(pedido, pedido.items.all(), vistas=['despachado', 'back_order'])
+        self.assertTrue(pdf.startswith(b'%PDF'))
+
+    def test_combina_tres_vistas_sin_desbordar_ancho(self):
+        """Caso mas exigente: parcial + recibido aporta 3 columnas de cantidad."""
+        from .pdf import generar_pedido_pdf
+        from .models import Pedido, PedidoItem
+        pedido = Pedido.objects.create(solicitante=self.pedido.solicitante)
+        PedidoItem.objects.create(
+            pedido=pedido, codigo='A', descripcion='Articulo A',
+            cantidad_solicitada=5, estado='PARCIAL',
+            cantidad_despachada=2, cantidad_back_order=3,
+        )
+        PedidoItem.objects.create(
+            pedido=pedido, codigo='B', descripcion='Articulo B',
+            cantidad_solicitada=4, estado='RECIBIDO', cantidad_recibida=4,
+        )
+        pdf = generar_pedido_pdf(
+            pedido, pedido.items.all(),
+            vistas=['despachado', 'back_order', 'recibido'],
+        )
         self.assertTrue(pdf.startswith(b'%PDF'))
 
 
@@ -272,7 +307,7 @@ class ExportarPedidoVistaTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         args, kwargs = mock_pdf.call_args
         self.assertEqual([i.estado for i in args[1]], ['DESPACHADO'])
-        self.assertEqual(kwargs.get('vista'), 'despachado')
+        self.assertEqual(kwargs.get('vistas'), ['despachado'])
 
     @patch('PedidosAlmacen.views.generar_pedido_pdf', return_value=b'%PDF-x')
     def test_vista_invalida_cae_a_todos(self, mock_pdf):
@@ -281,7 +316,7 @@ class ExportarPedidoVistaTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         args, kwargs = mock_pdf.call_args
         self.assertEqual(len(list(args[1])), 4)
-        self.assertEqual(kwargs.get('vista'), 'todos')
+        self.assertEqual(kwargs.get('vistas'), ['todos'])
 
     @patch('PedidosAlmacen.views.generar_pedido_pdf', return_value=b'%PDF-x')
     def test_tienda_no_puede_despachado(self, mock_pdf):
@@ -310,6 +345,65 @@ class ExportarPedidoVistaTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         args, _ = mock_pdf.call_args
         self.assertEqual(len(list(args[1])), 0)
+
+    @patch('PedidosAlmacen.views.generar_pedido_pdf', return_value=b'%PDF-x')
+    def test_combina_varios_estados(self, mock_pdf):
+        self.client.force_login(self.almacen)
+        url = self.reverse('pedidos-pdf', args=[self.pedido.numero_pedido]) + '?vista=despachado&vista=back_order'
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        args, kwargs = mock_pdf.call_args
+        self.assertEqual(
+            sorted(i.estado for i in args[1]),
+            sorted(['DESPACHADO', 'BACK_ORDER']),
+        )
+        self.assertEqual(kwargs.get('vistas'), ['despachado', 'back_order'])
+
+    @patch('PedidosAlmacen.views.generar_pedido_pdf', return_value=b'%PDF-x')
+    def test_combinacion_se_normaliza_a_orden_canonico(self, mock_pdf):
+        self.client.force_login(self.almacen)
+        url = self.reverse('pedidos-pdf', args=[self.pedido.numero_pedido]) + '?vista=back_order&vista=despachado'
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        _, kwargs = mock_pdf.call_args
+        self.assertEqual(kwargs.get('vistas'), ['despachado', 'back_order'])
+
+    @patch('PedidosAlmacen.views.generar_pedido_pdf', return_value=b'%PDF-x')
+    def test_todos_junto_a_otra_vista_colapsa_a_todos(self, mock_pdf):
+        self.client.force_login(self.almacen)
+        url = self.reverse('pedidos-pdf', args=[self.pedido.numero_pedido]) + '?vista=todos&vista=despachado'
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        args, kwargs = mock_pdf.call_args
+        self.assertEqual(kwargs.get('vistas'), ['todos'])
+        self.assertEqual(len(list(args[1])), 4)
+
+    @patch('PedidosAlmacen.views.generar_pedido_pdf', return_value=b'%PDF-x')
+    def test_clave_invalida_mezclada_se_ignora(self, mock_pdf):
+        self.client.force_login(self.almacen)
+        url = self.reverse('pedidos-pdf', args=[self.pedido.numero_pedido]) + '?vista=noexiste&vista=recibido'
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        _, kwargs = mock_pdf.call_args
+        self.assertEqual(kwargs.get('vistas'), ['recibido'])
+
+    @patch('PedidosAlmacen.views.generar_pedido_pdf', return_value=b'%PDF-x')
+    def test_tienda_no_puede_combinar_con_estado_prohibido(self, mock_pdf):
+        self.client.force_login(self.tienda)
+        url = self.reverse('pedidos-pdf', args=[self.pedido.numero_pedido]) + '?vista=recibido&vista=despachado'
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 302)
+        mock_pdf.assert_not_called()
+
+    @patch('PedidosAlmacen.views.generar_pedido_pdf', return_value=b'%PDF-x')
+    def test_nombre_archivo_combina_sufijos(self, mock_pdf):
+        self.client.force_login(self.almacen)
+        url = self.reverse('pedidos-pdf', args=[self.pedido.numero_pedido]) + '?vista=despachado&vista=back_order'
+        resp = self.client.get(url)
+        self.assertIn(
+            f'pedido_{self.pedido.numero_pedido}_despachado-back_order.pdf',
+            resp['Content-Disposition'],
+        )
 
 
 class DetallePedidoVistasPdfTest(TestCase):
@@ -351,18 +445,28 @@ class DetallePedidoVistasPdfTest(TestCase):
 
 
 class DetallePedidoModalTest(TestCase):
-    def test_detalle_incluye_modal_y_variantes(self):
+    def setUp(self):
         from users.models import User
         from .models import Pedido, PedidoItem
-        from django.urls import reverse
-        almacen = User.objects.create_superuser(username='alm3', password='x')
-        pedido = Pedido.objects.create(solicitante=almacen)
-        PedidoItem.objects.create(pedido=pedido, codigo='A', descripcion='a',
+        self.almacen = User.objects.create_superuser(username='alm3', password='x')
+        self.pedido = Pedido.objects.create(solicitante=self.almacen)
+        PedidoItem.objects.create(pedido=self.pedido, codigo='A', descripcion='a',
                                   cantidad_solicitada=1, estado='DESPACHADO')
-        self.client.force_login(almacen)
-        resp = self.client.get(reverse('pedidos-detalle', args=[pedido.numero_pedido]))
+
+    def test_detalle_incluye_modal_y_variantes(self):
+        from django.urls import reverse
+        self.client.force_login(self.almacen)
+        resp = self.client.get(reverse('pedidos-detalle', args=[self.pedido.numero_pedido]))
         self.assertContains(resp, 'modalImprimirPedido')
         self.assertContains(resp, 'vista=despachado')
+
+    def test_modal_incluye_form_de_combinacion_con_checkboxes(self):
+        from django.urls import reverse
+        self.client.force_login(self.almacen)
+        resp = self.client.get(reverse('pedidos-detalle', args=[self.pedido.numero_pedido]))
+        self.assertContains(resp, 'formPdfCombinado')
+        self.assertContains(resp, 'name="vista"')
+        self.assertContains(resp, 'value="despachado"')
 
 
 class AnulacionModeloTest(TestCase):

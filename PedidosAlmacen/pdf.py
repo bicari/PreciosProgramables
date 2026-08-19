@@ -51,6 +51,13 @@ _VISTA_WIDTHS = {
     1: [50, 150, 65, 52, 52, 45, 48, 80],
     2: [48, 132, 60, 48, 48, 42, 44, 44, 76],
 }
+# Anchos cuando se combinan 2+ vistas: se agrega columna "Estado" antes de Observacion.
+# Cols fijas: Codigo, Descripcion, Referencia, Puesto, Ref.Prov, Solicitado, <cant...>, Estado, Observacion
+_MULTI_VISTA_WIDTHS = {
+    1: [48, 130, 60, 48, 48, 42, 46, 58, 62],
+    2: [46, 116, 55, 44, 44, 40, 42, 42, 55, 58],
+    3: [44, 100, 50, 42, 42, 38, 38, 38, 38, 52, 60],
+}
 
 
 def _kpi_card(titulo: str, valor: str, color) -> Table:
@@ -399,19 +406,24 @@ def generar_reporte_pickers_pdf(ctx: dict) -> bytes:
     return pdf_bytes
 
 
-def generar_pedido_pdf(pedido, items, vista: str = "todos", mostrar_cantidades: bool = False) -> bytes:
+def generar_pedido_pdf(pedido, items, vistas=("todos",), mostrar_cantidades: bool = False) -> bytes:
     """
     Genera el PDF de un pedido individual.
 
     Args:
         pedido: Instancia del modelo Pedido.
         items: QuerySet o lista de PedidoItem relacionados al pedido.
+        vistas: Secuencia de claves de variante de impresion (ver _VISTA_LABEL).
+            Con una sola vista filtrada, el PDF es identico al de antes de
+            soportar combinaciones. Con dos o mas, se agrega una columna
+            "Estado" y se unen las columnas de cantidad de cada vista.
         mostrar_cantidades: Si es True, incluye las columnas de cantidad
             despachada y recibida (solo para usuarios con privilegios).
 
     Returns:
         Bytes del PDF generado.
     """
+    vistas = list(vistas)
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=LETTER,
@@ -446,7 +458,9 @@ def generar_pedido_pdf(pedido, items, vista: str = "todos", mostrar_cantidades: 
     estado_label = _LABEL_ESTADO.get(pedido.estado, pedido.estado)
     condicion_label = _LABEL_CONDICION.get(pedido.condicion, pedido.condicion) if pedido.condicion else "-"
 
-    sufijo_vista = _VISTA_LABEL.get(vista, "")
+    sufijo_vista = ", ".join(
+        label for label in (_VISTA_LABEL.get(v, "") for v in vistas) if label
+    )
     titulo_pedido = f"Pedido de Almacen  #{pedido.numero_pedido}"
     if sufijo_vista:
         titulo_pedido += f"  —  {sufijo_vista}"
@@ -548,9 +562,22 @@ def generar_pedido_pdf(pedido, items, vista: str = "todos", mostrar_cantidades: 
     # Ancho util = 542 pt (612 - margenes 35*2)
     # Sin cantidades: 55+175+75+60+60+47+70 = 542
     # Con cantidades: 50+148+68+55+55+42+40+44+40 = 542
-    es_filtrada = vista in _VISTA_CANTIDADES
+    # Union de columnas de cantidad de las vistas seleccionadas, deduplicada
+    # y en el orden canonico Despachado -> Back Order -> Recibido.
+    cantidad_cols = []
+    _attrs_vistos = set()
+    for v in vistas:
+        for encabezado, attr in _VISTA_CANTIDADES.get(v, []):
+            if attr not in _attrs_vistos:
+                cantidad_cols.append((encabezado, attr))
+                _attrs_vistos.add(attr)
+
+    es_filtrada = bool(cantidad_cols)
+    # Con 2+ vistas combinadas se agrega la columna "Estado" para distinguir
+    # filas; con una sola vista filtrada el PDF queda igual que antes.
+    es_multi = es_filtrada and len(vistas) >= 2
+
     if es_filtrada:
-        cantidad_cols = _VISTA_CANTIDADES[vista]
         cabeceras = [
             Paragraph("Codigo", st_th),
             Paragraph("Descripcion", st_th),
@@ -561,8 +588,11 @@ def generar_pedido_pdf(pedido, items, vista: str = "todos", mostrar_cantidades: 
         ]
         for encabezado, _attr in cantidad_cols:
             cabeceras.append(Paragraph(encabezado, st_th))
+        if es_multi:
+            cabeceras.append(Paragraph("Estado", st_th))
         cabeceras.append(Paragraph("Observacion", st_th))
-        col_widths = _VISTA_WIDTHS[len(cantidad_cols)]
+        widths_por_vista = _MULTI_VISTA_WIDTHS if es_multi else _VISTA_WIDTHS
+        col_widths = widths_por_vista[len(cantidad_cols)]
     elif mostrar_cantidades:
         cabeceras = [
             Paragraph("Codigo", st_th),
@@ -602,6 +632,8 @@ def generar_pedido_pdf(pedido, items, vista: str = "todos", mostrar_cantidades: 
         if es_filtrada:
             for _encabezado, attr in cantidad_cols:
                 fila.append(Paragraph(str(getattr(item, attr)), st_td_c))
+            if es_multi:
+                fila.append(Paragraph(item.get_estado_display(), st_td_c))
         elif mostrar_cantidades:
             fila += [
                 Paragraph(str(item.cantidad_despachada), st_td_c),
