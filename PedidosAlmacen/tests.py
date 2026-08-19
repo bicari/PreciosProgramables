@@ -1333,20 +1333,26 @@ class ApiCrearDespachoStockTest(TestCase):
 
 
 class TrasladosRecepcionExistentesTest(TestCase):
+    """Identifica despachos (no pedidos) por FTI_DOCUMENTOORIGEN: un pedido
+    puede tener varios despachos, y cada uno registra su propio traslado de
+    recepción en a2 con su numero_despacho en FTI_DOCUMENTOORIGEN. Verificar
+    solo por FTI_DOCUMENTO (número de pedido) oculta despachos huérfanos
+    cuando otro despacho del mismo pedido sí registró su traslado."""
+
     def _mock_cursor(self, mock_connect):
         conn = mock_connect.return_value.__enter__.return_value
         return conn.cursor.return_value.__enter__.return_value
 
-    def test_devuelve_documentos_encontrados_como_enteros(self):
+    def test_devuelve_despachos_encontrados_como_enteros(self):
         db = PedidosDBISAM()
         with patch.object(db, 'connect') as mock_connect:
             cursor = self._mock_cursor(mock_connect)
             cursor.execute.return_value.fetchall.return_value = [
-                NS(FTI_DOCUMENTO='00001234'),
-                NS(FTI_DOCUMENTO='00005678'),
+                NS(FTI_DOCUMENTOORIGEN='00000077'),
+                NS(FTI_DOCUMENTOORIGEN='00000078'),
             ]
-            resultado = db.traslados_recepcion_existentes([1234, 5678, 9999], 10)
-        self.assertEqual(resultado, {1234, 5678})
+            resultado = db.traslados_recepcion_existentes([77, 78, 79], 10)
+        self.assertEqual(resultado, {77, 78})
 
     def test_lista_vacia_no_consulta_bd(self):
         db = PedidosDBISAM()
@@ -1355,16 +1361,17 @@ class TrasladosRecepcionExistentesTest(TestCase):
         self.assertEqual(resultado, set())
         mock_connect.assert_not_called()
 
-    def test_sql_filtra_tipo_y_deposito_transito(self):
+    def test_sql_filtra_tipo_deposito_transito_y_documentoorigen(self):
         db = PedidosDBISAM()
         with patch.object(db, 'connect') as mock_connect:
             cursor = self._mock_cursor(mock_connect)
             cursor.execute.return_value.fetchall.return_value = []
-            db.traslados_recepcion_existentes([1234], 15)
+            db.traslados_recepcion_existentes([77], 15)
             sql = cursor.execute.call_args[0][0]
         self.assertIn('FTI_TIPO = 1', sql)
         self.assertIn('FTI_DEPOSITOSOURCE = 15', sql)
-        self.assertIn("'00001234'", sql)
+        self.assertIn('FTI_DOCUMENTOORIGEN IN', sql)
+        self.assertIn("'00000077'", sql)
 
     def test_pagina_en_lotes_de_200(self):
         db = PedidosDBISAM()
@@ -1381,7 +1388,20 @@ class TrasladosRecepcionExistentesTest(TestCase):
         with patch.object(db, 'connect') as mock_connect:
             mock_connect.side_effect = Exception('odbc down')
             with self.assertRaises(pyodbc.DatabaseError):
-                db.traslados_recepcion_existentes([1234], 10)
+                db.traslados_recepcion_existentes([77], 10)
+
+    def test_distingue_despachos_del_mismo_pedido(self):
+        """Dos despachos del mismo pedido: solo uno registrado en a2 -> solo
+        ese despacho debe aparecer como existente, el otro sigue huérfano."""
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = self._mock_cursor(mock_connect)
+            cursor.execute.return_value.fetchall.return_value = [
+                NS(FTI_DOCUMENTOORIGEN='00000077'),
+            ]
+            resultado = db.traslados_recepcion_existentes([77, 78], 10)
+        self.assertEqual(resultado, {77})
+        self.assertNotIn(78, resultado)
 
 
 class InsertarTrasladoCamposOrigenTest(TestCase):
@@ -1428,69 +1448,88 @@ class ValidarTrasladosRecepcionCommandTest(TestCase):
         self.user = User.objects.create_superuser(username='cmd_valtras', password='x')
 
     def _crear_pedido_recibido(self, deposito_codigo=2, estado_despacho='RECIBIDO'):
+        """Crea un pedido con un único despacho y lo devuelve junto al despacho."""
         from .models import Pedido, Despacho
         pedido = Pedido.objects.create(
             solicitante=self.user, estado='RECIBIDO', deposito_codigo=deposito_codigo,
         )
-        Despacho.objects.create(pedido=pedido, estado=estado_despacho)
-        return pedido
+        despacho = Despacho.objects.create(pedido=pedido, estado=estado_despacho, receptor=self.user)
+        return pedido, despacho
 
     @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
-    def test_detecta_pedido_sin_traslado(self, mock_db):
-        pedido = self._crear_pedido_recibido()
+    def test_detecta_despacho_sin_traslado(self, mock_db):
+        pedido, despacho = self._crear_pedido_recibido()
         mock_db.return_value.traslados_recepcion_existentes.return_value = set()
 
         out = StringIO()
         call_command('validar_traslados_recepcion', stdout=out)
 
         salida = out.getvalue()
-        self.assertIn(f'#{pedido.numero_pedido}', salida)
-        self.assertIn('1 de 1 pedidos sin traslado', salida)
+        self.assertIn(f'Despacho #{despacho.numero_despacho}', salida)
+        self.assertIn(f'Pedido #{pedido.numero_pedido}', salida)
+        self.assertIn('1 de 1 despachos sin traslado', salida)
 
     @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
-    def test_no_reporta_pedido_con_traslado_ok(self, mock_db):
-        pedido = self._crear_pedido_recibido()
-        mock_db.return_value.traslados_recepcion_existentes.return_value = {pedido.numero_pedido}
+    def test_no_reporta_despacho_con_traslado_ok(self, mock_db):
+        pedido, despacho = self._crear_pedido_recibido()
+        mock_db.return_value.traslados_recepcion_existentes.return_value = {despacho.numero_despacho}
 
         out = StringIO()
         call_command('validar_traslados_recepcion', stdout=out)
 
         salida = out.getvalue()
-        self.assertNotIn(f'#{pedido.numero_pedido}', salida)
-        self.assertIn('0 de 1 pedidos sin traslado', salida)
+        self.assertNotIn(f'Despacho #{despacho.numero_despacho}', salida)
+        self.assertIn('0 de 1 despachos sin traslado', salida)
+
+    @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
+    def test_detecta_despacho_huerfano_cuando_otro_despacho_del_mismo_pedido_si_registro(self, mock_db):
+        """Caso central del fix: un pedido con 2 despachos, solo uno con
+        traslado en a2. El chequeo por pedido lo ocultaría; por despacho no."""
+        from .models import Despacho
+        pedido, despacho_ok = self._crear_pedido_recibido()
+        despacho_huerfano = Despacho.objects.create(pedido=pedido, estado='RECIBIDO', receptor=self.user)
+        mock_db.return_value.traslados_recepcion_existentes.return_value = {despacho_ok.numero_despacho}
+
+        out = StringIO()
+        call_command('validar_traslados_recepcion', stdout=out)
+
+        salida = out.getvalue()
+        self.assertIn(f'Despacho #{despacho_huerfano.numero_despacho}', salida)
+        self.assertNotIn(f'Despacho #{despacho_ok.numero_despacho}', salida)
+        self.assertIn('1 de 2 despachos sin traslado', salida)
 
     @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
     def test_sin_candidatos_no_consulta_dbisam(self, mock_db):
         out = StringIO()
         call_command('validar_traslados_recepcion', stdout=out)
 
-        self.assertIn('No hay pedidos candidatos', out.getvalue())
+        self.assertIn('No hay despachos candidatos', out.getvalue())
         mock_db.assert_not_called()
 
     @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
     def test_filtro_pedido_ignora_otros(self, mock_db):
-        p1 = self._crear_pedido_recibido()
-        p2 = self._crear_pedido_recibido()
+        p1, d1 = self._crear_pedido_recibido()
+        p2, d2 = self._crear_pedido_recibido()
         mock_db.return_value.traslados_recepcion_existentes.return_value = set()
 
         out = StringIO()
         call_command('validar_traslados_recepcion', '--pedido', str(p1.numero_pedido), stdout=out)
 
         salida = out.getvalue()
-        self.assertIn(f'#{p1.numero_pedido}', salida)
-        self.assertNotIn(f'#{p2.numero_pedido}', salida)
-        mock_db.return_value.traslados_recepcion_existentes.assert_called_once_with([p1.numero_pedido], 10)
+        self.assertIn(f'Despacho #{d1.numero_despacho}', salida)
+        self.assertNotIn(f'Despacho #{d2.numero_despacho}', salida)
+        mock_db.return_value.traslados_recepcion_existentes.assert_called_once_with([d1.numero_despacho], 10)
 
     @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
     def test_filtro_dias_excluye_antiguos(self, mock_db):
         from django.utils import timezone
         from datetime import timedelta
 
-        reciente = self._crear_pedido_recibido()
+        p_reciente, reciente = self._crear_pedido_recibido()
         reciente.fecha_recepcion = timezone.now()
         reciente.save()
 
-        antiguo = self._crear_pedido_recibido()
+        p_antiguo, antiguo = self._crear_pedido_recibido()
         antiguo.fecha_recepcion = timezone.now() - timedelta(days=100)
         antiguo.save()
 
@@ -1500,8 +1539,8 @@ class ValidarTrasladosRecepcionCommandTest(TestCase):
         call_command('validar_traslados_recepcion', '--dias', '30', stdout=out)
 
         salida = out.getvalue()
-        self.assertIn(f'#{reciente.numero_pedido}', salida)
-        self.assertNotIn(f'#{antiguo.numero_pedido}', salida)
+        self.assertIn(f'Despacho #{reciente.numero_despacho}', salida)
+        self.assertNotIn(f'Despacho #{antiguo.numero_despacho}', salida)
 
     @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')
     def test_pedido_sin_deposito_codigo_se_excluye(self, mock_db):
@@ -1510,7 +1549,7 @@ class ValidarTrasladosRecepcionCommandTest(TestCase):
         out = StringIO()
         call_command('validar_traslados_recepcion', stdout=out)
 
-        self.assertIn('No hay pedidos candidatos', out.getvalue())
+        self.assertIn('No hay despachos candidatos', out.getvalue())
         mock_db.assert_not_called()
 
     @patch('PedidosAlmacen.management.commands.validar_traslados_recepcion.PedidosDBISAM')

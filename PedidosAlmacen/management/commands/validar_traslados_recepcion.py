@@ -1,7 +1,7 @@
 """
-Management command para detectar pedidos recibidos en la app cuyo traslado de
-recepción (tránsito → destino) no quedó registrado en a2 (SOPERACIONINV), por
-lo que las existencias de los productos recibidos no se actualizaron.
+Management command para detectar despachos recibidos en la app cuyo traslado
+de recepción (tránsito → destino) no quedó registrado en a2 (SOPERACIONINV),
+por lo que las existencias de los productos recibidos no se actualizaron.
 
 Es de solo lectura: no modifica Postgres ni a2.
 
@@ -9,9 +9,16 @@ Valida únicamente el paso de RECEPCIÓN. El paso de despacho (almacén→tráns
 ya se audita en Postgres mediante Despacho.traslado_a2_registrado, sin
 necesitar consultar DBISAM.
 
+Revisa por DESPACHO, no por pedido: un mismo pedido puede tener varios
+despachos, cada uno con su propio traslado de recepción en a2 (identificado
+por FTI_DOCUMENTOORIGEN = numero_despacho). Verificar solo a nivel de pedido
+ocultaría un despacho huérfano cuando otro despacho del mismo pedido sí
+registró el suyo.
+
 La verificación usa el depósito de tránsito actualmente configurado en
-ConfiguracionPedidos; pedidos históricos despachados con otro depósito de
-tránsito pueden aparecer como falsos positivos.
+ConfiguracionPedidos; despachos históricos recibidos con otro depósito de
+tránsito pueden aparecer como falsos positivos. Lo mismo aplica a despachos
+recibidos antes de que se agregara FTI_DOCUMENTOORIGEN a los traslados.
 
 Uso:
     python manage.py validar_traslados_recepcion
@@ -25,12 +32,12 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from PedidosAlmacen.dbisam import PedidosDBISAM
-from PedidosAlmacen.models import ConfiguracionPedidos, Pedido
+from PedidosAlmacen.models import ConfiguracionPedidos, Despacho
 
 
 class Command(BaseCommand):
     help = (
-        "Detecta pedidos RECIBIDO/PARCIAL cuyo traslado de recepción "
+        "Detecta despachos RECIBIDO/PARCIAL cuyo traslado de recepción "
         "(tránsito → destino) no está registrado en a2 (SOPERACIONINV). "
         "Solo lectura: no modifica Postgres ni a2."
     )
@@ -40,13 +47,13 @@ class Command(BaseCommand):
             "--dias",
             type=int,
             default=None,
-            help="Limita la revisión a pedidos con fecha_recepcion dentro de los últimos N días. Por defecto revisa todo el histórico.",
+            help="Limita la revisión a despachos con fecha_recepcion dentro de los últimos N días. Por defecto revisa todo el histórico.",
         )
         parser.add_argument(
             "--pedido",
             type=int,
             default=None,
-            help="Revisa un único número de pedido (spot-check). Si se pasa junto con --dias, --dias se ignora.",
+            help="Revisa únicamente los despachos de un número de pedido (spot-check). Si se pasa junto con --dias, --dias se ignora.",
         )
 
     def handle(self, *args, **options) -> None:
@@ -55,15 +62,15 @@ class Command(BaseCommand):
 
         candidatos = self._obtener_candidatos(dias, pedido_num)
         if not candidatos:
-            self.stdout.write(self.style.WARNING("No hay pedidos candidatos para revisar."))
+            self.stdout.write(self.style.WARNING("No hay despachos candidatos para revisar."))
             return
 
-        numeros = [c[0] for c in candidatos]
+        numeros_despacho = [c[0] for c in candidatos]
         # La verificación asume el depósito de tránsito actualmente configurado;
-        # pedidos históricos despachados con otro tránsito pueden dar falso positivo.
+        # despachos históricos recibidos con otro tránsito pueden dar falso positivo.
         deposito_transito = ConfiguracionPedidos.load().deposito_transito
         try:
-            existentes = PedidosDBISAM().traslados_recepcion_existentes(numeros, deposito_transito)
+            existentes = PedidosDBISAM().traslados_recepcion_existentes(numeros_despacho, deposito_transito)
         except Exception as e:
             self.stderr.write(self.style.ERROR(f"Error al consultar a2: {e}"))
             return
@@ -72,44 +79,45 @@ class Command(BaseCommand):
         self._mostrar_reporte(candidatos, problematicos)
 
     def _obtener_candidatos(self, dias: int | None, pedido_num: int | None) -> list[tuple]:
-        """Devuelve tuplas (numero_pedido, username, fecha_recepcion, deposito_codigo)."""
+        """Devuelve tuplas (numero_despacho, numero_pedido, username, fecha_recepcion, deposito_codigo)."""
         qs = (
-            Pedido.objects.filter(despachos__estado__in=["RECIBIDO", "PARCIAL"])
-            .exclude(deposito_codigo__isnull=True)
-            .distinct()
+            Despacho.objects.filter(estado__in=["RECIBIDO", "PARCIAL"])
+            .exclude(pedido__deposito_codigo__isnull=True)
         )
         if pedido_num is not None:
-            qs = qs.filter(numero_pedido=pedido_num)
+            qs = qs.filter(pedido__numero_pedido=pedido_num)
         elif dias is not None:
             desde = timezone.now() - timedelta(days=dias)
             qs = qs.filter(fecha_recepcion__gte=desde)
 
         return list(
             qs.values_list(
-                "numero_pedido", "solicitante__username", "fecha_recepcion", "deposito_codigo"
+                "numero_despacho", "pedido__numero_pedido", "receptor__username",
+                "fecha_recepcion", "pedido__deposito_codigo",
             ).order_by("-fecha_recepcion")
         )
 
     def _mostrar_reporte(self, candidatos: list[tuple], problematicos: list[tuple]) -> None:
         self.stdout.write("")
-        self.stdout.write(f"Pedidos revisados: {len(candidatos)}")
+        self.stdout.write(f"Despachos revisados: {len(candidatos)}")
         self.stdout.write("")
         if problematicos:
-            for numero, username, fecha_recepcion, deposito in problematicos:
+            for numero_despacho, numero_pedido, username, fecha_recepcion, deposito in problematicos:
                 self.stdout.write(
                     self.style.ERROR(
-                        f"  #{numero} | {username} | {fecha_recepcion} | depósito destino {deposito}"
+                        f"  Despacho #{numero_despacho} (Pedido #{numero_pedido}) | {username} | "
+                        f"{fecha_recepcion} | depósito destino {deposito}"
                     )
                 )
             self.stdout.write("")
             self.stdout.write(
                 self.style.WARNING(
-                    f"{len(problematicos)} de {len(candidatos)} pedidos sin traslado de recepción en a2."
+                    f"{len(problematicos)} de {len(candidatos)} despachos sin traslado de recepción en a2."
                 )
             )
         else:
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"0 de {len(candidatos)} pedidos sin traslado de recepción en a2."
+                    f"0 de {len(candidatos)} despachos sin traslado de recepción en a2."
                 )
             )

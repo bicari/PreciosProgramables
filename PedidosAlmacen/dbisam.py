@@ -361,42 +361,53 @@ class PedidosDBISAM:
         except Exception as e:
             raise pyodbc.DatabaseError(str(e))
 
-    def traslados_recepcion_existentes(self, numeros_pedido: list[int], deposito_transito: int) -> set[int]:
+    def traslados_recepcion_existentes(self, numeros_despacho: list[int], deposito_transito: int) -> set[int]:
         """
-        Verifica cuáles de los pedidos dados tienen registrado el traslado de
-        recepción (tránsito → destino) en a2 (SOPERACIONINV).
+        Verifica cuáles de los despachos dados tienen registrado su traslado
+        de recepción (tránsito → destino) en a2 (SOPERACIONINV).
+
+        Identifica cada recepción por FTI_DOCUMENTOORIGEN (número de
+        despacho), no por FTI_DOCUMENTO (número de pedido): un mismo pedido
+        puede tener varios despachos, cada uno con su propio traslado. Filtrar
+        solo por pedido ocultaría un despacho huérfano cuando otro despacho
+        del mismo pedido sí registró el suyo.
 
         Args:
-            numeros_pedido: Números de pedido (PK de Pedido en Postgres) a
-                verificar.
+            numeros_despacho: Números de despacho (PK de Despacho en
+                Postgres) a verificar.
             deposito_transito: Código del depósito de tránsito usado como
                 origen del traslado de recepción.
 
         Returns:
-            Conjunto de números de pedido que SÍ tienen el traslado
+            Conjunto de números de despacho que SÍ tienen el traslado
             registrado en a2. Los ausentes del conjunto de entrada son los
             problemáticos (recibidos en la app sin traslado en a2).
 
         Raises:
             pyodbc.DatabaseError: Si falla la conexión o la consulta.
+
+        Nota: despachos recibidos antes de que se agregara FTI_DOCUMENTOORIGEN
+        a los traslados de recepción no tendrán ese campo poblado en a2 y
+        aparecerán como falsos positivos (problemáticos aunque su traslado sí
+        exista, solo que sin trazabilidad de despacho).
         """
-        if not numeros_pedido:
+        if not numeros_despacho:
             return set()
 
         TAMANO_LOTE = 200
         encontrados: set[int] = set()
         try:
             with self.connect() as conn:
-                for i in range(0, len(numeros_pedido), TAMANO_LOTE):
-                    lote = numeros_pedido[i:i + TAMANO_LOTE]
+                for i in range(0, len(numeros_despacho), TAMANO_LOTE):
+                    lote = numeros_despacho[i:i + TAMANO_LOTE]
                     docs_str = ','.join(f"'{str(n).rjust(8, '0')}'" for n in lote)
                     with conn.cursor() as cursor:
-                        rows = cursor.execute(f"""SELECT DISTINCT FTI_DOCUMENTO
+                        rows = cursor.execute(f"""SELECT DISTINCT FTI_DOCUMENTOORIGEN
                                                 FROM SOPERACIONINV
                                                 WHERE FTI_TIPO = 1
                                                   AND FTI_DEPOSITOSOURCE = {int(deposito_transito)}
-                                                  AND FTI_DOCUMENTO IN ({docs_str})""").fetchall()
-                        encontrados.update(int(row.FTI_DOCUMENTO) for row in rows)
+                                                  AND FTI_DOCUMENTOORIGEN IN ({docs_str})""").fetchall()
+                        encontrados.update(int(row.FTI_DOCUMENTOORIGEN) for row in rows)
             return encontrados
         except Exception as e:
             raise pyodbc.DatabaseError(str(e))
