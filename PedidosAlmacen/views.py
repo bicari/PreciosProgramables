@@ -2572,3 +2572,51 @@ def buscar_documentos_a2(request):
         doc['tipo_badge_class'] = info.get('badge', 'bg-secondary')
 
     return render(request, 'pedidos-buscar-documentos-a2.html', {'documentos': documentos})
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_tienda, login_url='dashboard')
+def cargar_items_documentos_a2(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Método no permitido'}, status=405)
+
+    operacion_ids_raw = request.POST.getlist('operacion_ids')
+    operacion_ids = [int(i) for i in operacion_ids_raw if i.isdigit()]
+
+    if not operacion_ids:
+        return JsonResponse({'error': 'Debe seleccionar al menos un documento'}, status=400)
+
+    try:
+        items_raw = PedidosDBISAM().obtener_items_documentos(operacion_ids)
+    except Exception:
+        return JsonResponse(
+            {'error': 'No se pudo consultar a2. Intenta de nuevo en unos segundos.'}, status=502
+        )
+
+    categorias_map = {}
+    try:
+        categorias_map = {str(c[0]): c[1] for c in PedidosDBISAM().obtener_categorias()}
+    except Exception:
+        pass
+
+    items_por_codigo = {}
+    for item in items_raw:
+        codigo = item['codigo']
+        if codigo in items_por_codigo:
+            items_por_codigo[codigo]['cantidad'] += item['cantidad']
+        else:
+            items_por_codigo[codigo] = {
+                'codigo': codigo,
+                'descripcion': item['descripcion'],
+                'referencia': item['referencia'],
+                'puesto': item['puesto'],
+                'ref_proveedor': item['ref_proveedor'],
+                'cantidad': item['cantidad'],
+                'categoria': item['categoria'],
+                'categoria_nombre': categorias_map.get(item['categoria'], item['categoria']),
+            }
+
+    items = list(items_por_codigo.values())
+    categorias_distintas = sorted({item['categoria'] for item in items if item['categoria']})
+
+    return JsonResponse({'items': items, 'categorias_distintas': categorias_distintas})

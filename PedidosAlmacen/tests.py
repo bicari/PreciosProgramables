@@ -4754,3 +4754,61 @@ class BuscarDocumentosA2ViewTest(TestCase):
         self.client.force_login(otro)
         resp = self.client.get('/pedidos/buscar-documentos-a2/', {'tipos': ['9'], 'documento': '1234'})
         self.assertEqual(resp.status_code, 302)
+
+
+class CargarItemsDocumentosA2ViewTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        self.user = User.objects.create_user(username='tnd_a2b', password='x')
+        g, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.user.groups.add(g)
+        self.client.force_login(self.user)
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_suma_cantidades_de_codigos_repetidos(self, mock_db):
+        mock_db.return_value.obtener_items_documentos.return_value = [
+            {'codigo': 'SKU1', 'cantidad': 5, 'descripcion': 'Uno', 'puesto': 'P1',
+             'referencia': 'R1', 'ref_proveedor': 'PR1', 'categoria': 'FERRETERIA'},
+            {'codigo': 'SKU1', 'cantidad': 3, 'descripcion': 'Uno', 'puesto': 'P1',
+             'referencia': 'R1', 'ref_proveedor': 'PR1', 'categoria': 'FERRETERIA'},
+        ]
+        mock_db.return_value.obtener_categorias.return_value = [('FERRETERIA', 'Ferreteria')]
+
+        resp = self.client.post('/pedidos/cargar-items-a2/', {'operacion_ids': ['100', '200']})
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(len(data['items']), 1)
+        self.assertEqual(data['items'][0]['cantidad'], 8)
+        self.assertEqual(data['items'][0]['categoria_nombre'], 'Ferreteria')
+        self.assertEqual(data['categorias_distintas'], ['FERRETERIA'])
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_detecta_multiples_categorias(self, mock_db):
+        mock_db.return_value.obtener_items_documentos.return_value = [
+            {'codigo': 'SKU1', 'cantidad': 1, 'descripcion': 'Uno', 'puesto': '',
+             'referencia': '', 'ref_proveedor': '', 'categoria': 'FERRETERIA'},
+            {'codigo': 'SKU2', 'cantidad': 1, 'descripcion': 'Dos', 'puesto': '',
+             'referencia': '', 'ref_proveedor': '', 'categoria': 'PLOMERIA'},
+        ]
+        mock_db.return_value.obtener_categorias.return_value = []
+
+        resp = self.client.post('/pedidos/cargar-items-a2/', {'operacion_ids': ['100']})
+
+        data = resp.json()
+        self.assertEqual(sorted(data['categorias_distintas']), ['FERRETERIA', 'PLOMERIA'])
+
+    def test_sin_operacion_ids_devuelve_400(self):
+        resp = self.client.post('/pedidos/cargar-items-a2/', {})
+        self.assertEqual(resp.status_code, 400)
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_error_dbisam_devuelve_502(self, mock_db):
+        mock_db.return_value.obtener_items_documentos.side_effect = Exception('odbc down')
+        resp = self.client.post('/pedidos/cargar-items-a2/', {'operacion_ids': ['100']})
+        self.assertEqual(resp.status_code, 502)
+
+    def test_get_no_permitido(self):
+        resp = self.client.get('/pedidos/cargar-items-a2/')
+        self.assertEqual(resp.status_code, 405)

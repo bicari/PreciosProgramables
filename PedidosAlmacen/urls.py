@@ -14,6 +14,7 @@ urlpatterns = [
     path('pedidos/<int:pk>/pdf/', views.exportar_pedido_pdf, name='pedidos-pdf'),
     path('pedidos/buscar-producto/', views.buscar_producto, name='pedidos-buscar-producto'),
     path('pedidos/buscar-documentos-a2/', views.buscar_documentos_a2, name='pedidos-buscar-documentos-a2'),
+    path('pedidos/cargar-items-a2/', views.cargar_items_documentos_a2, name='pedidos-cargar-items-a2'),
     path('pedidos/pendientes-count/', views.contar_pendientes, name='pedidos-pendientes-count'),
     path('pedidos/reporte/', views.reporte_pedidos, name='pedidos-reporte'),
     path('pedidos/reporte/pdf/', views.exportar_reporte_pdf, name='pedidos-reporte-pdf'),
