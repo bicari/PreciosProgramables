@@ -1,0 +1,36 @@
+{% if documentos %}
+<div class="table-responsive">
+<table class="table table-sm table-hover mb-0">
+    <thead>
+        <tr>
+            <th></th>
+            <th>Tipo</th>
+            <th>Documento</th>
+            <th>Fecha</th>
+            <th>Cliente</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for doc in documentos %}
+        <tr>
+            <td>
+                <input type="checkbox" class="form-check-input chk-doc-a2"
+                    value="{{ doc.operacion_id }}"
+                    aria-label="Seleccionar documento {{ doc.tipo_label }} {{ doc.documento }}">
+            </td>
+            <td>
+                <span class="badge {{ doc.tipo_badge_class }}">
+                    <i class="fas {{ doc.tipo_icon }}"></i> {{ doc.tipo_label }}
+                </span>
+            </td>
+            <td>{{ doc.documento }}</td>
+            <td>{{ doc.fecha|date:"d/m/Y"|default:"—" }}</td>
+            <td>{{ doc.cliente|default:"—" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<p class="text-muted p-2">No se encontraron documentos abiertos con esos datos. Prueba con otro número o nombre de cliente.</p>
+{% endif %}

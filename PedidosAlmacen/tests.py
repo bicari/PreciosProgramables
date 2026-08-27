@@ -4703,3 +4703,54 @@ class BadgeMixtoTest(TestCase):
     def test_detalle_muestra_badge_mixto(self):
         resp = self.client.get(self.reverse('pedidos-detalle', args=[self.pedido.numero_pedido]))
         self.assertContains(resp, 'Mixto')
+
+
+class BuscarDocumentosA2ViewTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        self.user = User.objects.create_user(username='tnd_a2', password='x')
+        g, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.user.groups.add(g)
+        self.client.force_login(self.user)
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_devuelve_resultados_con_tipos_y_documento(self, mock_db):
+        mock_db.return_value.buscar_documentos_venta.return_value = [
+            {'operacion_id': 100, 'tipo': 9, 'documento': '00001234',
+             'fecha': None, 'cliente': 'Cliente Uno'},
+        ]
+        resp = self.client.get('/pedidos/buscar-documentos-a2/', {
+            'tipos': ['9'], 'documento': '1234',
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, '00001234')
+        self.assertContains(resp, 'Cliente Uno')
+
+    def test_sin_tipos_no_consulta_dbisam(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            resp = self.client.get('/pedidos/buscar-documentos-a2/', {'documento': '1234'})
+        self.assertEqual(resp.status_code, 200)
+        mock_db.assert_not_called()
+
+    def test_sin_documento_ni_cliente_no_consulta_dbisam(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            resp = self.client.get('/pedidos/buscar-documentos-a2/', {'tipos': ['9']})
+        self.assertEqual(resp.status_code, 200)
+        mock_db.assert_not_called()
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_error_dbisam_muestra_mensaje_sin_romper(self, mock_db):
+        mock_db.return_value.buscar_documentos_venta.side_effect = Exception('odbc down')
+        resp = self.client.get('/pedidos/buscar-documentos-a2/', {
+            'tipos': ['9'], 'documento': '1234',
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'No se pudo consultar a2')
+
+    def test_usuario_sin_permiso_redirige(self):
+        from users.models import User
+        otro = User.objects.create_user(username='sin_permiso_a2', password='x')
+        self.client.force_login(otro)
+        resp = self.client.get('/pedidos/buscar-documentos-a2/', {'tipos': ['9'], 'documento': '1234'})
+        self.assertEqual(resp.status_code, 302)

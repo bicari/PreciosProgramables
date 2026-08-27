@@ -13,6 +13,7 @@ urlpatterns = [
     path('pedidos/<int:pk>/despachos/<int:despacho_id>/pdf/', views.exportar_despacho_pdf, name='pedidos-despacho-pdf'),
     path('pedidos/<int:pk>/pdf/', views.exportar_pedido_pdf, name='pedidos-pdf'),
     path('pedidos/buscar-producto/', views.buscar_producto, name='pedidos-buscar-producto'),
+    path('pedidos/buscar-documentos-a2/', views.buscar_documentos_a2, name='pedidos-buscar-documentos-a2'),
     path('pedidos/pendientes-count/', views.contar_pendientes, name='pedidos-pendientes-count'),
     path('pedidos/reporte/', views.reporte_pedidos, name='pedidos-reporte'),
     path('pedidos/reporte/pdf/', views.exportar_reporte_pdf, name='pedidos-reporte-pdf'),

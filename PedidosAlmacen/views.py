@@ -85,6 +85,12 @@ GROUP_SUPERVISOR = 'Pedidos Supervisor'
 GROUP_PICKER = 'Pedidos Picker'
 GROUP_RECEPTOR = 'Pedidos Receptor'
 
+TIPOS_DOCUMENTO_A2 = {
+    9: {'label': 'Presupuesto', 'icon': 'fa-file-invoice-dollar', 'badge': 'bg-info text-dark'},
+    10: {'label': 'Pedido', 'icon': 'fa-file-invoice', 'badge': 'bg-primary'},
+    13: {'label': 'Nota de Entrega', 'icon': 'fa-truck', 'badge': 'bg-success'},
+}
+
 
 def is_pedidos_tienda(user):
     return user.groups.filter(name=GROUP_TIENDA).exists() or user.is_superuser
@@ -2536,3 +2542,33 @@ def contar_pendientes(request):
     else:
         count = 0
     return HttpResponse(f'<span class="badge bg-danger rounded-pill">{count}</span>' if count > 0 else '')
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_tienda, login_url='dashboard')
+def buscar_documentos_a2(request):
+    tipos_raw = request.GET.getlist('tipos')
+    documento = request.GET.get('documento', '').strip()
+    cliente = request.GET.get('cliente', '').strip()
+
+    tipos = [int(t) for t in tipos_raw if t.isdigit()]
+
+    if not tipos:
+        return HttpResponse('<p class="text-warning p-2">Seleccione al menos un tipo de documento</p>')
+    if not documento and not cliente:
+        return HttpResponse('<p class="text-muted p-2">Ingrese un número de documento o un nombre de cliente</p>')
+
+    try:
+        documentos = PedidosDBISAM().buscar_documentos_venta(tipos, documento=documento, cliente=cliente)
+    except Exception:
+        return HttpResponse(
+            '<p class="text-danger p-2">No se pudo consultar a2. Intenta de nuevo en unos segundos.</p>'
+        )
+
+    for doc in documentos:
+        info = TIPOS_DOCUMENTO_A2.get(doc['tipo'], {})
+        doc['tipo_label'] = info.get('label', 'Documento')
+        doc['tipo_icon'] = info.get('icon', 'fa-file')
+        doc['tipo_badge_class'] = info.get('badge', 'bg-secondary')
+
+    return render(request, 'pedidos-buscar-documentos-a2.html', {'documentos': documentos})
