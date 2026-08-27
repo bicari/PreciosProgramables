@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from types import SimpleNamespace
 from types import SimpleNamespace as NS
 from unittest.mock import patch, MagicMock
@@ -99,6 +100,67 @@ class BuscarEnCategoriaFiltroTest(TestCase):
             db.buscar_en_categoria(['CAT1', 'CAT2'], 'abc', 'descripcion')
             sql = cursor.execute.call_args[0][0]
         self.assertIn("FI_CATEGORIA IN ('CAT1','CAT2')", sql)
+
+
+class BuscarDocumentosVentaTest(TestCase):
+    def _capturar_sql(self, tipos, documento='', cliente=''):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = (mock_connect.return_value.__enter__.return_value
+                      .cursor.return_value.__enter__.return_value)
+            cursor.execute.return_value.fetchmany.return_value = []
+            db.buscar_documentos_venta(tipos, documento=documento, cliente=cliente)
+            return cursor.execute.call_args[0][0]
+
+    def test_filtra_por_tipos_y_estados_abiertos(self):
+        sql = self._capturar_sql([9, 10], documento='1234')
+        self.assertIn('FTI_TIPO IN (9,10)', sql)
+        self.assertIn('FTI_STATUS IN (1,4)', sql)
+
+    def test_busca_por_documento_con_like(self):
+        sql = self._capturar_sql([9], documento='1234')
+        self.assertIn("FTI_DOCUMENTO LIKE '%1234%'", sql)
+
+    def test_busca_por_cliente_con_like_case_insensitive(self):
+        sql = self._capturar_sql([9], cliente='Perez')
+        self.assertIn("UPPER(FTI_PERSONACONTACTO) LIKE UPPER('%Perez%')", sql)
+
+    def test_escapa_comillas_simples_en_cliente(self):
+        sql = self._capturar_sql([9], cliente="O'Brien")
+        self.assertIn("O''Brien", sql)
+
+    def test_sin_tipos_no_ejecuta_query(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            resultado = db.buscar_documentos_venta([], documento='1234')
+        mock_connect.assert_not_called()
+        self.assertEqual(resultado, [])
+
+    def test_sin_documento_ni_cliente_no_ejecuta_query(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            resultado = db.buscar_documentos_venta([9])
+        mock_connect.assert_not_called()
+        self.assertEqual(resultado, [])
+
+    def test_ignora_tipos_no_permitidos(self):
+        sql = self._capturar_sql([9, 99], documento='1234')
+        self.assertIn('FTI_TIPO IN (9)', sql)
+        self.assertNotIn('99', sql)
+
+    def test_mapea_filas_a_dicts(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = (mock_connect.return_value.__enter__.return_value
+                      .cursor.return_value.__enter__.return_value)
+            cursor.execute.return_value.fetchmany.return_value = [
+                (100, 9, '00001234', date(2026, 8, 20), 'Cliente Uno'),
+            ]
+            resultado = db.buscar_documentos_venta([9], documento='1234')
+        self.assertEqual(resultado, [{
+            'operacion_id': 100, 'tipo': 9, 'documento': '00001234',
+            'fecha': date(2026, 8, 20), 'cliente': 'Cliente Uno',
+        }])
 
 
 class BuscarProductoVistaTest(TestCase):

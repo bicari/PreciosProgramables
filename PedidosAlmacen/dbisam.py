@@ -13,6 +13,9 @@ DEPOSITO_ALMACEN = 1    # Almacén principal (origen en despacho)
 CLASIFICACION_DESPACHO = 1          # FTI_CLASIFICACION traslado almacén → tránsito
 CLASIFICACION_RECEPCION_TIENDA = 2  # FTI_CLASIFICACION traslado tránsito → tienda
 
+TIPOS_DOCUMENTO_VENTA = {9, 10, 13}  # Presupuesto, Pedido, Nota de Entrega
+ESTADOS_ABIERTOS = (1, 4)            # Procesado, Transito
+
 
 def _clean(value):
     """Convierte None a string vacio para valores que van al frontend."""
@@ -560,6 +563,66 @@ class PedidosDBISAM:
                                         ORDER BY FI_DESCRIPCION""").fetchmany(100)
                     return [
                         (_clean(r[0]), _clean(r[1]), _clean(r[2]), _clean(r[3]), r[4] or 0, _clean(r[5]))
+                        for r in rows
+                    ]
+        except Exception as e:
+            raise pyodbc.DatabaseError(str(e))
+
+    def buscar_documentos_venta(self, tipos: list[int], documento: str = '', cliente: str = '', limit: int = 50) -> list[dict]:
+        """Busca cabeceras de presupuestos/pedidos/notas de entrega abiertos en a2.
+
+        Args:
+            tipos: Subconjunto de TIPOS_DOCUMENTO_VENTA a incluir; valores no
+                permitidos se descartan.
+            documento: Coincidencia parcial contra FTI_DOCUMENTO.
+            cliente: Coincidencia parcial (case-insensitive) contra FTI_PERSONACONTACTO.
+            limit: Máximo de filas a traer.
+
+        Returns:
+            Lista de dicts: operacion_id, tipo, documento, fecha, cliente.
+            Lista vacía si no hay tipos válidos o si documento/cliente vienen
+            ambos vacíos (no se ejecuta ningún query en ese caso).
+        """
+        tipos_validos = sorted({t for t in tipos if t in TIPOS_DOCUMENTO_VENTA})
+        documento = (documento or '').strip()
+        cliente = (cliente or '').strip()
+        if not tipos_validos or (not documento and not cliente):
+            return []
+
+        tipos_str = ','.join(str(t) for t in tipos_validos)
+        estados_str = ','.join(str(e) for e in ESTADOS_ABIERTOS)
+
+        condiciones = []
+        if documento:
+            doc_esc = documento[:20].replace("'", "''")
+            condiciones.append(f"FTI_DOCUMENTO LIKE '%{doc_esc}%'")
+        if cliente:
+            cli_esc = cliente[:100].replace("'", "''")
+            condiciones.append(f"UPPER(FTI_PERSONACONTACTO) LIKE UPPER('%{cli_esc}%')")
+        filtro_busqueda = ' OR '.join(condiciones)
+
+        try:
+            with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    rows = cursor.execute(f"""SELECT
+                                            FTI_AUTOINCREMENT,
+                                            FTI_TIPO,
+                                            FTI_DOCUMENTO,
+                                            FTI_FECHAEMISION,
+                                            FTI_PERSONACONTACTO
+                                        FROM SOPERACIONINV
+                                        WHERE FTI_TIPO IN ({tipos_str})
+                                        AND FTI_STATUS IN ({estados_str})
+                                        AND ({filtro_busqueda})
+                                        ORDER BY FTI_FECHAEMISION DESC""").fetchmany(limit)
+                    return [
+                        {
+                            'operacion_id': int(r[0]),
+                            'tipo': int(r[1]),
+                            'documento': _clean(r[2]),
+                            'fecha': r[3],
+                            'cliente': _clean(r[4]),
+                        }
                         for r in rows
                     ]
         except Exception as e:
