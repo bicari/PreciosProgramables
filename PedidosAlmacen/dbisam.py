@@ -627,3 +627,63 @@ class PedidosDBISAM:
                     ]
         except Exception as e:
             raise pyodbc.DatabaseError(str(e))
+
+    def obtener_items_documentos(self, operacion_ids: list[int]) -> list[dict]:
+        """Trae las líneas de los documentos de venta seleccionados.
+
+        Revalida FTI_TIPO y ambos estados (cabecera y línea) sin importar
+        qué operacion_ids se reciban, para no confiar en datos manipulados
+        del cliente.
+
+        Args:
+            operacion_ids: FTI_AUTOINCREMENT de los documentos marcados.
+
+        Returns:
+            Lista de dicts: codigo, cantidad, descripcion, puesto,
+            referencia, ref_proveedor, categoria (código de SINVENTARIO.FI_CATEGORIA).
+        """
+        ids_validos = []
+        for oid in operacion_ids:
+            try:
+                ids_validos.append(int(oid))
+            except (TypeError, ValueError):
+                continue
+        if not ids_validos:
+            return []
+
+        ids_str = ','.join(str(i) for i in ids_validos)
+        tipos_str = ','.join(str(t) for t in sorted(TIPOS_DOCUMENTO_VENTA))
+        estados_str = ','.join(str(e) for e in ESTADOS_ABIERTOS)
+
+        try:
+            with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    rows = cursor.execute(f"""SELECT
+                                            FDI_CODIGO,
+                                            FDI_CANTIDAD,
+                                            FI_DESCRIPCION,
+                                            FI_PUESTO,
+                                            FI_REFERENCIA,
+                                            ZZCAMPO_001,
+                                            FI_CATEGORIA
+                                        FROM SOPERACIONINV
+                                        INNER JOIN SDETALLEVENTA ON FTI_AUTOINCREMENT = FDI_OPERACION_AUTOINCREMENT
+                                        INNER JOIN SINVENTARIO ON FDI_CODIGO = FI_CODIGO
+                                        WHERE FTI_AUTOINCREMENT IN ({ids_str})
+                                        AND FTI_TIPO IN ({tipos_str})
+                                        AND FTI_STATUS IN ({estados_str})
+                                        AND FDI_STATUS IN ({estados_str})""").fetchall()
+                    return [
+                        {
+                            'codigo': _clean(r[0]),
+                            'cantidad': r[1] or 0,
+                            'descripcion': _clean(r[2]),
+                            'puesto': _clean(r[3]),
+                            'referencia': _clean(r[4]),
+                            'ref_proveedor': _clean(r[5]),
+                            'categoria': _clean(r[6]),
+                        }
+                        for r in rows
+                    ]
+        except Exception as e:
+            raise pyodbc.DatabaseError(str(e))

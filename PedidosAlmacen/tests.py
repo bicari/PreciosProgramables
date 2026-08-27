@@ -163,6 +163,55 @@ class BuscarDocumentosVentaTest(TestCase):
         }])
 
 
+class ObtenerItemsDocumentosTest(TestCase):
+    def _capturar_sql(self, ids):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = (mock_connect.return_value.__enter__.return_value
+                      .cursor.return_value.__enter__.return_value)
+            cursor.execute.return_value.fetchall.return_value = []
+            db.obtener_items_documentos(ids)
+            return cursor.execute.call_args[0][0]
+
+    def test_revalida_tipo_y_estado_siempre(self):
+        sql = self._capturar_sql([100, 200])
+        self.assertIn('FTI_AUTOINCREMENT IN (100,200)', sql)
+        self.assertIn('FTI_TIPO IN (9,10,13)', sql)
+        self.assertIn('FTI_STATUS IN (1,4)', sql)
+        self.assertIn('FDI_STATUS IN (1,4)', sql)
+
+    def test_join_correcto(self):
+        sql = self._capturar_sql([100])
+        self.assertIn('INNER JOIN SDETALLEVENTA ON FTI_AUTOINCREMENT = FDI_OPERACION_AUTOINCREMENT', sql)
+        self.assertIn('INNER JOIN SINVENTARIO ON FDI_CODIGO = FI_CODIGO', sql)
+
+    def test_sin_ids_no_ejecuta_query(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            resultado = db.obtener_items_documentos([])
+        mock_connect.assert_not_called()
+        self.assertEqual(resultado, [])
+
+    def test_ignora_ids_no_numericos(self):
+        sql = self._capturar_sql([100, 'abc', 200])
+        self.assertIn('FTI_AUTOINCREMENT IN (100,200)', sql)
+
+    def test_mapea_filas_a_dicts(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = (mock_connect.return_value.__enter__.return_value
+                      .cursor.return_value.__enter__.return_value)
+            cursor.execute.return_value.fetchall.return_value = [
+                ('SKU1', 5, 'Producto Uno', 'P1', 'REF1', 'PROV1', 'FERRETERIA'),
+            ]
+            resultado = db.obtener_items_documentos([100])
+        self.assertEqual(resultado, [{
+            'codigo': 'SKU1', 'cantidad': 5, 'descripcion': 'Producto Uno',
+            'puesto': 'P1', 'referencia': 'REF1', 'ref_proveedor': 'PROV1',
+            'categoria': 'FERRETERIA',
+        }])
+
+
 class BuscarProductoVistaTest(TestCase):
     def setUp(self):
         from users.models import User
