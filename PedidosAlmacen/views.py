@@ -2573,18 +2573,23 @@ def contar_pendientes(request):
 @user_passes_test(is_pedidos_tienda, login_url='dashboard')
 def buscar_documentos_a2(request):
     tipos_raw = request.GET.getlist('tipos')
+    estados_raw = request.GET.getlist('estados')
     documento = request.GET.get('documento', '').strip()
     cliente = request.GET.get('cliente', '').strip()
 
     tipos = [int(t) for t in tipos_raw if t.isdigit()]
+    estados = [int(e) for e in estados_raw if e.isdigit()]
 
     if not tipos:
         return HttpResponse('<p class="text-warning p-2">Seleccione al menos un tipo de documento</p>')
+    if not estados:
+        return HttpResponse('<p class="text-warning p-2">Seleccione al menos un estado</p>')
     if not documento and not cliente:
         return HttpResponse('<p class="text-muted p-2">Ingrese un número de documento o un nombre de cliente</p>')
 
     try:
-        documentos = PedidosDBISAM().buscar_documentos_venta(tipos, documento=documento, cliente=cliente)
+        documentos = PedidosDBISAM().buscar_documentos_venta(
+            tipos, documento=documento, cliente=cliente, estados=estados)
     except pyodbc.Error as e:
         logger.error(
             f'Error al buscar documentos a2 (tipos={tipos}, documento={documento!r}, cliente={cliente!r}): {e}'

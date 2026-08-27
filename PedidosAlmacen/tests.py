@@ -105,19 +105,39 @@ class BuscarEnCategoriaFiltroTest(TestCase):
 
 
 class BuscarDocumentosVentaTest(TestCase):
-    def _capturar_sql(self, tipos, documento='', cliente=''):
+    def _capturar_sql(self, tipos, documento='', cliente='', estados=None):
         db = PedidosDBISAM()
         with patch.object(db, 'connect') as mock_connect:
             cursor = (mock_connect.return_value.__enter__.return_value
                       .cursor.return_value.__enter__.return_value)
             cursor.execute.return_value.fetchmany.return_value = []
-            db.buscar_documentos_venta(tipos, documento=documento, cliente=cliente)
+            db.buscar_documentos_venta(tipos, documento=documento, cliente=cliente, estados=estados)
             return cursor.execute.call_args[0][0]
 
     def test_filtra_por_tipos_y_estados_abiertos(self):
         sql = self._capturar_sql([9, 10], documento='1234')
         self.assertIn('FTI_TIPO IN (9,10)', sql)
         self.assertIn('FTI_STATUS IN (1,4)', sql)
+
+    def test_sin_estados_explicito_usa_ambos_por_defecto(self):
+        sql = self._capturar_sql([9], documento='1234')
+        self.assertIn('FTI_STATUS IN (1,4)', sql)
+
+    def test_estados_personalizados_filtra_solo_por_ellos(self):
+        sql = self._capturar_sql([9], documento='1234', estados=[1])
+        self.assertIn('FTI_STATUS IN (1)', sql)
+        self.assertNotIn('FTI_STATUS IN (1,4)', sql)
+
+    def test_estados_no_permitidos_se_descartan(self):
+        sql = self._capturar_sql([9], documento='1234', estados=[1, 99])
+        self.assertIn('FTI_STATUS IN (1)', sql)
+
+    def test_estados_vacio_no_ejecuta_query(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            resultado = db.buscar_documentos_venta([9], documento='1234', estados=[])
+        mock_connect.assert_not_called()
+        self.assertEqual(resultado, [])
 
     def test_busca_por_documento_con_like(self):
         sql = self._capturar_sql([9], documento='1234')
@@ -4813,7 +4833,7 @@ class BuscarDocumentosA2ViewTest(TestCase):
              'fecha': None, 'cliente': 'Cliente Uno'},
         ]
         resp = self.client.get('/pedidos/buscar-documentos-a2/', {
-            'tipos': ['9'], 'documento': '1234',
+            'tipos': ['9'], 'documento': '1234', 'estados': ['1', '4'],
         })
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, '00001234')
@@ -4827,7 +4847,24 @@ class BuscarDocumentosA2ViewTest(TestCase):
 
     def test_sin_documento_ni_cliente_no_consulta_dbisam(self):
         with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
-            resp = self.client.get('/pedidos/buscar-documentos-a2/', {'tipos': ['9']})
+            resp = self.client.get('/pedidos/buscar-documentos-a2/', {'tipos': ['9'], 'estados': ['1', '4']})
+        self.assertEqual(resp.status_code, 200)
+        mock_db.assert_not_called()
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_pasa_estados_seleccionados_a_dbisam(self, mock_db):
+        mock_db.return_value.buscar_documentos_venta.return_value = []
+        self.client.get('/pedidos/buscar-documentos-a2/', {
+            'tipos': ['9'], 'documento': '1234', 'estados': ['1'],
+        })
+        _, kwargs = mock_db.return_value.buscar_documentos_venta.call_args
+        self.assertEqual(kwargs.get('estados'), [1])
+
+    def test_sin_estados_no_consulta_dbisam(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            resp = self.client.get('/pedidos/buscar-documentos-a2/', {
+                'tipos': ['9'], 'documento': '1234',
+            })
         self.assertEqual(resp.status_code, 200)
         mock_db.assert_not_called()
 
@@ -4837,7 +4874,7 @@ class BuscarDocumentosA2ViewTest(TestCase):
         # (ver dbisam.py); la vista narrowea su catch a pyodbc.Error.
         mock_db.return_value.buscar_documentos_venta.side_effect = pyodbc.DatabaseError('odbc down')
         resp = self.client.get('/pedidos/buscar-documentos-a2/', {
-            'tipos': ['9'], 'documento': '1234',
+            'tipos': ['9'], 'documento': '1234', 'estados': ['1', '4'],
         })
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'No se pudo consultar a2')
@@ -4846,14 +4883,18 @@ class BuscarDocumentosA2ViewTest(TestCase):
     @patch('PedidosAlmacen.views.PedidosDBISAM')
     def test_error_dbisam_se_loguea(self, mock_db, mock_logger):
         mock_db.return_value.buscar_documentos_venta.side_effect = pyodbc.DatabaseError('odbc down')
-        self.client.get('/pedidos/buscar-documentos-a2/', {'tipos': ['9'], 'documento': '1234'})
+        self.client.get('/pedidos/buscar-documentos-a2/', {
+            'tipos': ['9'], 'documento': '1234', 'estados': ['1', '4'],
+        })
         mock_logger.error.assert_called_once()
 
     def test_usuario_sin_permiso_redirige(self):
         from users.models import User
         otro = User.objects.create_user(username='sin_permiso_a2', password='x')
         self.client.force_login(otro)
-        resp = self.client.get('/pedidos/buscar-documentos-a2/', {'tipos': ['9'], 'documento': '1234'})
+        resp = self.client.get('/pedidos/buscar-documentos-a2/', {
+            'tipos': ['9'], 'documento': '1234', 'estados': ['1', '4'],
+        })
         self.assertEqual(resp.status_code, 302)
 
 

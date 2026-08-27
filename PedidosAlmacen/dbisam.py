@@ -568,7 +568,8 @@ class PedidosDBISAM:
         except Exception as e:
             raise pyodbc.DatabaseError(str(e))
 
-    def buscar_documentos_venta(self, tipos: list[int], documento: str = '', cliente: str = '', limit: int = 50) -> list[dict]:
+    def buscar_documentos_venta(self, tipos: list[int], documento: str = '', cliente: str = '',
+                                 estados: list[int] | None = None, limit: int = 50) -> list[dict]:
         """Busca cabeceras de presupuestos/pedidos/notas de entrega abiertos en a2.
 
         Args:
@@ -576,21 +577,28 @@ class PedidosDBISAM:
                 permitidos se descartan.
             documento: Coincidencia parcial contra FTI_DOCUMENTO.
             cliente: Coincidencia parcial (case-insensitive) contra FTI_PERSONACONTACTO.
+            estados: Subconjunto de ESTADOS_ABIERTOS a incluir; valores no
+                permitidos se descartan. None (default) busca ambos estados
+                abiertos, igual que el comportamiento anterior a este parámetro.
             limit: Máximo de filas a traer.
 
         Returns:
             Lista de dicts: operacion_id, tipo, documento, fecha, cliente.
-            Lista vacía si no hay tipos válidos o si documento/cliente vienen
-            ambos vacíos (no se ejecuta ningún query en ese caso).
+            Lista vacía si no hay tipos o estados válidos, o si documento/cliente
+            vienen ambos vacíos (no se ejecuta ningún query en ese caso).
         """
         tipos_validos = sorted({t for t in tipos if t in TIPOS_DOCUMENTO_VENTA})
+        estados_validos = (
+            list(ESTADOS_ABIERTOS) if estados is None
+            else sorted({e for e in estados if e in ESTADOS_ABIERTOS})
+        )
         documento = (documento or '').strip()
         cliente = (cliente or '').strip()
-        if not tipos_validos or (not documento and not cliente):
+        if not tipos_validos or not estados_validos or (not documento and not cliente):
             return []
 
         tipos_str = ','.join(str(t) for t in tipos_validos)
-        estados_str = ','.join(str(e) for e in ESTADOS_ABIERTOS)
+        estados_str = ','.join(str(e) for e in estados_validos)
 
         condiciones = []
         if documento:
