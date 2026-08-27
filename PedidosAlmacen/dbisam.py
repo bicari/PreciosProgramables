@@ -676,7 +676,7 @@ class PedidosDBISAM:
                     return [
                         {
                             'codigo': _clean(r[0]),
-                            'cantidad': r[1] or 0,
+                            'cantidad': int(r[1] or 0),
                             'descripcion': _clean(r[2]),
                             'puesto': _clean(r[3]),
                             'referencia': _clean(r[4]),

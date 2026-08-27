@@ -1,4 +1,6 @@
 import json
+import decimal
+import pyodbc
 from datetime import date
 from types import SimpleNamespace
 from types import SimpleNamespace as NS
@@ -210,6 +212,25 @@ class ObtenerItemsDocumentosTest(TestCase):
             'puesto': 'P1', 'referencia': 'REF1', 'ref_proveedor': 'PROV1',
             'categoria': 'FERRETERIA',
         }])
+
+    def test_cantidad_decimal_se_convierte_a_int(self):
+        """FDI_CANTIDAD es numerico en a2; pyodbc puede devolver Decimal.
+
+        JsonResponse serializaria un Decimal como string, y el int() del
+        lado JS/crear_pedido reventaria contra eso. La conversion debe
+        pasar a int plano (truncando) en el propio mapeo de filas.
+        """
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = (mock_connect.return_value.__enter__.return_value
+                      .cursor.return_value.__enter__.return_value)
+            cursor.execute.return_value.fetchall.return_value = [
+                ('SKU1', decimal.Decimal('5.5'), 'Producto Uno', 'P1', 'REF1', 'PROV1', 'FERRETERIA'),
+            ]
+            resultado = db.obtener_items_documentos([100])
+        cantidad = resultado[0]['cantidad']
+        self.assertIsInstance(cantidad, int)
+        self.assertEqual(cantidad, 5)
 
 
 class BuscarProductoVistaTest(TestCase):
@@ -4741,12 +4762,21 @@ class BuscarDocumentosA2ViewTest(TestCase):
 
     @patch('PedidosAlmacen.views.PedidosDBISAM')
     def test_error_dbisam_muestra_mensaje_sin_romper(self, mock_db):
-        mock_db.return_value.buscar_documentos_venta.side_effect = Exception('odbc down')
+        # buscar_documentos_venta envuelve cualquier error en pyodbc.DatabaseError
+        # (ver dbisam.py); la vista narrowea su catch a pyodbc.Error.
+        mock_db.return_value.buscar_documentos_venta.side_effect = pyodbc.DatabaseError('odbc down')
         resp = self.client.get('/pedidos/buscar-documentos-a2/', {
             'tipos': ['9'], 'documento': '1234',
         })
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'No se pudo consultar a2')
+
+    @patch('PedidosAlmacen.views.logger')
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_error_dbisam_se_loguea(self, mock_db, mock_logger):
+        mock_db.return_value.buscar_documentos_venta.side_effect = pyodbc.DatabaseError('odbc down')
+        self.client.get('/pedidos/buscar-documentos-a2/', {'tipos': ['9'], 'documento': '1234'})
+        mock_logger.error.assert_called_once()
 
     def test_usuario_sin_permiso_redirige(self):
         from users.models import User
@@ -4803,11 +4833,39 @@ class CargarItemsDocumentosA2ViewTest(TestCase):
         resp = self.client.post('/pedidos/cargar-items-a2/', {})
         self.assertEqual(resp.status_code, 400)
 
+    def test_operacion_ids_no_numericos_devuelve_400(self):
+        # 'abc'.isdigit() es False, asi que se filtra igual que si no
+        # hubiese venido ningun id valido; no debe reventar con ValueError.
+        resp = self.client.post('/pedidos/cargar-items-a2/', {'operacion_ids': ['abc']})
+        self.assertEqual(resp.status_code, 400)
+
     @patch('PedidosAlmacen.views.PedidosDBISAM')
     def test_error_dbisam_devuelve_502(self, mock_db):
-        mock_db.return_value.obtener_items_documentos.side_effect = Exception('odbc down')
+        # obtener_items_documentos envuelve cualquier error en
+        # pyodbc.DatabaseError (ver dbisam.py); la vista narrowea su catch a
+        # pyodbc.Error.
+        mock_db.return_value.obtener_items_documentos.side_effect = pyodbc.DatabaseError('odbc down')
         resp = self.client.post('/pedidos/cargar-items-a2/', {'operacion_ids': ['100']})
         self.assertEqual(resp.status_code, 502)
+
+    @patch('PedidosAlmacen.views.logger')
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_error_dbisam_se_loguea(self, mock_db, mock_logger):
+        mock_db.return_value.obtener_items_documentos.side_effect = pyodbc.DatabaseError('odbc down')
+        self.client.post('/pedidos/cargar-items-a2/', {'operacion_ids': ['100']})
+        mock_logger.error.assert_called_once()
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_sin_items_devuelve_respuesta_vacia(self, mock_db):
+        """Cubre lo que consume el frontend (hallazgo #4): si la revalidacion
+        en obtener_items_documentos descarta todos los documentos (ej. cambio
+        de estado entre busqueda y carga), la respuesta trae listas vacias,
+        no un error."""
+        mock_db.return_value.obtener_items_documentos.return_value = []
+        mock_db.return_value.obtener_categorias.return_value = []
+        resp = self.client.post('/pedidos/cargar-items-a2/', {'operacion_ids': ['100']})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {'items': [], 'categorias_distintas': []})
 
     def test_get_no_permitido(self):
         resp = self.client.get('/pedidos/cargar-items-a2/')

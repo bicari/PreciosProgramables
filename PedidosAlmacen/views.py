@@ -27,6 +27,7 @@ import logging
 import json
 import csv
 import io
+import pyodbc
 
 logger = logging.getLogger(__name__)
 
@@ -2560,7 +2561,10 @@ def buscar_documentos_a2(request):
 
     try:
         documentos = PedidosDBISAM().buscar_documentos_venta(tipos, documento=documento, cliente=cliente)
-    except Exception:
+    except pyodbc.Error as e:
+        logger.error(
+            f'Error al buscar documentos a2 (tipos={tipos}, documento={documento!r}, cliente={cliente!r}): {e}'
+        )
         return HttpResponse(
             '<p class="text-danger p-2">No se pudo consultar a2. Intenta de nuevo en unos segundos.</p>'
         )
@@ -2588,7 +2592,8 @@ def cargar_items_documentos_a2(request):
 
     try:
         items_raw = PedidosDBISAM().obtener_items_documentos(operacion_ids)
-    except Exception:
+    except pyodbc.Error as e:
+        logger.error(f'Error al cargar items de documentos a2 (operacion_ids={operacion_ids}): {e}')
         return JsonResponse(
             {'error': 'No se pudo consultar a2. Intenta de nuevo en unos segundos.'}, status=502
         )
@@ -2596,8 +2601,8 @@ def cargar_items_documentos_a2(request):
     categorias_map = {}
     try:
         categorias_map = {str(c[0]): c[1] for c in PedidosDBISAM().obtener_categorias()}
-    except Exception:
-        pass
+    except pyodbc.Error as e:
+        logger.error(f'Error al obtener categorias para cargar items de documentos a2: {e}')
 
     items_por_codigo = {}
     for item in items_raw:
