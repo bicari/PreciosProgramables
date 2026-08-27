@@ -296,43 +296,80 @@ def crear_pedido(request):
         except json.JSONDecodeError:
             items_data = []
 
+        # Si la cabecera no trae categoria (ej. carrito mixto cargado desde a2,
+        # donde cada item ya trae la suya y nunca se fija un selector global),
+        # se deriva del primer item — mismo fallback que ya usa la creación del
+        # Pedido más abajo, para que este guard no rechace lo que esa lógica sí
+        # sabe crear correctamente.
+        if not categoria_codigo and items_data:
+            categoria_codigo = items_data[0].get('categoria', '')
+        if not categoria_nombre and items_data:
+            categoria_nombre = items_data[0].get('categoria_nombre', '')
+
+        # Revalidar disponibilidad real (existencia en depósito 1 menos lo ya
+        # comprometido por pedidos activos aún no despachados) en el servidor.
+        # El frontend bloquea el botón "Agregar" para existencia=0, pero la validación
+        # aquí cubre manipulaciones del form y cambios de stock entre búsqueda y envío.
+        # Se calcula antes de los guards de cabecera para poder rehidratar el
+        # carrito (con su info de stock) sin importar cuál de los campos de
+        # cabecera sea el que falte — el carrito puede haberse cargado desde a2
+        # antes de completar el formulario.
+        codigos_pedido = [item['codigo'] for item in items_data] if items_data else []
+
+        stock_pedido = {}
+        dbisam_consulta_ok = False
+        if codigos_pedido:
+            try:
+                stock_pedido = PedidosDBISAM().consultar_stock_multiple(codigos_pedido, deposito=DEPOSITO_ALMACEN)
+                dbisam_consulta_ok = True
+            except Exception as e:
+                messages.warning(request, f'No se pudo verificar el stock en almacén: {e}')
+
+        disponibilidad = calcular_disponibilidad(codigos_pedido, stock_pedido) if dbisam_consulta_ok else {}
+
+        def _ctx_rehidratacion():
+            return {
+                'items_json_inicial': items_json,
+                'stock_info_json': json.dumps({
+                    item['codigo']: disponibilidad.get(item['codigo'], {}).get(
+                        'disponible', int(item['cantidad']))
+                    for item in items_data
+                }),
+                'categoria_inicial': categoria_codigo,
+                'categoria_nombre_inicial': categoria_nombre,
+                'condicion_inicial': condicion,
+                'deposito_inicial': deposito_codigo,
+                'deposito_nombre_inicial': deposito_nombre or deposito_codigo,
+                'es_mixto_inicial': es_mixto,
+            }
+
         if not categoria_codigo:
             messages.error(request, 'Debe seleccionar una categoria para el pedido', extra_tags='danger')
+            if items_data:
+                ctx.update(_ctx_rehidratacion())
             return render(request, 'pedidos-crear.html', ctx)
 
         if not condicion:
             messages.error(request, 'Debe seleccionar la condicion del pedido', extra_tags='danger')
+            if items_data:
+                ctx.update(_ctx_rehidratacion())
             return render(request, 'pedidos-crear.html', ctx)
 
         if not deposito_codigo:
             messages.error(request, 'Debe seleccionar el deposito de origen', extra_tags='danger')
+            if items_data:
+                ctx.update(_ctx_rehidratacion())
             return render(request, 'pedidos-crear.html', ctx)
 
         if not items_data:
             messages.error(request, 'Debe agregar al menos un producto al pedido', extra_tags='danger')
             return render(request, 'pedidos-crear.html', ctx)
 
-        # Revalidar disponibilidad real (existencia en depósito 1 menos lo ya
-        # comprometido por pedidos activos aún no despachados) en el servidor.
-        # El frontend bloquea el botón "Agregar" para existencia=0, pero la validación
-        # aquí cubre manipulaciones del form y cambios de stock entre búsqueda y envío.
-        codigos_pedido = [item['codigo'] for item in items_data]
-
         deposito_codigo_int = None
         try:
             deposito_codigo_int = int(deposito_codigo)
         except (ValueError, TypeError):
             pass
-
-        stock_pedido = {}
-        dbisam_consulta_ok = False
-        try:
-            stock_pedido = PedidosDBISAM().consultar_stock_multiple(codigos_pedido, deposito=DEPOSITO_ALMACEN)
-            dbisam_consulta_ok = True
-        except Exception as e:
-            messages.warning(request, f'No se pudo verificar el stock en almacén: {e}')
-
-        disponibilidad = calcular_disponibilidad(codigos_pedido, stock_pedido) if dbisam_consulta_ok else {}
 
         if disponibilidad:
             conflictos = [
@@ -351,20 +388,7 @@ def crear_pedido(request):
                     'No hay suficiente stock para algunos ítems. '
                     'Corrija las cantidades marcadas en rojo: ' + ', '.join(detalles),
                 )
-                ctx.update({
-                    'items_json_inicial': items_json,
-                    'stock_info_json': json.dumps({
-                        item['codigo']: disponibilidad.get(item['codigo'], {}).get(
-                            'disponible', int(item['cantidad']))
-                        for item in items_data
-                    }),
-                    'categoria_inicial': categoria_codigo,
-                    'categoria_nombre_inicial': categoria_nombre,
-                    'condicion_inicial': condicion,
-                    'deposito_inicial': deposito_codigo,
-                    'deposito_nombre_inicial': deposito_nombre or deposito_codigo,
-                    'es_mixto_inicial': es_mixto,
-                })
+                ctx.update(_ctx_rehidratacion())
                 return render(request, 'pedidos-crear.html', ctx)
 
         primer_item = items_data[0]

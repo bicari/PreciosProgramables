@@ -469,6 +469,16 @@ function validarFormulario() {
 
     habilitarBusqueda();
     bloquearCategoria();
+    actualizarBotonEnviar();
+}
+
+function actualizarBotonEnviar() {
+    // El carrito puede tener items (cargados desde a2) antes de que categoria,
+    // condicion y deposito esten completos — el boton no debe habilitarse hasta
+    // que el formulario este completo, sin importar el origen de los items.
+    const hayErroresStock = itemsPedido.some(i => i.stockError);
+    document.getElementById('btn-enviar').disabled =
+        itemsPedido.length === 0 || hayErroresStock || !formularioCompleto();
 }
 
 function seleccionarCategoria(select) {
@@ -588,8 +598,7 @@ function _checkStockYActualizar(index) {
         renderItems();
     } else {
         actualizarJSON();
-        const hayErrores = itemsPedido.some(i => i.stockError);
-        document.getElementById('btn-enviar').disabled = hayErrores;
+        actualizarBotonEnviar();
     }
 }
 
@@ -597,23 +606,20 @@ function renderItems() {
     const tbody = document.getElementById('items-body');
     const sinItems = document.getElementById('sin-items');
     const totalBadge = document.getElementById('total-items');
-    const btnEnviar = document.getElementById('btn-enviar');
 
     if (itemsPedido.length === 0) {
         tbody.innerHTML = '';
         sinItems.style.display = 'block';
-        btnEnviar.disabled = true;
         totalBadge.textContent = '0 items';
         actualizarJSON();
         bloquearCategoria();
+        actualizarBotonEnviar();
         return;
     }
 
     sinItems.style.display = 'none';
     totalBadge.textContent = itemsPedido.length + ' items';
-
-    const hayErroresStock = itemsPedido.some(i => i.stockError);
-    btnEnviar.disabled = hayErroresStock;
+    actualizarBotonEnviar();
 
     tbody.innerHTML = itemsPedido.map((item, i) => `
         <tr class="${item.stockError ? 'table-danger' : ''}" data-index="${i}">

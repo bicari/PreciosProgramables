@@ -1239,6 +1239,77 @@ class CrearPedidoStockTest(TestCase):
         self.assertIn('items_json_inicial', resp.context)
 
 
+class CrearPedidoValidacionParcialConCarritoA2Test(TestCase):
+    """Cuando el carrito ya tiene items (cargados desde a2 antes de completar el
+    formulario de categoria/condicion/deposito), rechazar por un campo de cabecera
+    faltante no debe:
+    (a) bloquear ordenes mixtas cuya categoria de cabecera nunca se fijo pero cuyos
+        items ya traen su propia categoria (el header la deriva del primer item al
+        crear el Pedido, pero el guard de validacion no lo sabia), ni
+    (b) descartar el carrito cargado — debe rehidratarlo igual que el caso de stock.
+    """
+
+    def setUp(self):
+        from users.models import User
+        from django.urls import reverse
+        self.reverse = reverse
+        self.user = User.objects.create_superuser(username='a2_valid_u', password='x')
+        self.client.force_login(self.user)
+        self.url = self.reverse('pedidos-crear')
+        self.items_mixtos = [
+            {'codigo': 'SKU1', 'descripcion': 'Producto Uno', 'cantidad': '2',
+             'referencia': '', 'puesto': '', 'ref_proveedor': '',
+             'categoria': 'CAT1', 'categoria_nombre': 'Categoria 1'},
+            {'codigo': 'SKU2', 'descripcion': 'Producto Dos', 'cantidad': '3',
+             'referencia': '', 'puesto': '', 'ref_proveedor': '',
+             'categoria': 'CAT2', 'categoria_nombre': 'Categoria 2'},
+        ]
+
+    def _post(self, overrides, mock_stock=None):
+        data = {
+            'categoria': '', 'categoria_nombre': '',
+            'condicion': 'URGENTE', 'deposito': '2', 'deposito_nombre': 'Tienda Norte',
+            'items_json': json.dumps(self.items_mixtos), 'es_mixto': 'on',
+        }
+        data.update(overrides)
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.obtener_categorias.return_value = []
+            mock_db.return_value.consultar_stock_multiple.return_value = (
+                mock_stock or {'SKU1': 10, 'SKU2': 10}
+            )
+            resp = self.client.post(self.url, data)
+        return resp
+
+    def test_categoria_de_cabecera_ausente_usa_categoria_del_primer_item(self):
+        from .models import Pedido, PedidoItem
+        resp = self._post({})  # categoria='' explicito, items ya traen su categoria
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(Pedido.objects.count(), 1)
+        pedido = Pedido.objects.first()
+        self.assertEqual(pedido.categoria, 'CAT1')
+        self.assertEqual(PedidoItem.objects.get(codigo='SKU2').categoria, 'CAT2')
+
+    def test_condicion_ausente_rehidrata_el_carrito(self):
+        from .models import Pedido
+        resp = self._post({'condicion': ''})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(Pedido.objects.count(), 0)
+        self.assertIn('items_json_inicial', resp.context)
+        self.assertIn('stock_info_json', resp.context)
+
+    def test_deposito_ausente_rehidrata_el_carrito(self):
+        from .models import Pedido
+        resp = self._post({'deposito': ''})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(Pedido.objects.count(), 0)
+        self.assertIn('items_json_inicial', resp.context)
+
+    def test_categoria_y_carrito_vacios_no_rehidrata_ni_falla(self):
+        resp = self._post({'items_json': '[]'})
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn('items_json_inicial', resp.context)
+
+
 class CrearPedidoDisponibilidadTest(TestCase):
     """crear_pedido descuenta lo comprometido por pedidos previos no completados
     del stock físico, y rechaza pedidos que excedan lo realmente disponible."""
