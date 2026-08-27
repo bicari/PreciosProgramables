@@ -268,7 +268,7 @@
             </div>
         </div>
 
-        <div class="row g-2 mb-3">
+        <div class="row g-2 mb-3 align-items-end">
             <div class="col-md-6">
                 <label for="a2-documento" class="form-label small">N° de documento</label>
                 <input type="text" class="form-control" id="a2-documento" name="documento"
@@ -277,7 +277,8 @@
                     hx-trigger="input changed delay:500ms, keyup[key=='Enter'], cambioFiltroA2"
                     hx-target="#resultados-a2"
                     hx-swap="innerHTML"
-                    hx-include="#a2-cliente, .chk-tipo-a2">
+                    hx-include="#a2-cliente, .chk-tipo-a2"
+                    hx-indicator="#texto-buscando-a2">
             </div>
             <div class="col-md-6">
                 <label for="a2-cliente" class="form-label small">Cliente</label>
@@ -287,7 +288,14 @@
                     hx-trigger="input changed delay:500ms, keyup[key=='Enter'], cambioFiltroA2"
                     hx-target="#resultados-a2"
                     hx-swap="innerHTML"
-                    hx-include="#a2-documento, .chk-tipo-a2">
+                    hx-include="#a2-documento, .chk-tipo-a2"
+                    hx-indicator="#texto-buscando-a2">
+            </div>
+            <div class="col-12">
+                <small id="texto-buscando-a2" class="htmx-indicator text-primary fw-semibold" style="display:none;">
+                    <span class="loader-dots"><span></span><span></span><span></span></span>
+                    Buscando...
+                </small>
             </div>
         </div>
 
@@ -460,6 +468,7 @@ function validarFormulario() {
         selDep.options[selDep.selectedIndex]?.dataset.nombre || '';
 
     habilitarBusqueda();
+    bloquearCategoria();
 }
 
 function seleccionarCategoria(select) {
@@ -484,7 +493,7 @@ function sincronizarMixto() {
 
 function bloquearCategoria() {
     const esMixto = document.getElementById('checkbox-mixto').checked;
-    if (!categoriaFijada && itemsPedido.length > 0) {
+    if (!categoriaFijada && itemsPedido.length > 0 && formularioCompleto()) {
         categoriaFijada = true;
         if (!esMixto) {
             document.getElementById('selector-categoria').disabled = true;
@@ -772,9 +781,20 @@ function mezclarItemsA2(items) {
         document.getElementById('checkbox-mixto').checked = true;
         sincronizarMixto();
     } else if (categoriasEnCarrito.length === 1) {
+        const cat = categoriasEnCarrito[0];
         const sel = document.getElementById('selector-categoria');
-        sel.value = categoriasEnCarrito[0];
-        seleccionarCategoria(sel);
+        const opcionExiste = Array.from(sel.options).some(function(o) { return o.value === cat; });
+        if (opcionExiste) {
+            sel.value = cat;
+            seleccionarCategoria(sel);
+        } else {
+            // El codigo de categoria del item no tiene <option> visible en el
+            // selector (ej. discrepancia de padding CHAR en DBISAM). Fijamos
+            // los campos ocultos igual, para no bloquear el envio del pedido.
+            const item = itemsPedido.find(function(i) { return i.categoria === cat; });
+            document.getElementById('campo-categoria').value = cat;
+            document.getElementById('campo-categoria-nombre').value = (item && item.categoria_nombre) || cat;
+        }
     }
 
     renderItems();
@@ -803,6 +823,12 @@ document.getElementById('btn-cargar-a2').addEventListener('click', function() {
             if (data.error) {
                 document.getElementById('resultados-a2').innerHTML =
                     '<p class="text-danger p-2">' + data.error + '</p>';
+                return;
+            }
+            if (!data.items.length) {
+                document.getElementById('resultados-a2').innerHTML =
+                    '<p class="text-muted p-2">Los documentos seleccionados ya no tienen items disponibles ' +
+                    'para cargar (puede que su estado haya cambiado). Prueba buscar de nuevo.</p>';
                 return;
             }
             mezclarItemsA2(data.items);
