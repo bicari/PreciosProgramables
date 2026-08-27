@@ -66,6 +66,12 @@
         </div>
     </div>
 
+    <div class="d-flex justify-content-end mb-2">
+        <button type="button" class="btn btn-outline-primary btn-sm" id="btn-abrir-a2">
+            <i class="fas fa-file-import"></i> Cargar de a2
+        </button>
+    </div>
+
     <div class="card mb-3" id="card-busqueda" style="opacity:0.5; pointer-events:none;">
         <div class="card-body">
             <h5 class="card-title">Buscar Producto</h5>
@@ -233,6 +239,66 @@
         </div>
         <p class="fw-bold fs-5 mb-1 text-dark">Enviando pedido...</p>
         <p class="text-muted mb-0" style="font-size:0.9rem;">Por favor espere, no cierre esta ventana</p>
+    </div>
+</div>
+
+<!-- Overlay de carga de documentos a2 -->
+<div id="overlay-a2" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9997; align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:16px; padding:28px 32px; max-width:760px; width:95%; max-height:85vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.25);">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0"><i class="fas fa-file-import"></i> Cargar de a2</h5>
+            <button type="button" class="btn-close" id="btn-cerrar-a2" aria-label="Cerrar"></button>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-bold d-block">Tipo de documento</label>
+            <div class="d-flex flex-wrap gap-3">
+                <div class="form-check">
+                    <input class="form-check-input chk-tipo-a2" type="checkbox" value="9" id="tipo-a2-9" name="tipos">
+                    <label class="form-check-label" for="tipo-a2-9"><i class="fas fa-file-invoice-dollar"></i> Presupuesto</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input chk-tipo-a2" type="checkbox" value="10" id="tipo-a2-10" name="tipos">
+                    <label class="form-check-label" for="tipo-a2-10"><i class="fas fa-file-invoice"></i> Pedido</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input chk-tipo-a2" type="checkbox" value="13" id="tipo-a2-13" name="tipos">
+                    <label class="form-check-label" for="tipo-a2-13"><i class="fas fa-truck"></i> Nota de Entrega</label>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-2 mb-3">
+            <div class="col-md-6">
+                <label for="a2-documento" class="form-label small">N° de documento</label>
+                <input type="text" class="form-control" id="a2-documento" name="documento"
+                    placeholder="Ej. 00001234" autocomplete="off"
+                    hx-get="/pedidos/buscar-documentos-a2/"
+                    hx-trigger="input changed delay:500ms, keyup[key=='Enter'], cambioFiltroA2"
+                    hx-target="#resultados-a2"
+                    hx-swap="innerHTML"
+                    hx-include="#a2-cliente, .chk-tipo-a2">
+            </div>
+            <div class="col-md-6">
+                <label for="a2-cliente" class="form-label small">Cliente</label>
+                <input type="text" class="form-control" id="a2-cliente" name="cliente"
+                    placeholder="Nombre del cliente" autocomplete="off"
+                    hx-get="/pedidos/buscar-documentos-a2/"
+                    hx-trigger="input changed delay:500ms, keyup[key=='Enter'], cambioFiltroA2"
+                    hx-target="#resultados-a2"
+                    hx-swap="innerHTML"
+                    hx-include="#a2-documento, .chk-tipo-a2">
+            </div>
+        </div>
+
+        <div id="resultados-a2" class="mb-3">
+            <p class="text-muted p-2">Seleccione el tipo de documento e ingrese un número o cliente para buscar</p>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center">
+            <button type="button" class="btn btn-secondary" id="btn-cancelar-a2">Cancelar</button>
+            <button type="button" class="btn btn-primary" id="btn-cargar-a2" disabled>Cargar seleccionados (0)</button>
+        </div>
     </div>
 </div>
 
@@ -629,6 +695,126 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     renderItems();
+});
+
+document.getElementById('btn-abrir-a2').addEventListener('click', function() {
+    document.getElementById('overlay-a2').style.display = 'flex';
+    document.getElementById('a2-documento').focus();
+});
+
+function cerrarOverlayA2() {
+    document.getElementById('overlay-a2').style.display = 'none';
+    document.getElementById('a2-documento').value = '';
+    document.getElementById('a2-cliente').value = '';
+    document.querySelectorAll('.chk-tipo-a2').forEach(function(c) { c.checked = false; });
+    document.getElementById('resultados-a2').innerHTML =
+        '<p class="text-muted p-2">Seleccione el tipo de documento e ingrese un número o cliente para buscar</p>';
+    actualizarContadorA2();
+}
+
+document.getElementById('btn-cerrar-a2').addEventListener('click', cerrarOverlayA2);
+document.getElementById('btn-cancelar-a2').addEventListener('click', cerrarOverlayA2);
+
+document.getElementById('overlay-a2').addEventListener('click', function(e) {
+    if (e.target === this) cerrarOverlayA2();
+});
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.getElementById('overlay-a2').style.display === 'flex') {
+        cerrarOverlayA2();
+    }
+});
+
+document.querySelectorAll('.chk-tipo-a2').forEach(function(chk) {
+    chk.addEventListener('change', function() {
+        const doc = document.getElementById('a2-documento');
+        const cliente = document.getElementById('a2-cliente');
+        if (doc.value.trim() || cliente.value.trim()) {
+            htmx.trigger(doc, 'cambioFiltroA2');
+        }
+    });
+});
+
+function actualizarContadorA2() {
+    const seleccionados = document.querySelectorAll('.chk-doc-a2:checked').length;
+    const btn = document.getElementById('btn-cargar-a2');
+    btn.textContent = 'Cargar seleccionados (' + seleccionados + ')';
+    btn.disabled = seleccionados === 0;
+}
+
+document.getElementById('resultados-a2').addEventListener('change', function(e) {
+    if (e.target.classList.contains('chk-doc-a2')) {
+        actualizarContadorA2();
+    }
+});
+
+function mezclarItemsA2(items) {
+    items.forEach(function(item) {
+        const existe = itemsPedido.find(function(i) { return i.codigo === item.codigo; });
+        if (existe) {
+            existe.cantidad += item.cantidad;
+        } else {
+            itemsPedido.push({
+                codigo: item.codigo,
+                descripcion: item.descripcion,
+                referencia: item.referencia || '',
+                puesto: item.puesto || '',
+                ref_proveedor: item.ref_proveedor || '',
+                cantidad: item.cantidad,
+                categoria: item.categoria,
+                categoria_nombre: item.categoria_nombre,
+            });
+        }
+    });
+
+    const categoriasEnCarrito = Array.from(new Set(itemsPedido.map(function(i) { return i.categoria; }).filter(Boolean)));
+    if (categoriasEnCarrito.length > 1) {
+        document.getElementById('checkbox-mixto').checked = true;
+        sincronizarMixto();
+    } else if (categoriasEnCarrito.length === 1) {
+        const sel = document.getElementById('selector-categoria');
+        sel.value = categoriasEnCarrito[0];
+        seleccionarCategoria(sel);
+    }
+
+    renderItems();
+}
+
+document.getElementById('btn-cargar-a2').addEventListener('click', function() {
+    const ids = Array.from(document.querySelectorAll('.chk-doc-a2:checked')).map(function(c) { return c.value; });
+    if (ids.length === 0) return;
+
+    const btn = this;
+    btn.disabled = true;
+
+    const params = new URLSearchParams();
+    ids.forEach(function(id) { params.append('operacion_ids', id); });
+
+    fetch('/pedidos/cargar-items-a2/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+        },
+        body: params.toString(),
+    })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                document.getElementById('resultados-a2').innerHTML =
+                    '<p class="text-danger p-2">' + data.error + '</p>';
+                return;
+            }
+            mezclarItemsA2(data.items);
+            cerrarOverlayA2();
+        })
+        .catch(function() {
+            document.getElementById('resultados-a2').innerHTML =
+                '<p class="text-danger p-2">No se pudo consultar a2. Intenta de nuevo en unos segundos.</p>';
+        })
+        .finally(function() {
+            actualizarContadorA2();
+        });
 });
 </script>
 {% endblock content %}
