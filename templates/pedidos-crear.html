@@ -66,7 +66,10 @@
         </div>
     </div>
 
-    <div class="d-flex justify-content-end mb-2">
+    <div class="d-flex justify-content-end gap-2 mb-2">
+        <button type="button" class="btn btn-outline-primary btn-sm" id="btn-abrir-excel">
+            <i class="fas fa-file-excel"></i> Cargar desde Excel
+        </button>
         <button type="button" class="btn btn-outline-primary btn-sm" id="btn-abrir-a2">
             <i class="fas fa-file-import"></i> Cargar de a2
         </button>
@@ -324,6 +327,36 @@
         <div class="d-flex justify-content-between align-items-center">
             <button type="button" class="btn btn-secondary" id="btn-cancelar-a2">Cancelar</button>
             <button type="button" class="btn btn-primary" id="btn-cargar-a2" disabled>Cargar seleccionados (0)</button>
+        </div>
+    </div>
+</div>
+
+<!-- Overlay de carga masiva desde Excel -->
+<div id="overlay-excel" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9996; align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:16px; padding:28px 32px; max-width:520px; width:95%; max-height:85vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.25);">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0"><i class="fas fa-file-excel"></i> Cargar desde Excel</h5>
+            <button type="button" class="btn-close" id="btn-cerrar-excel" aria-label="Cerrar"></button>
+        </div>
+
+        <p class="text-muted small">Sube un archivo con las columnas SKU y Cantidad (Categoria es opcional, solo de referencia).</p>
+
+        <div class="mb-3">
+            <a href="/pedidos/plantilla-excel/" class="btn btn-outline-secondary btn-sm">
+                <i class="fas fa-download"></i> Descargar plantilla
+            </a>
+        </div>
+
+        <div class="mb-3">
+            <label for="excel-archivo" class="form-label small">Archivo (.xlsx o .xls)</label>
+            <input type="file" class="form-control" id="excel-archivo" accept=".xlsx,.xls">
+        </div>
+
+        <div id="resultados-excel" class="mb-3"></div>
+
+        <div class="d-flex justify-content-between align-items-center">
+            <button type="button" class="btn btn-secondary" id="btn-cancelar-excel">Cancelar</button>
+            <button type="button" class="btn btn-primary" id="btn-cargar-excel">Cargar archivo</button>
         </div>
     </div>
 </div>
@@ -782,7 +815,7 @@ document.getElementById('resultados-a2').addEventListener('change', function(e) 
     }
 });
 
-function mezclarItemsA2(items) {
+function mezclarItemsAlCarrito(items) {
     items.forEach(function(item) {
         const existe = itemsPedido.find(function(i) { return i.codigo === item.codigo; });
         if (existe) {
@@ -856,7 +889,7 @@ document.getElementById('btn-cargar-a2').addEventListener('click', function() {
                     'para cargar (puede que su estado haya cambiado). Prueba buscar de nuevo.</p>';
                 return;
             }
-            mezclarItemsA2(data.items);
+            mezclarItemsAlCarrito(data.items);
             cerrarOverlayA2();
         })
         .catch(function() {
@@ -865,6 +898,81 @@ document.getElementById('btn-cargar-a2').addEventListener('click', function() {
         })
         .finally(function() {
             actualizarContadorA2();
+        });
+});
+
+document.getElementById('btn-abrir-excel').addEventListener('click', function() {
+    document.getElementById('overlay-excel').style.display = 'flex';
+});
+
+function cerrarOverlayExcel() {
+    document.getElementById('overlay-excel').style.display = 'none';
+    document.getElementById('excel-archivo').value = '';
+    document.getElementById('resultados-excel').innerHTML = '';
+}
+
+document.getElementById('btn-cerrar-excel').addEventListener('click', cerrarOverlayExcel);
+document.getElementById('btn-cancelar-excel').addEventListener('click', cerrarOverlayExcel);
+
+document.getElementById('overlay-excel').addEventListener('click', function(e) {
+    if (e.target === this) cerrarOverlayExcel();
+});
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.getElementById('overlay-excel').style.display === 'flex') {
+        cerrarOverlayExcel();
+    }
+});
+
+document.getElementById('btn-cargar-excel').addEventListener('click', function() {
+    const input = document.getElementById('excel-archivo');
+    if (!input.files.length) {
+        document.getElementById('resultados-excel').innerHTML =
+            '<p class="text-warning p-2">Selecciona un archivo primero</p>';
+        return;
+    }
+
+    const btn = this;
+    btn.disabled = true;
+
+    const formData = new FormData();
+    formData.append('archivo', input.files[0]);
+
+    fetch('/pedidos/cargar-items-excel/', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+        },
+        body: formData,
+    })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                document.getElementById('resultados-excel').innerHTML =
+                    '<p class="text-danger p-2">' + data.error + '</p>';
+                return;
+            }
+            if (data.items.length) {
+                mezclarItemsAlCarrito(data.items);
+            }
+            if (data.omitidos.length) {
+                const lista = data.omitidos.map(function(o) {
+                    return '<li>Fila ' + o.fila + ': ' + o.sku + ' — ' + o.motivo + '</li>';
+                }).join('');
+                document.getElementById('resultados-excel').innerHTML =
+                    '<p class="text-warning p-2 mb-1">' + data.items.length + ' ítem(s) cargados. ' +
+                    data.omitidos.length + ' fila(s) omitida(s):</p>' +
+                    '<ul class="small text-muted">' + lista + '</ul>';
+            } else {
+                cerrarOverlayExcel();
+            }
+        })
+        .catch(function() {
+            document.getElementById('resultados-excel').innerHTML =
+                '<p class="text-danger p-2">No se pudo consultar a2. Intenta de nuevo en unos segundos.</p>';
+        })
+        .finally(function() {
+            btn.disabled = false;
         });
 });
 </script>
