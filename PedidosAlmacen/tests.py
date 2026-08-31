@@ -5178,3 +5178,117 @@ class ConstruirItemsTest(TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]['cantidad'], 8)
         self.assertEqual(omitidos, [])
+
+
+class PlantillaExcelPedidoViewTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        self.user = User.objects.create_user(username='tnd_plantilla', password='x')
+        g, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.user.groups.add(g)
+        self.client.force_login(self.user)
+
+    def test_descarga_xlsx_con_headers_correctos(self):
+        import openpyxl
+        import io
+        resp = self.client.get('/pedidos/plantilla-excel/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        wb = openpyxl.load_workbook(io.BytesIO(resp.content))
+        ws = wb.active
+        headers = [c.value for c in ws[1]]
+        self.assertEqual(headers, ['SKU', 'Cantidad', 'Categoria (opcional)'])
+
+    def test_usuario_sin_permiso_redirige(self):
+        from users.models import User
+        otro = User.objects.create_user(username='sin_permiso_plantilla', password='x')
+        self.client.force_login(otro)
+        resp = self.client.get('/pedidos/plantilla-excel/')
+        self.assertEqual(resp.status_code, 302)
+
+
+class CargarItemsExcelViewTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from django.contrib.auth.models import Group
+        self.user = User.objects.create_user(username='tnd_excel', password='x')
+        g, _ = Group.objects.get_or_create(name='Pedidos Tienda')
+        self.user.groups.add(g)
+        self.client.force_login(self.user)
+
+    def _archivo(self, filas, nombre='pedido.xlsx'):
+        import openpyxl
+        import io
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(['SKU', 'Cantidad', 'Categoria (opcional)'])
+        for fila in filas:
+            ws.append(fila)
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        return SimpleUploadedFile(
+            nombre, buffer.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_carga_items_validos(self, mock_db):
+        mock_db.return_value.resolver_productos.return_value = {
+            'SKU1': {'descripcion': 'Uno', 'referencia': 'R1', 'puesto': 'P1',
+                     'ref_proveedor': 'PR1', 'categoria': 'CAT1'},
+        }
+        mock_db.return_value.obtener_categorias.return_value = [('CAT1', 'Ferreteria')]
+        archivo = self._archivo([['SKU1', 5, '']])
+        resp = self.client.post('/pedidos/cargar-items-excel/', {'archivo': archivo})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(len(data['items']), 1)
+        self.assertEqual(data['items'][0]['cantidad'], 5)
+        self.assertEqual(data['items'][0]['categoria_nombre'], 'Ferreteria')
+        self.assertEqual(data['omitidos'], [])
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_fila_con_sku_no_encontrado_se_reporta_en_omitidos(self, mock_db):
+        mock_db.return_value.resolver_productos.return_value = {}
+        mock_db.return_value.obtener_categorias.return_value = []
+        archivo = self._archivo([['NOEXISTE', 5, '']])
+        resp = self.client.post('/pedidos/cargar-items-excel/', {'archivo': archivo})
+        data = resp.json()
+        self.assertEqual(data['items'], [])
+        self.assertEqual(len(data['omitidos']), 1)
+        self.assertEqual(data['omitidos'][0]['motivo'], 'SKU no encontrado en a2')
+
+    def test_extension_invalida_devuelve_400(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        archivo = SimpleUploadedFile('pedido.txt', b'no es un excel', content_type='text/plain')
+        resp = self.client.post('/pedidos/cargar-items-excel/', {'archivo': archivo})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_sin_archivo_devuelve_400(self):
+        resp = self.client.post('/pedidos/cargar-items-excel/', {})
+        self.assertEqual(resp.status_code, 400)
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_error_dbisam_devuelve_502(self, mock_db):
+        mock_db.return_value.resolver_productos.side_effect = pyodbc.DatabaseError('odbc down')
+        archivo = self._archivo([['SKU1', 5, '']])
+        resp = self.client.post('/pedidos/cargar-items-excel/', {'archivo': archivo})
+        self.assertEqual(resp.status_code, 502)
+
+    def test_get_no_permitido(self):
+        resp = self.client.get('/pedidos/cargar-items-excel/')
+        self.assertEqual(resp.status_code, 405)
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_mas_de_limite_filas_devuelve_400(self, mock_db):
+        from .excel_pedido import MAX_FILAS
+        archivo = self._archivo([[f'SKU{i}', 1, ''] for i in range(MAX_FILAS + 1)])
+        resp = self.client.post('/pedidos/cargar-items-excel/', {'archivo': archivo})
+        self.assertEqual(resp.status_code, 400)
+        mock_db.assert_not_called()

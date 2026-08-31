@@ -28,6 +28,8 @@ import json
 import csv
 import io
 import pyodbc
+import openpyxl
+from .excel_pedido import leer_filas_pedido, construir_items, ExcelPedidoError
 
 logger = logging.getLogger(__name__)
 
@@ -2655,3 +2657,62 @@ def cargar_items_documentos_a2(request):
     categorias_distintas = sorted({item['categoria'] for item in items if item['categoria']})
 
     return JsonResponse({'items': items, 'categorias_distintas': categorias_distintas})
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_tienda, login_url='dashboard')
+def plantilla_excel_pedido(request):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Pedido'
+    ws.append(['SKU', 'Cantidad', 'Categoria (opcional)'])
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename="plantilla_pedido.xlsx"'
+    return response
+
+
+@login_required(login_url='/login/')
+@user_passes_test(is_pedidos_tienda, login_url='dashboard')
+def cargar_items_excel(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Método no permitido'}, status=405)
+
+    archivo = request.FILES.get('archivo')
+    if archivo is None:
+        return JsonResponse({'error': 'Debe seleccionar un archivo'}, status=400)
+    if not archivo.name.lower().endswith(('.xlsx', '.xls')):
+        return JsonResponse({'error': 'El archivo debe ser .xlsx o .xls'}, status=400)
+
+    try:
+        filas = leer_filas_pedido(archivo)
+    except ExcelPedidoError as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+    codigos = sorted({
+        f['sku'].strip() for f in filas
+        if isinstance(f['sku'], str) and f['sku'].strip()
+    })
+    try:
+        productos = PedidosDBISAM().resolver_productos(codigos)
+    except pyodbc.Error as e:
+        logger.error(f'Error al resolver productos del Excel de pedido (codigos={codigos}): {e}')
+        return JsonResponse(
+            {'error': 'No se pudo consultar a2. Intenta de nuevo en unos segundos.'}, status=502
+        )
+
+    categorias_map = {}
+    try:
+        categorias_map = {str(c[0]): c[1] for c in PedidosDBISAM().obtener_categorias()}
+    except pyodbc.Error as e:
+        logger.error(f'Error al obtener categorias para carga de Excel de pedido: {e}')
+
+    items, omitidos = construir_items(filas, productos, categorias_map)
+    categorias_distintas = sorted({item['categoria'] for item in items if item['categoria']})
+
+    return JsonResponse({'items': items, 'categorias_distintas': categorias_distintas, 'omitidos': omitidos})
