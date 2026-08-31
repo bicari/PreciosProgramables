@@ -5079,3 +5079,102 @@ class CargarItemsDocumentosA2ViewTest(TestCase):
     def test_get_no_permitido(self):
         resp = self.client.get('/pedidos/cargar-items-a2/')
         self.assertEqual(resp.status_code, 405)
+
+
+class LeerFilasPedidoTest(TestCase):
+    def _archivo(self, filas, headers=('SKU', 'Cantidad', 'Categoria (opcional)')):
+        import openpyxl
+        import io
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(list(headers))
+        for fila in filas:
+            ws.append(fila)
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        return buffer
+
+    def test_lee_filas_validas(self):
+        from .excel_pedido import leer_filas_pedido
+        archivo = self._archivo([['SKU1', 5, ''], ['SKU2', 3, 'FERRETERIA']])
+        filas = leer_filas_pedido(archivo)
+        self.assertEqual(filas, [
+            {'fila': 2, 'sku': 'SKU1', 'cantidad': 5},
+            {'fila': 3, 'sku': 'SKU2', 'cantidad': 3},
+        ])
+
+    def test_columnas_faltantes_lanza_error(self):
+        from .excel_pedido import leer_filas_pedido, ExcelPedidoError
+        archivo = self._archivo([['SKU1', 5]], headers=('Codigo', 'Cant'))
+        with self.assertRaises(ExcelPedidoError):
+            leer_filas_pedido(archivo)
+
+    def test_mas_de_limite_filas_lanza_error(self):
+        from .excel_pedido import leer_filas_pedido, ExcelPedidoError, MAX_FILAS
+        archivo = self._archivo([[f'SKU{i}', 1, ''] for i in range(MAX_FILAS + 1)])
+        with self.assertRaises(ExcelPedidoError):
+            leer_filas_pedido(archivo)
+
+
+class ConstruirItemsTest(TestCase):
+    def test_fila_valida_se_incluye(self):
+        from .excel_pedido import construir_items
+        filas = [{'fila': 2, 'sku': 'SKU1', 'cantidad': 5}]
+        productos = {'SKU1': {'descripcion': 'Producto Uno', 'referencia': 'REF1',
+                               'puesto': 'P1', 'ref_proveedor': 'PROV1', 'categoria': 'CAT1'}}
+        categorias_map = {'CAT1': 'Ferreteria'}
+        items, omitidos = construir_items(filas, productos, categorias_map)
+        self.assertEqual(items, [{
+            'codigo': 'SKU1', 'descripcion': 'Producto Uno', 'referencia': 'REF1',
+            'puesto': 'P1', 'ref_proveedor': 'PROV1', 'cantidad': 5,
+            'categoria': 'CAT1', 'categoria_nombre': 'Ferreteria',
+        }])
+        self.assertEqual(omitidos, [])
+
+    def test_sku_vacio_se_omite(self):
+        from .excel_pedido import construir_items
+        filas = [{'fila': 2, 'sku': float('nan'), 'cantidad': 5}]
+        items, omitidos = construir_items(filas, {}, {})
+        self.assertEqual(items, [])
+        self.assertEqual(len(omitidos), 1)
+        self.assertEqual(omitidos[0]['fila'], 2)
+        self.assertEqual(omitidos[0]['motivo'], 'SKU vacío')
+
+    def test_cantidad_invalida_se_omite(self):
+        from .excel_pedido import construir_items
+        filas = [{'fila': 2, 'sku': 'SKU1', 'cantidad': 'abc'}]
+        productos = {'SKU1': {'descripcion': '', 'referencia': '', 'puesto': '',
+                               'ref_proveedor': '', 'categoria': ''}}
+        items, omitidos = construir_items(filas, productos, {})
+        self.assertEqual(items, [])
+        self.assertEqual(omitidos[0]['motivo'], 'Cantidad inválida')
+
+    def test_cantidad_cero_o_negativa_se_omite(self):
+        from .excel_pedido import construir_items
+        filas = [{'fila': 2, 'sku': 'SKU1', 'cantidad': 0}]
+        productos = {'SKU1': {'descripcion': '', 'referencia': '', 'puesto': '',
+                               'ref_proveedor': '', 'categoria': ''}}
+        items, omitidos = construir_items(filas, productos, {})
+        self.assertEqual(items, [])
+        self.assertEqual(omitidos[0]['motivo'], 'Cantidad inválida')
+
+    def test_sku_no_encontrado_se_omite(self):
+        from .excel_pedido import construir_items
+        filas = [{'fila': 2, 'sku': 'NOEXISTE', 'cantidad': 5}]
+        items, omitidos = construir_items(filas, {}, {})
+        self.assertEqual(items, [])
+        self.assertEqual(omitidos[0]['motivo'], 'SKU no encontrado en a2')
+
+    def test_sku_duplicado_suma_cantidades(self):
+        from .excel_pedido import construir_items
+        filas = [
+            {'fila': 2, 'sku': 'SKU1', 'cantidad': 5},
+            {'fila': 3, 'sku': 'SKU1', 'cantidad': 3},
+        ]
+        productos = {'SKU1': {'descripcion': 'Uno', 'referencia': '', 'puesto': '',
+                               'ref_proveedor': '', 'categoria': ''}}
+        items, omitidos = construir_items(filas, productos, {})
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['cantidad'], 8)
+        self.assertEqual(omitidos, [])
