@@ -287,6 +287,57 @@ class ObtenerItemsDocumentosTest(TestCase):
         self.assertEqual(cantidad, 5)
 
 
+class ResolverProductosTest(TestCase):
+    def _capturar_sql(self, codigos):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = (mock_connect.return_value.__enter__.return_value
+                      .cursor.return_value.__enter__.return_value)
+            cursor.execute.return_value.fetchall.return_value = []
+            db.resolver_productos(codigos)
+            return cursor.execute.call_args[0][0]
+
+    def test_filtra_por_codigos(self):
+        sql = self._capturar_sql(['SKU1', 'SKU2'])
+        self.assertIn("FI_CODIGO IN ('SKU1','SKU2')", sql)
+
+    def test_sin_codigos_no_ejecuta_query(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            resultado = db.resolver_productos([])
+        mock_connect.assert_not_called()
+        self.assertEqual(resultado, {})
+
+    def test_escapa_comillas_simples(self):
+        sql = self._capturar_sql(["O'BRIEN"])
+        self.assertIn("O''BRIEN", sql)
+
+    def test_mapea_filas_a_dict_indexado_por_codigo(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = (mock_connect.return_value.__enter__.return_value
+                      .cursor.return_value.__enter__.return_value)
+            cursor.execute.return_value.fetchall.return_value = [
+                ('SKU1', 'Producto Uno', 'REF1', 'P1', 'PROV1', 'FERRETERIA'),
+            ]
+            resultado = db.resolver_productos(['SKU1'])
+        self.assertEqual(resultado, {
+            'SKU1': {
+                'descripcion': 'Producto Uno', 'referencia': 'REF1',
+                'puesto': 'P1', 'ref_proveedor': 'PROV1', 'categoria': 'FERRETERIA',
+            },
+        })
+
+    def test_codigo_no_encontrado_no_aparece_en_resultado(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = (mock_connect.return_value.__enter__.return_value
+                      .cursor.return_value.__enter__.return_value)
+            cursor.execute.return_value.fetchall.return_value = []
+            resultado = db.resolver_productos(['NOEXISTE'])
+        self.assertEqual(resultado, {})
+
+
 class BuscarProductoVistaTest(TestCase):
     def setUp(self):
         from users.models import User

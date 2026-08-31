@@ -714,3 +714,48 @@ class PedidosDBISAM:
                     return _mapear(rows_venta) + _mapear(rows_compra)
         except Exception as e:
             raise pyodbc.DatabaseError(str(e))
+
+    def resolver_productos(self, codigos: list[str]) -> dict[str, dict]:
+        """Resuelve datos de producto (SINVENTARIO) para una lista de códigos.
+
+        Usado por la carga masiva de pedidos vía Excel: cada fila del
+        archivo trae solo el código, este método completa el resto.
+
+        Args:
+            codigos: Códigos de producto a resolver.
+
+        Returns:
+            Dict indexado por código: {codigo: {descripcion, referencia,
+            puesto, ref_proveedor, categoria}}. Códigos no encontrados en
+            SINVENTARIO simplemente no aparecen en el resultado.
+        """
+        codigos_validos = [c for c in codigos if c]
+        if not codigos_validos:
+            return {}
+
+        codigos_str = ','.join("'" + c.replace("'", "''") + "'" for c in codigos_validos)
+
+        try:
+            with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    rows = cursor.execute(f"""SELECT
+                                            FI_CODIGO,
+                                            FI_DESCRIPCION,
+                                            FI_REFERENCIA,
+                                            FI_PUESTO,
+                                            ZZCAMPO_001,
+                                            FI_CATEGORIA
+                                        FROM SINVENTARIO
+                                        WHERE FI_CODIGO IN ({codigos_str})""").fetchall()
+                    return {
+                        _clean(r[0]): {
+                            'descripcion': _clean(r[1]),
+                            'referencia': _clean(r[2]),
+                            'puesto': _clean(r[3]),
+                            'ref_proveedor': _clean(r[4]),
+                            'categoria': _clean(r[5]),
+                        }
+                        for r in rows
+                    }
+        except Exception as e:
+            raise pyodbc.DatabaseError(str(e))
