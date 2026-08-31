@@ -29,7 +29,7 @@ import csv
 import io
 import pyodbc
 import openpyxl
-from .excel_pedido import leer_filas_pedido, construir_items, ExcelPedidoError
+from .excel_pedido import leer_filas_pedido, construir_items, ExcelPedidoError, MAX_SKU_LEN
 
 logger = logging.getLogger(__name__)
 
@@ -2677,6 +2677,9 @@ def plantilla_excel_pedido(request):
     return response
 
 
+MAX_ARCHIVO_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
 @login_required(login_url='/login/')
 @user_passes_test(is_pedidos_tienda, login_url='dashboard')
 def cargar_items_excel(request):
@@ -2686,8 +2689,10 @@ def cargar_items_excel(request):
     archivo = request.FILES.get('archivo')
     if archivo is None:
         return JsonResponse({'error': 'Debe seleccionar un archivo'}, status=400)
-    if not archivo.name.lower().endswith(('.xlsx', '.xls')):
-        return JsonResponse({'error': 'El archivo debe ser .xlsx o .xls'}, status=400)
+    if not archivo.name.lower().endswith('.xlsx'):
+        return JsonResponse({'error': 'El archivo debe ser .xlsx'}, status=400)
+    if archivo.size > MAX_ARCHIVO_BYTES:
+        return JsonResponse({'error': 'El archivo es demasiado grande (máximo 5 MB)'}, status=400)
 
     try:
         filas = leer_filas_pedido(archivo)
@@ -2695,8 +2700,8 @@ def cargar_items_excel(request):
         return JsonResponse({'error': str(e)}, status=400)
 
     codigos = sorted({
-        f['sku'].strip() for f in filas
-        if isinstance(f['sku'], str) and f['sku'].strip()
+        f['sku'].strip().upper() for f in filas
+        if isinstance(f['sku'], str) and f['sku'].strip() and len(f['sku'].strip()) <= MAX_SKU_LEN
     })
     try:
         productos = PedidosDBISAM().resolver_productos(codigos)

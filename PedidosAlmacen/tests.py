@@ -323,6 +323,7 @@ class ResolverProductosTest(TestCase):
             resultado = db.resolver_productos(['SKU1'])
         self.assertEqual(resultado, {
             'SKU1': {
+                'codigo': 'SKU1',
                 'descripcion': 'Producto Uno', 'referencia': 'REF1',
                 'puesto': 'P1', 'ref_proveedor': 'PROV1', 'categoria': 'FERRETERIA',
             },
@@ -5121,7 +5122,7 @@ class ConstruirItemsTest(TestCase):
     def test_fila_valida_se_incluye(self):
         from .excel_pedido import construir_items
         filas = [{'fila': 2, 'sku': 'SKU1', 'cantidad': 5}]
-        productos = {'SKU1': {'descripcion': 'Producto Uno', 'referencia': 'REF1',
+        productos = {'SKU1': {'codigo': 'SKU1', 'descripcion': 'Producto Uno', 'referencia': 'REF1',
                                'puesto': 'P1', 'ref_proveedor': 'PROV1', 'categoria': 'CAT1'}}
         categorias_map = {'CAT1': 'Ferreteria'}
         items, omitidos = construir_items(filas, productos, categorias_map)
@@ -5144,7 +5145,7 @@ class ConstruirItemsTest(TestCase):
     def test_cantidad_invalida_se_omite(self):
         from .excel_pedido import construir_items
         filas = [{'fila': 2, 'sku': 'SKU1', 'cantidad': 'abc'}]
-        productos = {'SKU1': {'descripcion': '', 'referencia': '', 'puesto': '',
+        productos = {'SKU1': {'codigo': 'SKU1', 'descripcion': '', 'referencia': '', 'puesto': '',
                                'ref_proveedor': '', 'categoria': ''}}
         items, omitidos = construir_items(filas, productos, {})
         self.assertEqual(items, [])
@@ -5153,7 +5154,7 @@ class ConstruirItemsTest(TestCase):
     def test_cantidad_cero_o_negativa_se_omite(self):
         from .excel_pedido import construir_items
         filas = [{'fila': 2, 'sku': 'SKU1', 'cantidad': 0}]
-        productos = {'SKU1': {'descripcion': '', 'referencia': '', 'puesto': '',
+        productos = {'SKU1': {'codigo': 'SKU1', 'descripcion': '', 'referencia': '', 'puesto': '',
                                'ref_proveedor': '', 'categoria': ''}}
         items, omitidos = construir_items(filas, productos, {})
         self.assertEqual(items, [])
@@ -5172,12 +5173,32 @@ class ConstruirItemsTest(TestCase):
             {'fila': 2, 'sku': 'SKU1', 'cantidad': 5},
             {'fila': 3, 'sku': 'SKU1', 'cantidad': 3},
         ]
-        productos = {'SKU1': {'descripcion': 'Uno', 'referencia': '', 'puesto': '',
+        productos = {'SKU1': {'codigo': 'SKU1', 'descripcion': 'Uno', 'referencia': '', 'puesto': '',
                                'ref_proveedor': '', 'categoria': ''}}
         items, omitidos = construir_items(filas, productos, {})
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]['cantidad'], 8)
         self.assertEqual(omitidos, [])
+
+    def test_sku_con_case_distinto_al_de_a2_igual_resuelve(self):
+        from .excel_pedido import construir_items
+        filas = [{'fila': 2, 'sku': 'sku1', 'cantidad': 5}]
+        productos = {'SKU1': {'codigo': 'SKU1', 'descripcion': 'Producto Uno', 'referencia': '',
+                               'puesto': '', 'ref_proveedor': '', 'categoria': ''}}
+        items, omitidos = construir_items(filas, productos, {})
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['codigo'], 'SKU1')
+        self.assertEqual(omitidos, [])
+
+    def test_sku_demasiado_largo_se_omite(self):
+        from .excel_pedido import construir_items, MAX_SKU_LEN
+        sku_largo = 'X' * (MAX_SKU_LEN + 1)
+        filas = [{'fila': 2, 'sku': sku_largo, 'cantidad': 5}]
+        items, omitidos = construir_items(filas, {}, {})
+        self.assertEqual(items, [])
+        self.assertEqual(len(omitidos), 1)
+        self.assertEqual(omitidos[0]['motivo'], 'SKU inválido (demasiado largo)')
+        self.assertEqual(omitidos[0]['sku'], 'X' * MAX_SKU_LEN + '...')
 
 
 class PlantillaExcelPedidoViewTest(TestCase):
@@ -5240,7 +5261,7 @@ class CargarItemsExcelViewTest(TestCase):
     @patch('PedidosAlmacen.views.PedidosDBISAM')
     def test_carga_items_validos(self, mock_db):
         mock_db.return_value.resolver_productos.return_value = {
-            'SKU1': {'descripcion': 'Uno', 'referencia': 'R1', 'puesto': 'P1',
+            'SKU1': {'codigo': 'SKU1', 'descripcion': 'Uno', 'referencia': 'R1', 'puesto': 'P1',
                      'ref_proveedor': 'PR1', 'categoria': 'CAT1'},
         }
         mock_db.return_value.obtener_categorias.return_value = [('CAT1', 'Ferreteria')]
@@ -5269,6 +5290,29 @@ class CargarItemsExcelViewTest(TestCase):
         archivo = SimpleUploadedFile('pedido.txt', b'no es un excel', content_type='text/plain')
         resp = self.client.post('/pedidos/cargar-items-excel/', {'archivo': archivo})
         self.assertEqual(resp.status_code, 400)
+
+    def test_extension_xls_ya_no_se_acepta(self):
+        """La app nunca pudo leer .xls (falta xlrd) — se deja de anunciarlo (hallazgo #3)."""
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        archivo = SimpleUploadedFile(
+            'pedido.xls', b'contenido irrelevante', content_type='application/vnd.ms-excel',
+        )
+        resp = self.client.post('/pedidos/cargar-items-excel/', {'archivo': archivo})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'El archivo debe ser .xlsx')
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_archivo_demasiado_grande_devuelve_400_sin_llegar_a_dbisam(self, mock_db):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PedidosAlmacen.views import MAX_ARCHIVO_BYTES
+        archivo = SimpleUploadedFile(
+            'pedido.xlsx', b'x' * (MAX_ARCHIVO_BYTES + 1),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        resp = self.client.post('/pedidos/cargar-items-excel/', {'archivo': archivo})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('grande', resp.json()['error'])
+        mock_db.assert_not_called()
 
     def test_sin_archivo_devuelve_400(self):
         resp = self.client.post('/pedidos/cargar-items-excel/', {})

@@ -7,6 +7,7 @@ mocks de conexión.
 import pandas as pd
 
 MAX_FILAS = 500
+MAX_SKU_LEN = 30
 COLUMNAS_REQUERIDAS = ('SKU', 'Cantidad')
 
 
@@ -32,7 +33,7 @@ def leer_filas_pedido(archivo) -> list[dict]:
             requeridas, o supera MAX_FILAS filas de datos.
     """
     try:
-        df = pd.read_excel(archivo, header=0, dtype={'SKU': str})
+        df = pd.read_excel(archivo, header=0, dtype={'SKU': str}, nrows=MAX_FILAS + 1)
     except Exception as e:
         raise ExcelPedidoError(f'No se pudo leer el archivo: {e}')
 
@@ -55,8 +56,8 @@ def construir_items(filas: list[dict], productos: dict, categorias_map: dict) ->
     Args:
         filas: Salida de `leer_filas_pedido`.
         productos: Salida de `PedidosDBISAM.resolver_productos` — dict
-            indexado por código con descripcion/referencia/puesto/
-            ref_proveedor/categoria.
+            indexado por código normalizado (stripped + uppercase), con
+            codigo/descripcion/referencia/puesto/ref_proveedor/categoria.
         categorias_map: Dict código→nombre de categoría (de
             `PedidosDBISAM.obtener_categorias()`), para resolver
             categoria_nombre.
@@ -76,6 +77,10 @@ def construir_items(filas: list[dict], productos: dict, categorias_map: dict) ->
             continue
         sku = sku.strip()
 
+        if len(sku) > MAX_SKU_LEN:
+            omitidos.append({'fila': fila['fila'], 'sku': sku[:MAX_SKU_LEN] + '...', 'motivo': 'SKU inválido (demasiado largo)'})
+            continue
+
         try:
             cantidad = int(fila['cantidad'])
         except (TypeError, ValueError):
@@ -84,16 +89,17 @@ def construir_items(filas: list[dict], productos: dict, categorias_map: dict) ->
             omitidos.append({'fila': fila['fila'], 'sku': sku, 'motivo': 'Cantidad inválida'})
             continue
 
-        info = productos.get(sku)
+        info = productos.get(sku.upper())
         if info is None:
             omitidos.append({'fila': fila['fila'], 'sku': sku, 'motivo': 'SKU no encontrado en a2'})
             continue
 
-        if sku in items_por_codigo:
-            items_por_codigo[sku]['cantidad'] += cantidad
+        codigo = info['codigo']
+        if codigo in items_por_codigo:
+            items_por_codigo[codigo]['cantidad'] += cantidad
         else:
-            items_por_codigo[sku] = {
-                'codigo': sku,
+            items_por_codigo[codigo] = {
+                'codigo': codigo,
                 'descripcion': info['descripcion'],
                 'referencia': info['referencia'],
                 'puesto': info['puesto'],

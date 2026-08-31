@@ -725,9 +725,13 @@ class PedidosDBISAM:
             codigos: Códigos de producto a resolver.
 
         Returns:
-            Dict indexado por código: {codigo: {descripcion, referencia,
-            puesto, ref_proveedor, categoria}}. Códigos no encontrados en
-            SINVENTARIO simplemente no aparecen en el resultado.
+            Dict indexado por código normalizado (stripped + uppercase):
+            {codigo_normalizado: {codigo, descripcion, referencia, puesto,
+            ref_proveedor, categoria}}. `codigo` es el código tal como lo
+            devuelve la BD (sin normalizar) y es el que debe usarse para el
+            pedido, no el texto que escribió el usuario en el Excel/búsqueda.
+            Códigos no encontrados en SINVENTARIO simplemente no aparecen en
+            el resultado.
         """
         codigos_validos = [c for c in codigos if c]
         if not codigos_validos:
@@ -748,7 +752,8 @@ class PedidosDBISAM:
                                         FROM SINVENTARIO
                                         WHERE FI_CODIGO IN ({codigos_str})""").fetchall()
                     return {
-                        _clean(r[0]): {
+                        _clean(r[0]).strip().upper(): {
+                            'codigo': _clean(r[0]).strip(),
                             'descripcion': _clean(r[1]),
                             'referencia': _clean(r[2]),
                             'puesto': _clean(r[3]),
