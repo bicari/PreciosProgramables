@@ -265,6 +265,10 @@
                     <input class="form-check-input chk-tipo-a2" type="checkbox" value="13" id="tipo-a2-13" name="tipos">
                     <label class="form-check-label" for="tipo-a2-13"><i class="fas fa-truck"></i> Nota de Entrega</label>
                 </div>
+                <div class="form-check">
+                    <input class="form-check-input chk-tipo-a2" type="checkbox" value="8" id="tipo-a2-8" name="tipos">
+                    <label class="form-check-label" for="tipo-a2-8"><i class="fas fa-dolly"></i> Nota de Entrega (Compras)</label>
+                </div>
             </div>
         </div>
 
@@ -295,9 +299,9 @@
                     hx-indicator="#texto-buscando-a2">
             </div>
             <div class="col-md-6">
-                <label for="a2-cliente" class="form-label small">Cliente</label>
+                <label for="a2-cliente" class="form-label small">Cliente / Proveedor</label>
                 <input type="text" class="form-control" id="a2-cliente" name="cliente"
-                    placeholder="Nombre del cliente" autocomplete="off"
+                    placeholder="Nombre del cliente o proveedor" autocomplete="off"
                     hx-get="/pedidos/buscar-documentos-a2/"
                     hx-trigger="input changed delay:500ms, keyup[key=='Enter'], cambioFiltroA2"
                     hx-target="#resultados-a2"
@@ -314,7 +318,7 @@
         </div>
 
         <div id="resultados-a2" class="mb-3">
-            <p class="text-muted p-2">Seleccione el tipo de documento e ingrese un número o cliente para buscar</p>
+            <p class="text-muted p-2">Seleccione el tipo de documento e ingrese un número, cliente o proveedor para buscar</p>
         </div>
 
         <div class="d-flex justify-content-between align-items-center">
@@ -738,7 +742,7 @@ function cerrarOverlayA2() {
     document.querySelectorAll('.chk-tipo-a2').forEach(function(c) { c.checked = false; });
     document.querySelectorAll('.chk-estado-a2').forEach(function(c) { c.checked = true; });
     document.getElementById('resultados-a2').innerHTML =
-        '<p class="text-muted p-2">Seleccione el tipo de documento e ingrese un número o cliente para buscar</p>';
+        '<p class="text-muted p-2">Seleccione el tipo de documento e ingrese un número, cliente o proveedor para buscar</p>';
     actualizarContadorA2();
 }
 

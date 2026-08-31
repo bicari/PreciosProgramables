@@ -87,6 +87,7 @@ GROUP_PICKER = 'Pedidos Picker'
 GROUP_RECEPTOR = 'Pedidos Receptor'
 
 TIPOS_DOCUMENTO_A2 = {
+    8: {'label': 'Nota de Entrega (Compras)', 'icon': 'fa-dolly', 'badge': 'bg-warning text-dark'},
     9: {'label': 'Presupuesto', 'icon': 'fa-file-invoice-dollar', 'badge': 'bg-info text-dark'},
     10: {'label': 'Pedido', 'icon': 'fa-file-invoice', 'badge': 'bg-primary'},
     13: {'label': 'Nota de Entrega', 'icon': 'fa-truck', 'badge': 'bg-success'},
@@ -2588,7 +2589,7 @@ def buscar_documentos_a2(request):
         return HttpResponse('<p class="text-muted p-2">Ingrese un número de documento o un nombre de cliente</p>')
 
     try:
-        documentos = PedidosDBISAM().buscar_documentos_venta(
+        documentos = PedidosDBISAM().buscar_documentos(
             tipos, documento=documento, cliente=cliente, estados=estados)
     except pyodbc.Error as e:
         logger.error(

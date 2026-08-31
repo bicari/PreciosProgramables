@@ -104,14 +104,14 @@ class BuscarEnCategoriaFiltroTest(TestCase):
         self.assertIn("FI_CATEGORIA IN ('CAT1','CAT2')", sql)
 
 
-class BuscarDocumentosVentaTest(TestCase):
+class BuscarDocumentosTest(TestCase):
     def _capturar_sql(self, tipos, documento='', cliente='', estados=None):
         db = PedidosDBISAM()
         with patch.object(db, 'connect') as mock_connect:
             cursor = (mock_connect.return_value.__enter__.return_value
                       .cursor.return_value.__enter__.return_value)
             cursor.execute.return_value.fetchmany.return_value = []
-            db.buscar_documentos_venta(tipos, documento=documento, cliente=cliente, estados=estados)
+            db.buscar_documentos(tipos, documento=documento, cliente=cliente, estados=estados)
             return cursor.execute.call_args[0][0]
 
     def test_filtra_por_tipos_y_estados_abiertos(self):
@@ -135,7 +135,7 @@ class BuscarDocumentosVentaTest(TestCase):
     def test_estados_vacio_no_ejecuta_query(self):
         db = PedidosDBISAM()
         with patch.object(db, 'connect') as mock_connect:
-            resultado = db.buscar_documentos_venta([9], documento='1234', estados=[])
+            resultado = db.buscar_documentos([9], documento='1234', estados=[])
         mock_connect.assert_not_called()
         self.assertEqual(resultado, [])
 
@@ -154,14 +154,14 @@ class BuscarDocumentosVentaTest(TestCase):
     def test_sin_tipos_no_ejecuta_query(self):
         db = PedidosDBISAM()
         with patch.object(db, 'connect') as mock_connect:
-            resultado = db.buscar_documentos_venta([], documento='1234')
+            resultado = db.buscar_documentos([], documento='1234')
         mock_connect.assert_not_called()
         self.assertEqual(resultado, [])
 
     def test_sin_documento_ni_cliente_no_ejecuta_query(self):
         db = PedidosDBISAM()
         with patch.object(db, 'connect') as mock_connect:
-            resultado = db.buscar_documentos_venta([9])
+            resultado = db.buscar_documentos([9])
         mock_connect.assert_not_called()
         self.assertEqual(resultado, [])
 
@@ -169,6 +169,10 @@ class BuscarDocumentosVentaTest(TestCase):
         sql = self._capturar_sql([9, 99], documento='1234')
         self.assertIn('FTI_TIPO IN (9)', sql)
         self.assertNotIn('99', sql)
+
+    def test_acepta_tipo_nota_entrega_compras(self):
+        sql = self._capturar_sql([8], documento='1234')
+        self.assertIn('FTI_TIPO IN (8)', sql)
 
     def test_mapea_filas_a_dicts(self):
         db = PedidosDBISAM()
@@ -178,7 +182,7 @@ class BuscarDocumentosVentaTest(TestCase):
             cursor.execute.return_value.fetchmany.return_value = [
                 (100, 9, '00001234', date(2026, 8, 20), 'Cliente Uno'),
             ]
-            resultado = db.buscar_documentos_venta([9], documento='1234')
+            resultado = db.buscar_documentos([9], documento='1234')
         self.assertEqual(resultado, [{
             'operacion_id': 100, 'tipo': 9, 'documento': '00001234',
             'fecha': date(2026, 8, 20), 'cliente': 'Cliente Uno',
@@ -186,26 +190,46 @@ class BuscarDocumentosVentaTest(TestCase):
 
 
 class ObtenerItemsDocumentosTest(TestCase):
-    def _capturar_sql(self, ids):
+    """obtener_items_documentos ejecuta dos queries en la misma conexion:
+    uno contra SDETALLEVENTA (tipos 9/10/13) y otro contra SDETALLECOMPRA
+    (tipo 8, Nota de Entrega en Compras), y concatena los resultados.
+    """
+
+    def _capturar_sqls(self, ids, fetch_venta=None, fetch_compra=None):
         db = PedidosDBISAM()
         with patch.object(db, 'connect') as mock_connect:
             cursor = (mock_connect.return_value.__enter__.return_value
                       .cursor.return_value.__enter__.return_value)
-            cursor.execute.return_value.fetchall.return_value = []
-            db.obtener_items_documentos(ids)
-            return cursor.execute.call_args[0][0]
+            cursor.execute.return_value.fetchall.side_effect = [
+                fetch_venta if fetch_venta is not None else [],
+                fetch_compra if fetch_compra is not None else [],
+            ]
+            resultado = db.obtener_items_documentos(ids)
+            sqls = [c.args[0] for c in cursor.execute.call_args_list]
+        return sqls, resultado
 
-    def test_revalida_tipo_y_estado_siempre(self):
-        sql = self._capturar_sql([100, 200])
-        self.assertIn('FTI_AUTOINCREMENT IN (100,200)', sql)
-        self.assertIn('FTI_TIPO IN (9,10,13)', sql)
-        self.assertIn('FTI_STATUS IN (1,4)', sql)
-        self.assertIn('FDI_STATUS IN (1,4)', sql)
+    def test_revalida_tipo_y_estado_en_ambos_queries(self):
+        sqls, _ = self._capturar_sqls([100, 200])
+        self.assertEqual(len(sqls), 2)
+        sql_venta, sql_compra = sqls
 
-    def test_join_correcto(self):
-        sql = self._capturar_sql([100])
-        self.assertIn('INNER JOIN SDETALLEVENTA ON FTI_AUTOINCREMENT = FDI_OPERACION_AUTOINCREMENT', sql)
-        self.assertIn('INNER JOIN SINVENTARIO ON FDI_CODIGO = FI_CODIGO', sql)
+        self.assertIn('FTI_AUTOINCREMENT IN (100,200)', sql_venta)
+        self.assertIn('FTI_TIPO IN (9,10,13)', sql_venta)
+        self.assertIn('FTI_STATUS IN (1,4)', sql_venta)
+        self.assertIn('FDI_STATUS IN (1,4)', sql_venta)
+
+        self.assertIn('FTI_AUTOINCREMENT IN (100,200)', sql_compra)
+        self.assertIn('FTI_TIPO = 8', sql_compra)
+        self.assertIn('FTI_STATUS IN (1,4)', sql_compra)
+        self.assertIn('FDI_STATUS IN (1,4)', sql_compra)
+
+    def test_join_correcto_en_ambos_queries(self):
+        sqls, _ = self._capturar_sqls([100])
+        sql_venta, sql_compra = sqls
+        self.assertIn('INNER JOIN SDETALLEVENTA ON FTI_AUTOINCREMENT = FDI_OPERACION_AUTOINCREMENT', sql_venta)
+        self.assertIn('INNER JOIN SINVENTARIO ON FDI_CODIGO = FI_CODIGO', sql_venta)
+        self.assertIn('INNER JOIN SDETALLECOMPRA ON FTI_AUTOINCREMENT = FDI_OPERACION_AUTOINCREMENT', sql_compra)
+        self.assertIn('INNER JOIN SINVENTARIO ON FDI_CODIGO = FI_CODIGO', sql_compra)
 
     def test_sin_ids_no_ejecuta_query(self):
         db = PedidosDBISAM()
@@ -215,23 +239,38 @@ class ObtenerItemsDocumentosTest(TestCase):
         self.assertEqual(resultado, [])
 
     def test_ignora_ids_no_numericos(self):
-        sql = self._capturar_sql([100, 'abc', 200])
-        self.assertIn('FTI_AUTOINCREMENT IN (100,200)', sql)
+        sqls, _ = self._capturar_sqls([100, 'abc', 200])
+        for sql in sqls:
+            self.assertIn('FTI_AUTOINCREMENT IN (100,200)', sql)
 
-    def test_mapea_filas_a_dicts(self):
-        db = PedidosDBISAM()
-        with patch.object(db, 'connect') as mock_connect:
-            cursor = (mock_connect.return_value.__enter__.return_value
-                      .cursor.return_value.__enter__.return_value)
-            cursor.execute.return_value.fetchall.return_value = [
-                ('SKU1', 5, 'Producto Uno', 'P1', 'REF1', 'PROV1', 'FERRETERIA'),
-            ]
-            resultado = db.obtener_items_documentos([100])
+    def test_mapea_filas_de_venta_a_dicts(self):
+        _, resultado = self._capturar_sqls([100], fetch_venta=[
+            ('SKU1', 5, 'Producto Uno', 'P1', 'REF1', 'PROV1', 'FERRETERIA'),
+        ])
         self.assertEqual(resultado, [{
             'codigo': 'SKU1', 'cantidad': 5, 'descripcion': 'Producto Uno',
             'puesto': 'P1', 'referencia': 'REF1', 'ref_proveedor': 'PROV1',
             'categoria': 'FERRETERIA',
         }])
+
+    def test_incluye_lineas_de_nota_entrega_compras(self):
+        _, resultado = self._capturar_sqls([100], fetch_compra=[
+            ('SKU2', 3, 'Producto Dos', 'P2', 'REF2', 'PROV2', 'PLOMERIA'),
+        ])
+        self.assertEqual(resultado, [{
+            'codigo': 'SKU2', 'cantidad': 3, 'descripcion': 'Producto Dos',
+            'puesto': 'P2', 'referencia': 'REF2', 'ref_proveedor': 'PROV2',
+            'categoria': 'PLOMERIA',
+        }])
+
+    def test_mezcla_venta_y_compra_en_una_sola_carga(self):
+        _, resultado = self._capturar_sqls(
+            [100, 200],
+            fetch_venta=[('SKU1', 5, 'Uno', 'P1', 'R1', 'PR1', 'CAT1')],
+            fetch_compra=[('SKU2', 3, 'Dos', 'P2', 'R2', 'PR2', 'CAT2')],
+        )
+        self.assertEqual(len(resultado), 2)
+        self.assertEqual({item['codigo'] for item in resultado}, {'SKU1', 'SKU2'})
 
     def test_cantidad_decimal_se_convierte_a_int(self):
         """FDI_CANTIDAD es numerico en a2; pyodbc puede devolver Decimal.
@@ -240,14 +279,9 @@ class ObtenerItemsDocumentosTest(TestCase):
         lado JS/crear_pedido reventaria contra eso. La conversion debe
         pasar a int plano (truncando) en el propio mapeo de filas.
         """
-        db = PedidosDBISAM()
-        with patch.object(db, 'connect') as mock_connect:
-            cursor = (mock_connect.return_value.__enter__.return_value
-                      .cursor.return_value.__enter__.return_value)
-            cursor.execute.return_value.fetchall.return_value = [
-                ('SKU1', decimal.Decimal('5.5'), 'Producto Uno', 'P1', 'REF1', 'PROV1', 'FERRETERIA'),
-            ]
-            resultado = db.obtener_items_documentos([100])
+        _, resultado = self._capturar_sqls([100], fetch_venta=[
+            ('SKU1', decimal.Decimal('5.5'), 'Producto Uno', 'P1', 'REF1', 'PROV1', 'FERRETERIA'),
+        ])
         cantidad = resultado[0]['cantidad']
         self.assertIsInstance(cantidad, int)
         self.assertEqual(cantidad, 5)
@@ -4827,8 +4861,20 @@ class BuscarDocumentosA2ViewTest(TestCase):
         self.client.force_login(self.user)
 
     @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_devuelve_etiqueta_de_nota_entrega_compras_para_tipo_8(self, mock_db):
+        mock_db.return_value.buscar_documentos.return_value = [
+            {'operacion_id': 200, 'tipo': 8, 'documento': '00005678',
+             'fecha': None, 'cliente': 'Proveedor Uno'},
+        ]
+        resp = self.client.get('/pedidos/buscar-documentos-a2/', {
+            'tipos': ['8'], 'documento': '5678', 'estados': ['1', '4'],
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Nota de Entrega (Compras)')
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
     def test_devuelve_resultados_con_tipos_y_documento(self, mock_db):
-        mock_db.return_value.buscar_documentos_venta.return_value = [
+        mock_db.return_value.buscar_documentos.return_value = [
             {'operacion_id': 100, 'tipo': 9, 'documento': '00001234',
              'fecha': None, 'cliente': 'Cliente Uno'},
         ]
@@ -4853,11 +4899,11 @@ class BuscarDocumentosA2ViewTest(TestCase):
 
     @patch('PedidosAlmacen.views.PedidosDBISAM')
     def test_pasa_estados_seleccionados_a_dbisam(self, mock_db):
-        mock_db.return_value.buscar_documentos_venta.return_value = []
+        mock_db.return_value.buscar_documentos.return_value = []
         self.client.get('/pedidos/buscar-documentos-a2/', {
             'tipos': ['9'], 'documento': '1234', 'estados': ['1'],
         })
-        _, kwargs = mock_db.return_value.buscar_documentos_venta.call_args
+        _, kwargs = mock_db.return_value.buscar_documentos.call_args
         self.assertEqual(kwargs.get('estados'), [1])
 
     def test_sin_estados_no_consulta_dbisam(self):
@@ -4870,9 +4916,9 @@ class BuscarDocumentosA2ViewTest(TestCase):
 
     @patch('PedidosAlmacen.views.PedidosDBISAM')
     def test_error_dbisam_muestra_mensaje_sin_romper(self, mock_db):
-        # buscar_documentos_venta envuelve cualquier error en pyodbc.DatabaseError
+        # buscar_documentos envuelve cualquier error en pyodbc.DatabaseError
         # (ver dbisam.py); la vista narrowea su catch a pyodbc.Error.
-        mock_db.return_value.buscar_documentos_venta.side_effect = pyodbc.DatabaseError('odbc down')
+        mock_db.return_value.buscar_documentos.side_effect = pyodbc.DatabaseError('odbc down')
         resp = self.client.get('/pedidos/buscar-documentos-a2/', {
             'tipos': ['9'], 'documento': '1234', 'estados': ['1', '4'],
         })
@@ -4882,7 +4928,7 @@ class BuscarDocumentosA2ViewTest(TestCase):
     @patch('PedidosAlmacen.views.logger')
     @patch('PedidosAlmacen.views.PedidosDBISAM')
     def test_error_dbisam_se_loguea(self, mock_db, mock_logger):
-        mock_db.return_value.buscar_documentos_venta.side_effect = pyodbc.DatabaseError('odbc down')
+        mock_db.return_value.buscar_documentos.side_effect = pyodbc.DatabaseError('odbc down')
         self.client.get('/pedidos/buscar-documentos-a2/', {
             'tipos': ['9'], 'documento': '1234', 'estados': ['1', '4'],
         })

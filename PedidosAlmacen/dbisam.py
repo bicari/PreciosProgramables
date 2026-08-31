@@ -13,7 +13,7 @@ DEPOSITO_ALMACEN = 1    # Almacén principal (origen en despacho)
 CLASIFICACION_DESPACHO = 1          # FTI_CLASIFICACION traslado almacén → tránsito
 CLASIFICACION_RECEPCION_TIENDA = 2  # FTI_CLASIFICACION traslado tránsito → tienda
 
-TIPOS_DOCUMENTO_VENTA = {9, 10, 13}  # Presupuesto, Pedido, Nota de Entrega
+TIPOS_DOCUMENTO_SOPORTADOS = {8, 9, 10, 13}  # Nota Entrega Compras, Presupuesto, Pedido, Nota Entrega Ventas
 ESTADOS_ABIERTOS = (1, 4)            # Procesado, Transito
 
 
@@ -568,12 +568,13 @@ class PedidosDBISAM:
         except Exception as e:
             raise pyodbc.DatabaseError(str(e))
 
-    def buscar_documentos_venta(self, tipos: list[int], documento: str = '', cliente: str = '',
-                                 estados: list[int] | None = None, limit: int = 50) -> list[dict]:
-        """Busca cabeceras de presupuestos/pedidos/notas de entrega abiertos en a2.
+    def buscar_documentos(self, tipos: list[int], documento: str = '', cliente: str = '',
+                           estados: list[int] | None = None, limit: int = 50) -> list[dict]:
+        """Busca cabeceras de presupuestos, pedidos y notas de entrega (venta o
+        compra) abiertos en a2.
 
         Args:
-            tipos: Subconjunto de TIPOS_DOCUMENTO_VENTA a incluir; valores no
+            tipos: Subconjunto de TIPOS_DOCUMENTO_SOPORTADOS a incluir; valores no
                 permitidos se descartan.
             documento: Coincidencia parcial contra FTI_DOCUMENTO.
             cliente: Coincidencia parcial (case-insensitive) contra FTI_PERSONACONTACTO.
@@ -587,7 +588,7 @@ class PedidosDBISAM:
             Lista vacía si no hay tipos o estados válidos, o si documento/cliente
             vienen ambos vacíos (no se ejecuta ningún query en ese caso).
         """
-        tipos_validos = sorted({t for t in tipos if t in TIPOS_DOCUMENTO_VENTA})
+        tipos_validos = sorted({t for t in tipos if t in TIPOS_DOCUMENTO_SOPORTADOS})
         estados_validos = (
             list(ESTADOS_ABIERTOS) if estados is None
             else sorted({e for e in estados if e in ESTADOS_ABIERTOS})
@@ -637,11 +638,15 @@ class PedidosDBISAM:
             raise pyodbc.DatabaseError(str(e))
 
     def obtener_items_documentos(self, operacion_ids: list[int]) -> list[dict]:
-        """Trae las líneas de los documentos de venta seleccionados.
+        """Trae las líneas de los documentos seleccionados (venta o compra).
 
         Revalida FTI_TIPO y ambos estados (cabecera y línea) sin importar
         qué operacion_ids se reciban, para no confiar en datos manipulados
-        del cliente.
+        del cliente. Ejecuta dos queries en la misma conexión: uno contra
+        SDETALLEVENTA (presupuestos, pedidos, notas de entrega de venta) y
+        otro contra SDETALLECOMPRA (notas de entrega de compra, tipo 8) —
+        cada operacion_id solo puede calzar con una de las dos tablas, así
+        que los resultados se concatenan sin duplicar líneas.
 
         Args:
             operacion_ids: FTI_AUTOINCREMENT de los documentos marcados.
@@ -660,38 +665,52 @@ class PedidosDBISAM:
             return []
 
         ids_str = ','.join(str(i) for i in ids_validos)
-        tipos_str = ','.join(str(t) for t in sorted(TIPOS_DOCUMENTO_VENTA))
+        tipos_venta_str = ','.join(str(t) for t in sorted(TIPOS_DOCUMENTO_SOPORTADOS - {8}))
         estados_str = ','.join(str(e) for e in ESTADOS_ABIERTOS)
 
-        try:
-            with self.connect() as conn:
-                with conn.cursor() as cursor:
-                    rows = cursor.execute(f"""SELECT
-                                            FDI_CODIGO,
+        def _mapear(rows):
+            return [
+                {
+                    'codigo': _clean(r[0]),
+                    'cantidad': int(r[1] or 0),
+                    'descripcion': _clean(r[2]),
+                    'puesto': _clean(r[3]),
+                    'referencia': _clean(r[4]),
+                    'ref_proveedor': _clean(r[5]),
+                    'categoria': _clean(r[6]),
+                }
+                for r in rows
+            ]
+
+        campos = """FDI_CODIGO,
                                             FDI_CANTIDAD,
                                             FI_DESCRIPCION,
                                             FI_PUESTO,
                                             FI_REFERENCIA,
                                             ZZCAMPO_001,
-                                            FI_CATEGORIA
+                                            FI_CATEGORIA"""
+
+        try:
+            with self.connect() as conn:
+                with conn.cursor() as cursor:
+                    rows_venta = cursor.execute(f"""SELECT
+                                            {campos}
                                         FROM SOPERACIONINV
                                         INNER JOIN SDETALLEVENTA ON FTI_AUTOINCREMENT = FDI_OPERACION_AUTOINCREMENT
                                         INNER JOIN SINVENTARIO ON FDI_CODIGO = FI_CODIGO
                                         WHERE FTI_AUTOINCREMENT IN ({ids_str})
-                                        AND FTI_TIPO IN ({tipos_str})
+                                        AND FTI_TIPO IN ({tipos_venta_str})
                                         AND FTI_STATUS IN ({estados_str})
                                         AND FDI_STATUS IN ({estados_str})""").fetchall()
-                    return [
-                        {
-                            'codigo': _clean(r[0]),
-                            'cantidad': int(r[1] or 0),
-                            'descripcion': _clean(r[2]),
-                            'puesto': _clean(r[3]),
-                            'referencia': _clean(r[4]),
-                            'ref_proveedor': _clean(r[5]),
-                            'categoria': _clean(r[6]),
-                        }
-                        for r in rows
-                    ]
+                    rows_compra = cursor.execute(f"""SELECT
+                                            {campos}
+                                        FROM SOPERACIONINV
+                                        INNER JOIN SDETALLECOMPRA ON FTI_AUTOINCREMENT = FDI_OPERACION_AUTOINCREMENT
+                                        INNER JOIN SINVENTARIO ON FDI_CODIGO = FI_CODIGO
+                                        WHERE FTI_AUTOINCREMENT IN ({ids_str})
+                                        AND FTI_TIPO = 8
+                                        AND FTI_STATUS IN ({estados_str})
+                                        AND FDI_STATUS IN ({estados_str})""").fetchall()
+                    return _mapear(rows_venta) + _mapear(rows_compra)
         except Exception as e:
             raise pyodbc.DatabaseError(str(e))
