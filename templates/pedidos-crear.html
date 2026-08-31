@@ -348,8 +348,8 @@
         </div>
 
         <div class="mb-3">
-            <label for="excel-archivo" class="form-label small">Archivo (.xlsx o .xls)</label>
-            <input type="file" class="form-control" id="excel-archivo" accept=".xlsx,.xls">
+            <label for="excel-archivo" class="form-label small">Archivo (.xlsx)</label>
+            <input type="file" class="form-control" id="excel-archivo" accept=".xlsx">
         </div>
 
         <div id="resultados-excel" class="mb-3"></div>
@@ -483,6 +483,12 @@ window._rehidratarPedido = {
 {% endif %}
 
 <script>
+function escapeHtml(valor) {
+    const div = document.createElement('div');
+    div.textContent = String(valor == null ? '' : valor);
+    return div.innerHTML;
+}
+
 let itemsPedido = [];
 let categoriaFijada = false;
 
@@ -880,7 +886,7 @@ document.getElementById('btn-cargar-a2').addEventListener('click', function() {
         .then(function(data) {
             if (data.error) {
                 document.getElementById('resultados-a2').innerHTML =
-                    '<p class="text-danger p-2">' + data.error + '</p>';
+                    '<p class="text-danger p-2">' + escapeHtml(data.error) + '</p>';
                 return;
             }
             if (!data.items.length) {
@@ -949,15 +955,23 @@ document.getElementById('btn-cargar-excel').addEventListener('click', function()
         .then(function(data) {
             if (data.error) {
                 document.getElementById('resultados-excel').innerHTML =
-                    '<p class="text-danger p-2">' + data.error + '</p>';
+                    '<p class="text-danger p-2">' + escapeHtml(data.error) + '</p>';
                 return;
             }
             if (data.items.length) {
                 mezclarItemsAlCarrito(data.items);
             }
-            if (data.omitidos.length) {
+            // Limpiar el input siempre que la carga se procesó (con o sin
+            // omitidos), para que un segundo click en "Cargar archivo" sin
+            // elegir un nuevo archivo no vuelva a sumar los mismos items.
+            document.getElementById('excel-archivo').value = '';
+
+            if (!data.items.length && !data.omitidos.length) {
+                document.getElementById('resultados-excel').innerHTML =
+                    '<p class="text-muted p-2">El archivo no contiene filas con datos.</p>';
+            } else if (data.omitidos.length) {
                 const lista = data.omitidos.map(function(o) {
-                    return '<li>Fila ' + o.fila + ': ' + o.sku + ' — ' + o.motivo + '</li>';
+                    return '<li>Fila ' + o.fila + ': ' + escapeHtml(o.sku) + ' — ' + escapeHtml(o.motivo) + '</li>';
                 }).join('');
                 document.getElementById('resultados-excel').innerHTML =
                     '<p class="text-warning p-2 mb-1">' + data.items.length + ' ítem(s) cargados. ' +
