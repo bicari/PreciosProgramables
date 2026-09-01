@@ -1560,6 +1560,35 @@ class CrearPedidoMixtoTest(TestCase):
         self.assertFalse(pedido.es_mixto)
         self.assertEqual(pedido.items.get().categoria, 'CAT1')
 
+    def test_item_con_categoria_vacia_hereda_categoria_del_formulario(self):
+        """Si el JS manda 'categoria': '' en el item (clave presente, valor vacío),
+        el PedidoItem debe heredar la categoría elegida en el formulario, no quedar
+        en blanco. Reproduce el bug del reporte de items: miles de PedidoItem con
+        categoria='' que hacían que el filtro por categoría no trajera todos los items.
+        """
+        from .models import Pedido
+        form_data = {
+            'categoria': 'CAT1',
+            'categoria_nombre': 'Categoría 1',
+            'condicion': 'URGENTE',
+            'deposito': '2',
+            'deposito_nombre': 'Tienda Norte',
+            'items_json': json.dumps([
+                {'codigo': 'SKU1', 'descripcion': 'Producto Uno', 'cantidad': '2',
+                 'referencia': '', 'puesto': '', 'ref_proveedor': '',
+                 'categoria': '', 'categoria_nombre': ''},
+            ]),
+        }
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.obtener_categorias.return_value = []
+            mock_db.return_value.consultar_stock_multiple.return_value = {'SKU1': 10}
+            resp = self.client.post(self.url, form_data)
+        self.assertEqual(resp.status_code, 302)
+        pedido = Pedido.objects.get()
+        item = pedido.items.get()
+        self.assertEqual(item.categoria, 'CAT1')
+        self.assertEqual(item.categoria_nombre, 'Categoría 1')
+
 
 class CrearPedidoTemplateMixtoTest(TestCase):
     def test_checkbox_mixto_presente(self):
@@ -1871,6 +1900,72 @@ class ValidarTrasladosRecepcionCommandTest(TestCase):
         call_command('validar_traslados_recepcion', stdout=out, stderr=err)
 
         self.assertIn('Error al consultar a2', err.getvalue())
+
+
+class BackfillCategoriaPedidoItemCommandTest(TestCase):
+    """Backfill de PedidoItem.categoria='' heredando pedido.categoria, para los
+    items creados con el bug de categoria='' (ver crear_pedido)."""
+
+    def setUp(self):
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        self.user = User.objects.create_superuser(username='cmd_backfill', password='x')
+
+        self.pedido_recuperable = Pedido.objects.create(
+            solicitante=self.user, estado='PENDIENTE',
+            categoria='00011', categoria_nombre='MASCOTA',
+        )
+        self.item_recuperable = PedidoItem.objects.create(
+            pedido=self.pedido_recuperable, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=1, categoria='', categoria_nombre='',
+        )
+
+        self.pedido_sin_categoria = Pedido.objects.create(
+            solicitante=self.user, estado='PENDIENTE', categoria='', categoria_nombre='',
+        )
+        self.item_no_recuperable = PedidoItem.objects.create(
+            pedido=self.pedido_sin_categoria, codigo='SKU2', descripcion='Producto Dos',
+            cantidad_solicitada=1, categoria='', categoria_nombre='',
+        )
+
+        self.pedido_ya_ok = Pedido.objects.create(
+            solicitante=self.user, estado='PENDIENTE',
+            categoria='00020', categoria_nombre='AUTOMOTRIZ',
+        )
+        self.item_ya_ok = PedidoItem.objects.create(
+            pedido=self.pedido_ya_ok, codigo='SKU3', descripcion='Producto Tres',
+            cantidad_solicitada=1, categoria='00020', categoria_nombre='AUTOMOTRIZ',
+        )
+
+    def test_backfill_hereda_categoria_del_pedido(self):
+        out = StringIO()
+        call_command('backfill_categoria_pedidoitem', stdout=out)
+
+        self.item_recuperable.refresh_from_db()
+        self.assertEqual(self.item_recuperable.categoria, '00011')
+        self.assertEqual(self.item_recuperable.categoria_nombre, 'MASCOTA')
+
+    def test_backfill_no_toca_items_ya_con_categoria(self):
+        call_command('backfill_categoria_pedidoitem', stdout=StringIO())
+
+        self.item_ya_ok.refresh_from_db()
+        self.assertEqual(self.item_ya_ok.categoria, '00020')
+
+    def test_backfill_reporta_items_no_recuperables(self):
+        out = StringIO()
+        call_command('backfill_categoria_pedidoitem', stdout=out)
+
+        self.item_no_recuperable.refresh_from_db()
+        self.assertEqual(self.item_no_recuperable.categoria, '')
+        self.assertIn('1', out.getvalue())
+
+    def test_dry_run_no_modifica_nada(self):
+        out = StringIO()
+        call_command('backfill_categoria_pedidoitem', '--dry-run', stdout=out)
+
+        self.item_recuperable.refresh_from_db()
+        self.assertEqual(self.item_recuperable.categoria, '')
+        self.assertIn('dry-run', out.getvalue().lower())
 
 
 class RecibirDespachoTransaccionAtomicaTest(TestCase):
@@ -4346,6 +4441,7 @@ class ExportarReporteItemsTest(TestCase):
             cantidad_solicitada=80, cantidad_preparada=80, cantidad_despachada=80,
             cantidad_recibida=80, cantidad_back_order=0, estado='RECIBIDO',
             categoria='PLOM', categoria_nombre='Plomería',
+            referencia='REF-CEM-01', ref_proveedor='PROV-55',
         )
 
     def test_no_supervisor_redirige_csv(self):
@@ -4365,9 +4461,18 @@ class ExportarReporteItemsTest(TestCase):
         resp = self.client.get(self.reverse('pedidos-reporte-items-csv'), {'estado': ''})
         contenido = resp.content.decode('utf-8-sig')
         self.assertIn('01120044', contenido)
-        self.assertIn('2 pedidos', contenido)
+        self.assertIn(f'#{self.pedido1.pk}, #{self.pedido2.pk}', contenido)
         self.assertIn('02030011', contenido)
         self.assertIn(f'#{self.pedido3.pk}', contenido)
+
+    def test_csv_incluye_referencia_y_ref_proveedor(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items-csv'), {'categoria': 'PLOM'})
+        contenido = resp.content.decode('utf-8-sig')
+        self.assertIn('Referencia', contenido)
+        self.assertIn('Ref. Proveedor', contenido)
+        self.assertIn('REF-CEM-01', contenido)
+        self.assertIn('PROV-55', contenido)
 
     def test_csv_respeta_default_de_back_order_sin_filtros(self):
         self.client.force_login(self.supervisor)
@@ -4406,6 +4511,13 @@ class ExportarReporteItemsTest(TestCase):
     def test_pdf_respeta_default_de_back_order_sin_filtros(self):
         self.client.force_login(self.supervisor)
         resp = self.client.get(self.reverse('pedidos-reporte-items-pdf'))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp['Content-Type'], 'application/pdf')
+        self.assertTrue(resp.content.startswith(b'%PDF'))
+
+    def test_pdf_no_lanza_excepcion_con_multiples_pedidos_y_referencia(self):
+        self.client.force_login(self.supervisor)
+        resp = self.client.get(self.reverse('pedidos-reporte-items-pdf'), {'estado': ''})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp['Content-Type'], 'application/pdf')
         self.assertTrue(resp.content.startswith(b'%PDF'))

@@ -415,8 +415,8 @@ def crear_pedido(request):
                 puesto=item.get('puesto', ''),
                 ref_proveedor=item.get('ref_proveedor', ''),
                 cantidad_solicitada=int(item['cantidad']),
-                categoria=item.get('categoria', categoria_codigo),
-                categoria_nombre=item.get('categoria_nombre', categoria_nombre),
+                categoria=item.get('categoria') or categoria_codigo,
+                categoria_nombre=item.get('categoria_nombre') or categoria_nombre,
             )
             for item in items_data
         ]
@@ -2062,6 +2062,8 @@ def _construir_grupos_reporte_items(request, emitir_mensajes=True):
         items.values('codigo')
         .annotate(
             descripcion=Max('descripcion'),
+            referencia=Max('referencia'),
+            ref_proveedor=Max('ref_proveedor'),
             total_solicitada=Sum('cantidad_solicitada'),
             total_preparada=Coalesce(Sum('cantidad_preparada'), Value(0)),
             total_despachada=Sum('cantidad_despachada'),
@@ -2097,6 +2099,7 @@ def _construir_grupos_reporte_items(request, emitir_mensajes=True):
     for grupo in grupos:
         detalle = detalle_por_codigo.get(grupo['codigo'], [])
         grupo['detalle'] = detalle
+        grupo['pedidos_ids'] = sorted({item.pedido_id for item in detalle})
         grupo['estados_badges'] = sorted({(item.estado, item.get_estado_display()) for item in detalle})
         grupo['detalle_json'] = json.dumps([
             {
@@ -2184,18 +2187,17 @@ def exportar_reporte_items_csv(request):
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow([
-        'Código', 'Descripción', 'Pedido(s)', 'Estado',
+        'Código', 'Descripción', 'Referencia', 'Ref. Proveedor', 'Pedido(s)', 'Estado',
         'Solicit.', 'Preparada', 'Despach.', 'Recibida', 'Back Order', 'Existencia',
     ])
     for grupo in grupos:
-        if grupo['num_pedidos'] == 1:
-            pedido_col = f"#{grupo['detalle'][0].pedido_id}"
-        else:
-            pedido_col = f"{grupo['num_pedidos']} pedidos"
+        pedido_col = ', '.join(f'#{pid}' for pid in grupo['pedidos_ids'])
         estado_col = ', '.join(label for _codigo, label in grupo['estados_badges'])
         existencia_col = 'N/D' if grupo['existencia'] is None else grupo['existencia']
         writer.writerow([
-            _csv_safe(grupo['codigo']), _csv_safe(grupo['descripcion']), _csv_safe(pedido_col), _csv_safe(estado_col),
+            _csv_safe(grupo['codigo']), _csv_safe(grupo['descripcion']),
+            _csv_safe(grupo['referencia']), _csv_safe(grupo['ref_proveedor']),
+            _csv_safe(pedido_col), _csv_safe(estado_col),
             grupo['total_solicitada'], grupo['total_preparada'], grupo['total_despachada'],
             grupo['total_recibida'], grupo['total_back_order'], existencia_col,
         ])

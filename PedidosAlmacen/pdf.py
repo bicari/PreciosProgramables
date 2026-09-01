@@ -851,9 +851,10 @@ def generar_reporte_items_pdf(grupos: list, filtros: dict) -> bytes:
 
     Args:
         grupos: Lista de dicts con las mismas claves usadas en pantalla
-            (codigo, descripcion, num_pedidos, detalle, estados_badges,
-            total_solicitada, total_preparada, total_despachada,
-            total_recibida, total_back_order, existencia).
+            (codigo, descripcion, referencia, ref_proveedor, pedidos_ids,
+            num_pedidos, detalle, estados_badges, total_solicitada,
+            total_preparada, total_despachada, total_recibida,
+            total_back_order, existencia).
         filtros: Dict con codigos_filtro, categoria_filtro, estado_filtro,
             fecha_inicio, fecha_fin, sin_filtros_aplicados.
 
@@ -898,21 +899,21 @@ def generar_reporte_items_pdf(grupos: list, filtros: dict) -> bytes:
     st_head = ParagraphStyle("ih", fontSize=8, leading=10, fontName="Helvetica-Bold")
     data = [[
         Paragraph("Codigo", st_head), Paragraph("Descripcion", st_head),
+        Paragraph("Referencia", st_head), Paragraph("Ref. Proveedor", st_head),
         Paragraph("Pedido(s)", st_head), Paragraph("Estado", st_head),
         Paragraph("Solicit.", st_head), Paragraph("Preparada", st_head),
         Paragraph("Despach.", st_head), Paragraph("Recibida", st_head),
         Paragraph("Back Order", st_head), Paragraph("Existencia", st_head),
     ]]
     for grupo in grupos:
-        if grupo["num_pedidos"] == 1:
-            pedido_col = f"#{grupo['detalle'][0].pedido_id}"
-        else:
-            pedido_col = f"{grupo['num_pedidos']} pedidos"
+        pedido_col = ", ".join(f"#{pid}" for pid in grupo["pedidos_ids"])
         estado_col = ", ".join(label for _codigo, label in grupo["estados_badges"])
         existencia_col = "N/D" if grupo["existencia"] is None else str(grupo["existencia"])
         data.append([
             Paragraph(grupo["codigo"], st_cell),
             Paragraph(grupo["descripcion"], st_cell),
+            Paragraph(grupo["referencia"], st_cell),
+            Paragraph(grupo["ref_proveedor"], st_cell),
             Paragraph(pedido_col, st_cell),
             Paragraph(estado_col, st_cell),
             str(grupo["total_solicitada"]), str(grupo["total_preparada"]),
@@ -920,11 +921,12 @@ def generar_reporte_items_pdf(grupos: list, filtros: dict) -> bytes:
             str(grupo["total_back_order"]), existencia_col,
         ])
     if not grupos:
-        data.append([Paragraph("Sin datos", st_cell), "-", "-", "-", "-", "-", "-", "-", "-", "-"])
+        data.append([Paragraph("Sin datos", st_cell), "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-"])
 
     # Ancho util = 542 pt (612 - margenes 35*2)
-    # Codigo 50 | Descripcion 118 | Pedido(s) 55 | Estado 80 | Solicit 38 | Preparada 40 | Despach 40 | Recibida 38 | BackOrder 43 | Existencia 40 = 542
-    col_widths = [50, 118, 55, 80, 38, 40, 40, 38, 43, 40]
+    # Codigo 42 | Descripcion 95 | Referencia 45 | Ref.Proveedor 45 | Pedido(s) 48 | Estado 65 |
+    # Solicit 30 | Preparada 33 | Despach 33 | Recibida 30 | BackOrder 36 | Existencia 40 = 542
+    col_widths = [42, 95, 45, 45, 48, 65, 30, 33, 33, 30, 36, 40]
     tabla = Table(data, colWidths=col_widths, repeatRows=1)
     tabla.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), _GRIS_CLARO),
