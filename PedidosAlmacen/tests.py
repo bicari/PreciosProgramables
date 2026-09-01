@@ -5224,6 +5224,15 @@ class PlantillaExcelPedidoViewTest(TestCase):
         headers = [c.value for c in ws[1]]
         self.assertEqual(headers, ['SKU', 'Cantidad', 'Categoria (opcional)'])
 
+    def test_columna_sku_formato_texto_y_cantidad_formato_numerico(self):
+        import openpyxl
+        import io
+        resp = self.client.get('/pedidos/plantilla-excel/')
+        wb = openpyxl.load_workbook(io.BytesIO(resp.content))
+        ws = wb.active
+        self.assertEqual(ws.column_dimensions['A'].number_format, '@')
+        self.assertEqual(ws.column_dimensions['B'].number_format, '0')
+
     def test_usuario_sin_permiso_redirige(self):
         from users.models import User
         otro = User.objects.create_user(username='sin_permiso_plantilla', password='x')

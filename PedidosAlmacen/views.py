@@ -2666,6 +2666,8 @@ def plantilla_excel_pedido(request):
     ws = wb.active
     ws.title = 'Pedido'
     ws.append(['SKU', 'Cantidad', 'Categoria (opcional)'])
+    ws.column_dimensions['A'].number_format = '@'
+    ws.column_dimensions['B'].number_format = '0'
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
