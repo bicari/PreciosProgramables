@@ -158,13 +158,19 @@ def api_preparar_pedido(request, pk):
         pedido.save(update_fields=['estado', 'fecha_inicio_picking', 'fecha_fin_picking'])
 
     elif accion == 'finalizar':
+        from ubicaciones.services import UbicacionesService
         cantidades = request.data.get('cantidades', {})
+        ubicaciones_por_item = request.data.get('ubicaciones_picking', {})
         items = pedido.items.filter(estado__in=['PENDIENTE', 'BACK_ORDER', 'PARCIAL'])
         for item in items:
             cantidad = cantidades.get(str(item.id))
             if cantidad is not None:
                 item.cantidad_preparada = int(cantidad)
                 item.save(update_fields=['cantidad_preparada'])
+                UbicacionesService.descontar_por_picking(
+                    item, int(cantidad), request.user,
+                    nivel_id=ubicaciones_por_item.get(str(item.id)),
+                )
         if pedido.estado == 'PICKING':
             pedido.fecha_fin_picking = timezone.now()
         pedido.estado = 'EN_PREPARACION'

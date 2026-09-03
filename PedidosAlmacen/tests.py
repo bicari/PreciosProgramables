@@ -5701,3 +5701,64 @@ class ApiUpdateItemDescuentaUbicacionTest(TestCase):
         resp = self.api.patch(url, data={'cantidad_preparada': 5}, format='json')
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(resp.data['ubicacion_picking']['aplicado'])
+
+
+class ApiPrepararPedidoFinalizarDescuentaUbicacionTest(TestCase):
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        from ubicaciones.models import Cuerpo, Galpon, Nivel, ProductoUbicacion, Rack, Ubicacion
+
+        self.user = User.objects.create_superuser(username='api_finalizar_ubic', password='x')
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+        self.pedido = Pedido.objects.create(
+            solicitante=self.user, picker=self.user, estado='PICKING',
+        )
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=10, estado='PENDIENTE',
+        )
+
+        galpon = Galpon.objects.create(codigo='1', nombre='Galpón 1', creado_por=self.user)
+        rack = Rack.objects.create(galpon=galpon, codigo='A', max_niveles=6, creado_por=self.user)
+        cuerpo = Cuerpo.objects.create(rack=rack, codigo='01', creado_por=self.user)
+        ubicacion = Ubicacion.objects.create(cuerpo=cuerpo, codigo='01', creado_por=self.user)
+        self.nivel = Nivel.objects.create(ubicacion=ubicacion, numero=1, tipo=Nivel.PICKING, creado_por=self.user)
+        self.pu = ProductoUbicacion.objects.create(codigo_producto='SKU1', nivel=self.nivel, cantidad=50)
+
+        self.url = f'/api/pedidos/{self.pedido.numero_pedido}/preparar/'
+
+    def test_finalizar_descuenta_ubicacion_por_item(self):
+        resp = self.api.post(
+            self.url,
+            data={'accion': 'finalizar', 'cantidades': {str(self.item.id): 7}},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.pu.refresh_from_db()
+        self.assertEqual(self.pu.cantidad, 43)
+
+    def test_finalizar_usa_ubicacion_indicada_cuando_hay_varias(self):
+        from ubicaciones.models import Nivel, ProductoUbicacion
+        nivel2 = Nivel.objects.create(
+            ubicacion=self.nivel.ubicacion, numero=2, tipo=Nivel.PICKING, creado_por=self.user,
+        )
+        pu2 = ProductoUbicacion.objects.create(codigo_producto='SKU1', nivel=nivel2, cantidad=20)
+
+        resp = self.api.post(
+            self.url,
+            data={
+                'accion': 'finalizar',
+                'cantidades': {str(self.item.id): 7},
+                'ubicaciones_picking': {str(self.item.id): nivel2.pk},
+            },
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200)
+        pu2.refresh_from_db()
+        self.pu.refresh_from_db()
+        self.assertEqual(pu2.cantidad, 13)
+        self.assertEqual(self.pu.cantidad, 50)  # sin tocar
