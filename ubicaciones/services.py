@@ -514,3 +514,55 @@ class UbicacionesService:
             movimiento.notas = f"{movimiento.notas}\n{nota}".strip()
         movimiento.save(update_fields=['pendiente_revision', 'revisado_por', 'fecha_revision', 'notas'])
         return movimiento
+
+    # ------------------------------------------------------------------ Reconciliación a2
+
+    @staticmethod
+    @transaction.atomic
+    def ajustar_por_reconciliacion_a2(codigo_producto: str, existencia_a2: int, usuario=None) -> dict:
+        """Compara la existencia real en a2 contra lo asignado por ubicación
+        para un producto y, si a2 quedó por debajo (salida externa), ajusta
+        la ubicación resuelta sin ambigüedad y registra la incidencia.
+        No lanza excepciones."""
+        asignaciones = list(
+            ProductoUbicacion.objects
+            .select_for_update()
+            .filter(codigo_producto=codigo_producto)
+            .select_related('nivel__ubicacion__cuerpo__rack__galpon')
+        )
+        resultado = {'faltante': 0, 'ajustado': False, 'nivel_id': None}
+        if not asignaciones:
+            return resultado
+
+        suma = sum(pu.cantidad for pu in asignaciones)
+        if existencia_a2 >= suma:
+            return resultado
+
+        faltante = suma - existencia_a2
+        resultado['faltante'] = faltante
+
+        if len(asignaciones) == 1:
+            origen = asignaciones[0]
+        else:
+            origen = next((pu for pu in asignaciones if pu.es_principal), None)
+
+        if origen is not None:
+            disponible = origen.cantidad
+            descuento = min(faltante, disponible)
+            origen.cantidad = disponible - descuento
+            origen.save(update_fields=['cantidad'])
+            resultado['ajustado'] = True
+            resultado['nivel_id'] = origen.nivel_id
+
+        MovimientoUbicacion.objects.create(
+            tipo='AJUSTE_A2', codigo_producto=codigo_producto, cantidad=faltante,
+            pendiente_revision=True, activo=False, usuario=usuario,
+            nivel_destino=origen.nivel if origen else None,
+            galpon=origen.nivel.galpon if origen else None,
+            rack=origen.nivel.rack if origen else None,
+            notas=(
+                'Salida externa detectada por reconciliación con a2.' if origen else
+                'Salida externa detectada; ambigüedad de ubicación, requiere resolución manual.'
+            ),
+        )
+        return resultado

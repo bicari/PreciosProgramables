@@ -982,3 +982,71 @@ class ResolverIncidenciaServiceTest(TestCase):
         UbicacionesService.resolver_incidencia(self.mov, self.user, nota='Conteo físico confirmado')
         self.mov.refresh_from_db()
         self.assertIn('Conteo físico confirmado', self.mov.notas)
+
+
+class AjustarPorReconciliacionA2ServiceTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(username='ajuste_a2')
+        self.galpon = Galpon.objects.create(codigo='1', nombre='Galpón 1', creado_por=self.user)
+        self.rack = Rack.objects.create(galpon=self.galpon, codigo='A', max_niveles=6, creado_por=self.user)
+        self.cuerpo = Cuerpo.objects.create(rack=self.rack, codigo='01', creado_por=self.user)
+        self.ubicacion = Ubicacion.objects.create(cuerpo=self.cuerpo, codigo='01', creado_por=self.user)
+        self.nivel1 = Nivel.objects.create(ubicacion=self.ubicacion, numero=1, creado_por=self.user)
+        self.nivel2 = Nivel.objects.create(ubicacion=self.ubicacion, numero=2, creado_por=self.user)
+
+    def test_sin_diferencia_no_hace_nada(self):
+        ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel1, cantidad=30)
+        resultado = UbicacionesService.ajustar_por_reconciliacion_a2('ABC', existencia_a2=50)
+        self.assertEqual(resultado['faltante'], 0)
+        self.assertFalse(resultado['ajustado'])
+        self.assertFalse(MovimientoUbicacion.objects.filter(tipo='AJUSTE_A2').exists())
+
+    def test_diferencia_positiva_no_hace_nada(self):
+        # a2 tiene más de lo asignado: es stock sin ubicación, no es incidencia.
+        ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel1, cantidad=30)
+        resultado = UbicacionesService.ajustar_por_reconciliacion_a2('ABC', existencia_a2=30)
+        self.assertEqual(resultado['faltante'], 0)
+        self.assertFalse(MovimientoUbicacion.objects.filter(tipo='AJUSTE_A2').exists())
+
+    def test_faltante_con_una_sola_ubicacion_ajusta_ahi(self):
+        pu = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel1, cantidad=30)
+        resultado = UbicacionesService.ajustar_por_reconciliacion_a2('ABC', existencia_a2=20, usuario=self.user)
+        pu.refresh_from_db()
+        self.assertEqual(pu.cantidad, 20)  # 30 - 10 de faltante
+        self.assertEqual(resultado['faltante'], 10)
+        self.assertTrue(resultado['ajustado'])
+        self.assertEqual(resultado['nivel_id'], self.nivel1.pk)
+        mov = MovimientoUbicacion.objects.get(tipo='AJUSTE_A2', codigo_producto='ABC')
+        self.assertEqual(mov.cantidad, 10)
+        self.assertTrue(mov.pendiente_revision)
+
+    def test_faltante_clava_a_cero_si_supera_lo_disponible(self):
+        pu = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel1, cantidad=5)
+        UbicacionesService.ajustar_por_reconciliacion_a2('ABC', existencia_a2=-100)
+        pu.refresh_from_db()
+        self.assertEqual(pu.cantidad, 0)
+
+    def test_faltante_con_varias_y_principal_marcada_ajusta_esa(self):
+        pu1 = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel1, cantidad=30, es_principal=True)
+        pu2 = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel2, cantidad=20)
+        resultado = UbicacionesService.ajustar_por_reconciliacion_a2('ABC', existencia_a2=40)
+        pu1.refresh_from_db()
+        pu2.refresh_from_db()
+        self.assertEqual(pu1.cantidad, 20)  # 30 - 10
+        self.assertEqual(pu2.cantidad, 20)  # sin tocar
+        self.assertTrue(resultado['ajustado'])
+        self.assertEqual(resultado['nivel_id'], self.nivel1.pk)
+
+    def test_faltante_con_varias_sin_principal_solo_incidencia(self):
+        pu1 = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel1, cantidad=30)
+        pu2 = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel2, cantidad=20)
+        resultado = UbicacionesService.ajustar_por_reconciliacion_a2('ABC', existencia_a2=40)
+        pu1.refresh_from_db()
+        pu2.refresh_from_db()
+        self.assertEqual(pu1.cantidad, 30)
+        self.assertEqual(pu2.cantidad, 20)
+        self.assertFalse(resultado['ajustado'])
+        self.assertEqual(resultado['faltante'], 10)
+        mov = MovimientoUbicacion.objects.get(tipo='AJUSTE_A2', codigo_producto='ABC')
+        self.assertTrue(mov.pendiente_revision)
+        self.assertIsNone(mov.nivel_destino)
