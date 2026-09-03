@@ -228,3 +228,42 @@ def api_producto_ubicaciones(request, codigo: str):
         'existencia_dbisam': existencia,
         'ubicaciones': ProductoUbicacionSerializer(asignaciones, many=True).data,
     })
+
+
+@api_view(['GET'])
+@authentication_classes(_AUTH)
+@permission_classes(_PERM)
+def api_incidencias_list(request):
+    qs = MovimientoUbicacion.objects.filter(pendiente_revision=True).select_related('usuario', 'rack')
+    codigo = request.query_params.get('codigo')
+    tipo = request.query_params.get('tipo')
+    if codigo:
+        qs = qs.filter(codigo_producto__icontains=codigo)
+    if tipo:
+        qs = qs.filter(tipo=tipo)
+    return Response(MovimientoSerializer(qs.order_by('-fecha')[:200], many=True).data)
+
+
+@api_view(['POST'])
+@authentication_classes(_AUTH)
+@permission_classes(_PERM)
+def api_resolver_incidencia(request, pk: int):
+    try:
+        movimiento = MovimientoUbicacion.objects.get(pk=pk)
+    except MovimientoUbicacion.DoesNotExist:
+        return Response({'error': 'Movimiento no encontrado.'}, status=404)
+    nota = request.data.get('nota', '')
+    UbicacionesService.resolver_incidencia(movimiento, request.user, nota)
+    return Response(MovimientoSerializer(movimiento).data)
+
+
+@api_view(['POST'])
+@authentication_classes(_AUTH)
+@permission_classes(_PERM)
+def api_marcar_principal(request, pk: int):
+    try:
+        pu = ProductoUbicacion.objects.get(pk=pk)
+    except ProductoUbicacion.DoesNotExist:
+        return Response({'error': 'Asignación no encontrada.'}, status=404)
+    UbicacionesService.marcar_principal(pu, request.user)
+    return Response(ProductoUbicacionSerializer(pu).data)

@@ -15,4 +15,7 @@ urlpatterns = [
     path('producto-ubicaciones/<int:pk>/quitar/', api_views.api_quitar_producto, name='api-pu-quitar'),
     path('ubicaciones/movimientos/', api_views.api_movimientos, name='api-ubicaciones-movimientos'),
     path('productos/<str:codigo>/ubicaciones/', api_views.api_producto_ubicaciones, name='api-producto-ubicaciones'),
+    path('ubicaciones/incidencias/', api_views.api_incidencias_list, name='api-ubicaciones-incidencias'),
+    path('ubicaciones/movimientos/<int:pk>/resolver/', api_views.api_resolver_incidencia, name='api-movimiento-resolver'),
+    path('producto-ubicaciones/<int:pk>/marcar-principal/', api_views.api_marcar_principal, name='api-pu-marcar-principal'),
 ]

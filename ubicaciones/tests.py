@@ -1101,3 +1101,57 @@ class ReconciliarExistenciasCommandTest(TestCase):
             self.call_command('reconciliar_existencias')
         pu.refresh_from_db()
         self.assertEqual(pu.cantidad, 30)
+
+
+class ApiIncidenciasTest(TestCase):
+    def setUp(self):
+        from rest_framework.test import APIClient
+        self.user = User.objects.create_superuser(username='api_incidencias', password='x')
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+        self.galpon = Galpon.objects.create(codigo='1', nombre='Galpón 1', creado_por=self.user)
+        self.rack = Rack.objects.create(galpon=self.galpon, codigo='A', max_niveles=6, creado_por=self.user)
+        self.cuerpo = Cuerpo.objects.create(rack=self.rack, codigo='01', creado_por=self.user)
+        self.ubicacion = Ubicacion.objects.create(cuerpo=self.cuerpo, codigo='01', creado_por=self.user)
+        self.nivel = Nivel.objects.create(ubicacion=self.ubicacion, numero=1, creado_por=self.user)
+
+    def test_listar_incidencias_solo_pendientes(self):
+        MovimientoUbicacion.objects.create(
+            tipo='AJUSTE_A2', codigo_producto='ABC', cantidad=5, pendiente_revision=True,
+        )
+        MovimientoUbicacion.objects.create(
+            tipo='AJUSTE_A2', codigo_producto='XYZ', cantidad=3, pendiente_revision=False,
+        )
+        resp = self.api.get('/api/ubicaciones/incidencias/')
+        self.assertEqual(resp.status_code, 200)
+        codigos = [m['codigo_producto'] for m in resp.data]
+        self.assertIn('ABC', codigos)
+        self.assertNotIn('XYZ', codigos)
+
+    def test_listar_incidencias_filtra_por_codigo(self):
+        MovimientoUbicacion.objects.create(
+            tipo='PICKING', codigo_producto='ABC', cantidad=5, pendiente_revision=True,
+        )
+        MovimientoUbicacion.objects.create(
+            tipo='PICKING', codigo_producto='XYZ', cantidad=3, pendiente_revision=True,
+        )
+        resp = self.api.get('/api/ubicaciones/incidencias/', {'codigo': 'ABC'})
+        codigos = [m['codigo_producto'] for m in resp.data]
+        self.assertEqual(codigos, ['ABC'])
+
+    def test_resolver_incidencia_via_api(self):
+        mov = MovimientoUbicacion.objects.create(
+            tipo='AJUSTE_A2', codigo_producto='ABC', cantidad=5, pendiente_revision=True,
+        )
+        resp = self.api.post(f'/api/ubicaciones/movimientos/{mov.pk}/resolver/', data={'nota': 'ok'}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        mov.refresh_from_db()
+        self.assertFalse(mov.pendiente_revision)
+        self.assertEqual(mov.revisado_por, self.user)
+
+    def test_marcar_principal_via_api(self):
+        pu1 = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel, cantidad=10)
+        resp = self.api.post(f'/api/producto-ubicaciones/{pu1.pk}/marcar-principal/')
+        self.assertEqual(resp.status_code, 200)
+        pu1.refresh_from_db()
+        self.assertTrue(pu1.es_principal)

@@ -57,7 +57,10 @@ class ProductoUbicacionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ProductoUbicacion
-        fields = ['id', 'codigo_producto', 'nivel', 'nivel_codigo', 'tipo_nivel', 'cantidad', 'stock_minimo']
+        fields = [
+            'id', 'codigo_producto', 'nivel', 'nivel_codigo', 'tipo_nivel',
+            'cantidad', 'stock_minimo', 'es_principal',
+        ]
 
 
 class MovimientoSerializer(serializers.ModelSerializer):
@@ -66,14 +69,20 @@ class MovimientoSerializer(serializers.ModelSerializer):
     rack_codigo = serializers.CharField(source='rack.codigo', read_only=True, default=None)
     nivel_origen_str = serializers.CharField(source='nivel_origen.codigo_completo', read_only=True, default=None)
     nivel_destino_str = serializers.CharField(source='nivel_destino.codigo_completo', read_only=True, default=None)
+    revisado_por_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = MovimientoUbicacion
         fields = [
             'id', 'tipo', 'tipo_display', 'rack_codigo',
             'nivel_origen_str', 'nivel_destino_str',
-            'codigo_producto', 'usuario_nombre', 'fecha', 'notas',
+            'codigo_producto', 'cantidad', 'pendiente_revision',
+            'revisado_por_nombre', 'fecha_revision',
+            'usuario_nombre', 'fecha', 'notas',
         ]
 
     def get_usuario_nombre(self, obj) -> str:
         return obj.usuario.username if obj.usuario else ''
+
+    def get_revisado_por_nombre(self, obj) -> str:
+        return obj.revisado_por.username if obj.revisado_por else ''
