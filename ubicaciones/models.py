@@ -168,6 +168,7 @@ class ProductoUbicacion(models.Model):
     nivel = models.ForeignKey(Nivel, on_delete=models.PROTECT, related_name='productos')
     cantidad = models.PositiveIntegerField(default=0)
     stock_minimo = models.PositiveIntegerField(null=True, blank=True)
+    es_principal = models.BooleanField(default=False)
     fecha_asignacion = models.DateTimeField(auto_now_add=True)
     asignado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -205,6 +206,8 @@ class MovimientoUbicacion(models.Model):
         ('TRASLADO', 'Traslado entre niveles'),
         ('FUSION_NIVEL', 'Fusión de niveles'),
         ('DESFUSION_NIVEL', 'Desfusión de nivel'),
+        ('PICKING', 'Descuento por picking'),
+        ('AJUSTE_A2', 'Ajuste por reconciliación con a2'),
     ]
 
     tipo = models.CharField(max_length=30, choices=TIPO_CHOICES, db_index=True)
@@ -226,6 +229,20 @@ class MovimientoUbicacion(models.Model):
         related_name='movimientos_ubicacion',
     )
     fecha = models.DateTimeField(auto_now_add=True, db_index=True)
+    cantidad = models.IntegerField(null=True, blank=True)
+    pendiente_revision = models.BooleanField(default=False)
+    revisado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='incidencias_ubicacion_revisadas',
+    )
+    fecha_revision = models.DateTimeField(null=True, blank=True)
+    pedido_item = models.ForeignKey(
+        'PedidosAlmacen.PedidoItem',
+        on_delete=models.CASCADE, null=True, blank=True,
+        related_name='movimientos_ubicacion',
+    )
+    activo = models.BooleanField(default=True)
     notas = models.TextField(blank=True, default='')
 
     class Meta:

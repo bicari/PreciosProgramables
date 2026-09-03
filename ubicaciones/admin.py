@@ -45,21 +45,26 @@ class NivelAdmin(admin.ModelAdmin):
 
 @admin.register(ProductoUbicacion)
 class ProductoUbicacionAdmin(admin.ModelAdmin):
-    list_display = ['codigo_producto', 'nivel', 'cantidad', 'stock_minimo', 'fecha_asignacion']
+    list_display = ['codigo_producto', 'nivel', 'cantidad', 'stock_minimo', 'es_principal', 'fecha_asignacion']
     search_fields = ['codigo_producto']
-    list_filter = ['nivel__ubicacion__cuerpo__rack']
+    list_filter = ['nivel__ubicacion__cuerpo__rack', 'es_principal']
     readonly_fields = ['fecha_asignacion', 'asignado_por']
 
 
 @admin.register(MovimientoUbicacion)
 class MovimientoUbicacionAdmin(admin.ModelAdmin):
-    list_display = ['tipo', 'codigo_producto', 'rack', 'nivel_origen', 'nivel_destino', 'usuario', 'fecha']
-    list_filter = ['tipo']
+    list_display = [
+        'tipo', 'codigo_producto', 'cantidad', 'pendiente_revision', 'rack',
+        'nivel_origen', 'nivel_destino', 'usuario', 'fecha',
+    ]
+    list_filter = ['tipo', 'pendiente_revision']
     search_fields = ['codigo_producto']
     date_hierarchy = 'fecha'
     readonly_fields = [
         'tipo', 'galpon', 'rack', 'cuerpo', 'ubicacion', 'nivel',
-        'nivel_origen', 'nivel_destino', 'codigo_producto', 'usuario', 'fecha', 'notas',
+        'nivel_origen', 'nivel_destino', 'codigo_producto', 'cantidad',
+        'pendiente_revision', 'revisado_por', 'fecha_revision', 'pedido_item',
+        'activo', 'usuario', 'fecha', 'notas',
     ]
 
     def has_add_permission(self, request):

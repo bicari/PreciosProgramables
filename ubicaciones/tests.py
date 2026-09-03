@@ -775,3 +775,42 @@ class CuerpoUbicacionNivelTemplatesSmokeTest(TestCase):
         for url in urls:
             resp = self.client.get(url)
             self.assertEqual(resp.status_code, 200, f"{url} devolvió {resp.status_code}")
+
+
+class CamposIncidenciaModeloTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(username='campos_incidencia')
+        self.galpon = Galpon.objects.create(codigo='1', nombre='Galpón 1', creado_por=self.user)
+        self.rack = Rack.objects.create(galpon=self.galpon, codigo='A', max_niveles=6, creado_por=self.user)
+        self.cuerpo = Cuerpo.objects.create(rack=self.rack, codigo='01', creado_por=self.user)
+        self.ubicacion = Ubicacion.objects.create(cuerpo=self.cuerpo, codigo='01', creado_por=self.user)
+        self.nivel = Nivel.objects.create(ubicacion=self.ubicacion, numero=1, creado_por=self.user)
+
+    def test_producto_ubicacion_es_principal_default_false(self):
+        pu = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel, cantidad=10)
+        self.assertFalse(pu.es_principal)
+
+    def test_movimiento_ubicacion_campos_nuevos_default(self):
+        mov = MovimientoUbicacion.objects.create(tipo='PICKING', usuario=self.user, codigo_producto='ABC')
+        self.assertIsNone(mov.cantidad)
+        self.assertFalse(mov.pendiente_revision)
+        self.assertIsNone(mov.revisado_por)
+        self.assertIsNone(mov.fecha_revision)
+        self.assertIsNone(mov.pedido_item)
+        self.assertTrue(mov.activo)
+
+    def test_movimiento_ubicacion_admite_tipo_ajuste_a2(self):
+        mov = MovimientoUbicacion.objects.create(
+            tipo='AJUSTE_A2', codigo_producto='ABC', cantidad=5, pendiente_revision=True,
+        )
+        self.assertEqual(mov.cantidad, 5)
+        self.assertTrue(mov.pendiente_revision)
+
+    def test_movimiento_ubicacion_admite_pedido_item(self):
+        from PedidosAlmacen.models import Pedido, PedidoItem
+        pedido = Pedido.objects.create(solicitante=self.user)
+        item = PedidoItem.objects.create(
+            pedido=pedido, codigo='ABC', descripcion='Producto ABC', cantidad_solicitada=10,
+        )
+        mov = MovimientoUbicacion.objects.create(tipo='PICKING', codigo_producto='ABC', pedido_item=item)
+        self.assertEqual(mov.pedido_item_id, item.id)
