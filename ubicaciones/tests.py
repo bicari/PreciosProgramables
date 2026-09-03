@@ -5,9 +5,7 @@ from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
-from django.urls import reverse
 
-from PedidosAlmacen.models import Pedido, PedidoItem
 from ubicaciones.models import (
     Cuerpo, Galpon, MovimientoUbicacion, Nivel, ProductoUbicacion, Rack, Ubicacion,
 )
