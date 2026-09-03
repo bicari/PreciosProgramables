@@ -405,3 +405,98 @@ class UbicacionesService:
         producto_ubicacion.es_principal = True
         producto_ubicacion.save(update_fields=['es_principal'])
         return producto_ubicacion
+
+    @staticmethod
+    @transaction.atomic
+    def descontar_por_picking(
+        pedido_item, cantidad: int, usuario, nivel_id: int | None = None,
+    ) -> dict:
+        """Descuenta `cantidad` de la ubicación PICKING del producto de `pedido_item`.
+
+        Reentrante: revierte el descuento vigente para este pedido_item (si lo
+        hay) antes de aplicar el nuevo, así que puede llamarse cada vez que se
+        guarda cantidad_preparada sin duplicar descuentos. Nunca lanza
+        ValidationError: cualquier ambigüedad (varias ubicaciones sin indicar
+        cuál) o faltante de stock queda registrado como incidencia
+        (pendiente_revision=True) en vez de bloquear la operación.
+        """
+        codigo = pedido_item.codigo
+        resultado = {'aplicado': False, 'nivel_id': None, 'incidencia': False, 'mensaje': ''}
+
+        if nivel_id is not None:
+            nivel_id = int(nivel_id)
+
+        # Paso 1: revertir el descuento vigente para este ítem, si existe.
+        anterior = (
+            MovimientoUbicacion.objects
+            .select_for_update()
+            .filter(tipo='PICKING', pedido_item=pedido_item, activo=True)
+            .first()
+        )
+        if anterior is not None:
+            if anterior.nivel_origen_id is not None and anterior.cantidad:
+                pu_anterior = (
+                    ProductoUbicacion.objects
+                    .select_for_update()
+                    .filter(codigo_producto=codigo, nivel_id=anterior.nivel_origen_id)
+                    .first()
+                )
+                if pu_anterior is None:
+                    ProductoUbicacion.objects.create(
+                        codigo_producto=codigo, nivel_id=anterior.nivel_origen_id, cantidad=anterior.cantidad,
+                    )
+                else:
+                    pu_anterior.cantidad += anterior.cantidad
+                    pu_anterior.save(update_fields=['cantidad'])
+            anterior.activo = False
+            anterior.save(update_fields=['activo'])
+
+        if cantidad <= 0:
+            return resultado
+
+        # Paso 2: resolver la ubicación de origen.
+        candidatos = list(
+            ProductoUbicacion.objects
+            .select_for_update()
+            .filter(
+                codigo_producto=codigo, nivel__tipo=Nivel.PICKING, nivel__activo=True,
+                nivel__fusionado_en__isnull=True,
+            )
+            .select_related('nivel__ubicacion__cuerpo__rack__galpon')
+        )
+
+        if not candidatos:
+            return resultado
+
+        if len(candidatos) == 1:
+            origen = candidatos[0]
+        else:
+            origen = next((pu for pu in candidatos if pu.nivel_id == nivel_id), None)
+            if origen is None:
+                MovimientoUbicacion.objects.create(
+                    tipo='PICKING', pedido_item=pedido_item, codigo_producto=codigo,
+                    cantidad=cantidad, pendiente_revision=True, activo=False, usuario=usuario,
+                    notas='Ambigüedad: varias ubicaciones PICKING, ninguna indicada.',
+                )
+                resultado['incidencia'] = True
+                resultado['mensaje'] = 'Varias ubicaciones PICKING; se registró incidencia sin descuento.'
+                return resultado
+
+        # Paso 3: aplicar el descuento.
+        disponible = origen.cantidad
+        incidencia = cantidad > disponible
+        descuento = min(cantidad, disponible)
+        origen.cantidad = disponible - descuento
+        origen.save(update_fields=['cantidad'])
+
+        MovimientoUbicacion.objects.create(
+            tipo='PICKING', pedido_item=pedido_item, codigo_producto=codigo,
+            nivel_origen=origen.nivel, cantidad=cantidad, activo=True,
+            pendiente_revision=incidencia, usuario=usuario,
+            galpon=origen.nivel.galpon, rack=origen.nivel.rack,
+            notas='Faltante de stock en la ubicación.' if incidencia else '',
+        )
+        resultado.update(aplicado=True, nivel_id=origen.nivel_id, incidencia=incidencia)
+        if incidencia:
+            resultado['mensaje'] = f'Ubicación quedó en 0; faltaron {cantidad - disponible} unidades.'
+        return resultado

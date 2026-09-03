@@ -847,3 +847,118 @@ class MarcarPrincipalServiceTest(TestCase):
         UbicacionesService.marcar_principal(self.pu1, self.user)
         pu_otro.refresh_from_db()
         self.assertTrue(pu_otro.es_principal)
+
+
+class DescontarPorPickingServiceTest(TestCase):
+    def setUp(self):
+        from PedidosAlmacen.models import Pedido, PedidoItem
+        self.user = User.objects.create(username='descontar_picking')
+        self.galpon = Galpon.objects.create(codigo='1', nombre='Galpón 1', creado_por=self.user)
+        self.rack = Rack.objects.create(galpon=self.galpon, codigo='A', max_niveles=6, creado_por=self.user)
+        self.cuerpo = Cuerpo.objects.create(rack=self.rack, codigo='01', creado_por=self.user)
+        self.ubicacion = Ubicacion.objects.create(cuerpo=self.cuerpo, codigo='01', creado_por=self.user)
+        self.nivel = Nivel.objects.create(
+            ubicacion=self.ubicacion, numero=1, tipo=Nivel.PICKING, creado_por=self.user,
+        )
+        self.pu = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel, cantidad=50)
+        self.pedido = Pedido.objects.create(solicitante=self.user)
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='ABC', descripcion='Producto ABC', cantidad_solicitada=30,
+        )
+
+    def test_sin_ubicacion_picking_no_hace_nada(self):
+        item_sin_ubicacion = type(self.item).objects.create(
+            pedido=self.pedido, codigo='SIN-UBICACION', descripcion='X', cantidad_solicitada=5,
+        )
+        resultado = UbicacionesService.descontar_por_picking(item_sin_ubicacion, 5, self.user)
+        self.assertFalse(resultado['aplicado'])
+        self.assertFalse(resultado['incidencia'])
+        self.assertFalse(MovimientoUbicacion.objects.filter(tipo='PICKING').exists())
+
+    def test_una_sola_ubicacion_descuenta_automatico(self):
+        resultado = UbicacionesService.descontar_por_picking(self.item, 30, self.user)
+        self.pu.refresh_from_db()
+        self.assertEqual(self.pu.cantidad, 20)
+        self.assertTrue(resultado['aplicado'])
+        self.assertEqual(resultado['nivel_id'], self.nivel.pk)
+        self.assertFalse(resultado['incidencia'])
+
+    def test_una_sola_ubicacion_crea_movimiento_picking_activo(self):
+        UbicacionesService.descontar_por_picking(self.item, 30, self.user)
+        mov = MovimientoUbicacion.objects.get(tipo='PICKING', pedido_item=self.item)
+        self.assertEqual(mov.cantidad, 30)
+        self.assertTrue(mov.activo)
+        self.assertFalse(mov.pendiente_revision)
+        self.assertEqual(mov.nivel_origen_id, self.nivel.pk)
+
+    def test_varias_ubicaciones_sin_indicar_no_descuenta_y_marca_incidencia(self):
+        nivel2 = Nivel.objects.create(ubicacion=self.ubicacion, numero=2, tipo=Nivel.PICKING, creado_por=self.user)
+        ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=nivel2, cantidad=20)
+
+        resultado = UbicacionesService.descontar_por_picking(self.item, 30, self.user)
+
+        self.pu.refresh_from_db()
+        self.assertEqual(self.pu.cantidad, 50)  # sin tocar
+        self.assertFalse(resultado['aplicado'])
+        self.assertTrue(resultado['incidencia'])
+        mov = MovimientoUbicacion.objects.get(tipo='PICKING', pedido_item=self.item)
+        self.assertTrue(mov.pendiente_revision)
+        self.assertFalse(mov.activo)
+        self.assertEqual(mov.cantidad, 30)
+
+    def test_varias_ubicaciones_con_nivel_id_valido_descuenta_esa(self):
+        nivel2 = Nivel.objects.create(ubicacion=self.ubicacion, numero=2, tipo=Nivel.PICKING, creado_por=self.user)
+        pu2 = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=nivel2, cantidad=20)
+
+        resultado = UbicacionesService.descontar_por_picking(self.item, 15, self.user, nivel_id=nivel2.pk)
+
+        pu2.refresh_from_db()
+        self.pu.refresh_from_db()
+        self.assertEqual(pu2.cantidad, 5)
+        self.assertEqual(self.pu.cantidad, 50)  # la otra ubicación no se tocó
+        self.assertTrue(resultado['aplicado'])
+        self.assertEqual(resultado['nivel_id'], nivel2.pk)
+
+    def test_faltante_de_stock_descuenta_a_cero_y_marca_incidencia(self):
+        resultado = UbicacionesService.descontar_por_picking(self.item, 80, self.user)
+        self.pu.refresh_from_db()
+        self.assertEqual(self.pu.cantidad, 0)
+        self.assertTrue(resultado['aplicado'])
+        self.assertTrue(resultado['incidencia'])
+        mov = MovimientoUbicacion.objects.get(tipo='PICKING', pedido_item=self.item)
+        self.assertTrue(mov.pendiente_revision)
+        self.assertTrue(mov.activo)  # sí quedó un descuento vigente (a 0), a diferencia del caso de ambigüedad
+        self.assertEqual(mov.cantidad, 80)
+
+    def test_reeditar_revierte_y_reaplica(self):
+        UbicacionesService.descontar_por_picking(self.item, 30, self.user)
+        self.pu.refresh_from_db()
+        self.assertEqual(self.pu.cantidad, 20)
+
+        UbicacionesService.descontar_por_picking(self.item, 15, self.user)
+        self.pu.refresh_from_db()
+        self.assertEqual(self.pu.cantidad, 35)  # 50 - 15
+        self.assertEqual(
+            MovimientoUbicacion.objects.filter(tipo='PICKING', pedido_item=self.item, activo=True).count(), 1,
+        )
+
+    def test_reeditar_a_cero_revierte_todo_sin_reaplicar(self):
+        UbicacionesService.descontar_por_picking(self.item, 30, self.user)
+        resultado = UbicacionesService.descontar_por_picking(self.item, 0, self.user)
+        self.pu.refresh_from_db()
+        self.assertEqual(self.pu.cantidad, 50)
+        self.assertFalse(resultado['aplicado'])
+        self.assertFalse(
+            MovimientoUbicacion.objects.filter(tipo='PICKING', pedido_item=self.item, activo=True).exists(),
+        )
+
+    def test_reeditar_tras_incidencia_por_ambiguedad_no_revierte_nada_falso(self):
+        nivel2 = Nivel.objects.create(ubicacion=self.ubicacion, numero=2, tipo=Nivel.PICKING, creado_por=self.user)
+        ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=nivel2, cantidad=20)
+        UbicacionesService.descontar_por_picking(self.item, 30, self.user)  # incidencia, sin descuento
+
+        resultado = UbicacionesService.descontar_por_picking(self.item, 15, self.user, nivel_id=self.nivel.pk)
+
+        self.pu.refresh_from_db()
+        self.assertEqual(self.pu.cantidad, 35)  # 50 - 15, no se revirtió nada porque no había nada activo
+        self.assertTrue(resultado['aplicado'])
