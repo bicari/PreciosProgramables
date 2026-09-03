@@ -532,20 +532,31 @@ class PedidosDBISAM:
         )
 
     def buscar_en_categoria(self, categoria, query, tipo='codigo', solo_existencia=False):
+        """Busca productos en SINVENTARIO, opcionalmente acotado a una o más
+        categorías.
+
+        Args:
+            categoria: Código de categoría, lista de códigos, o lista vacía /
+                valor falsy para buscar en todas las categorías sin filtro.
+        """
         try:
-            categorias = categoria if isinstance(categoria, (list, tuple)) else [categoria]
-            categorias_str = ','.join(f"'{c}'" for c in categorias)
-            filtro_categoria = f"FI_CATEGORIA IN ({categorias_str})"
+            categorias = categoria if isinstance(categoria, (list, tuple)) else ([categoria] if categoria else [])
+            categorias = [c for c in categorias if c]
+            if categorias:
+                categorias_str = ','.join(f"'{c}'" for c in categorias)
+                filtro_categoria = f"FI_CATEGORIA IN ({categorias_str}) AND "
+            else:
+                filtro_categoria = ""
             if tipo == 'descripcion':
                 query_upper = query.upper()
-                where = f"{filtro_categoria} AND UPPER(FI_DESCRIPCION) LIKE '%{query_upper}%'"
+                where = f"{filtro_categoria}UPPER(FI_DESCRIPCION) LIKE '%{query_upper}%'"
             elif tipo == 'referencia':
-                where = f"{filtro_categoria} AND FI_REFERENCIA = '{query}'"
+                where = f"{filtro_categoria}FI_REFERENCIA = '{query}'"
             elif tipo == 'ref_proveedor':
                 query_upper = query.upper()
-                where = f"{filtro_categoria} AND UPPER(ZZCAMPO_001) LIKE '%{query_upper}%'"
+                where = f"{filtro_categoria}UPPER(ZZCAMPO_001) LIKE '%{query_upper}%'"
             else:
-                where = f"{filtro_categoria} AND (FI_REFERENCIA = '{query}' OR FI_CODIGO = '{query}')"
+                where = f"{filtro_categoria}(FI_REFERENCIA = '{query}' OR FI_CODIGO = '{query}')"
             filtro_existencia = " AND FT_EXISTENCIA > 0" if solo_existencia else ""
             with self.connect() as conn:
                 with conn.cursor() as cursor:
@@ -555,14 +566,15 @@ class PedidosDBISAM:
                                             FI_REFERENCIA,
                                             FI_PUESTO,
                                             FT_EXISTENCIA,
-                                            ZZCAMPO_001
-                                          
+                                            ZZCAMPO_001,
+                                            FI_CATEGORIA
+
                                         FROM SINVENTARIO
                                         INNER JOIN SINVDEP ON FT_CODIGOPRODUCTO = FI_CODIGO
                                         WHERE {where} AND FT_CODIGODEPOSITO = 1{filtro_existencia}
                                         ORDER BY FI_DESCRIPCION""").fetchmany(100)
                     return [
-                        (_clean(r[0]), _clean(r[1]), _clean(r[2]), _clean(r[3]), r[4] or 0, _clean(r[5]))
+                        (_clean(r[0]), _clean(r[1]), _clean(r[2]), _clean(r[3]), r[4] or 0, _clean(r[5]), _clean(r[6]))
                         for r in rows
                     ]
         except Exception as e:

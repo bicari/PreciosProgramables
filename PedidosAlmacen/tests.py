@@ -103,6 +103,28 @@ class BuscarEnCategoriaFiltroTest(TestCase):
             sql = cursor.execute.call_args[0][0]
         self.assertIn("FI_CATEGORIA IN ('CAT1','CAT2')", sql)
 
+    def test_categoria_vacia_no_agrega_filtro_categoria(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = (mock_connect.return_value.__enter__.return_value
+                      .cursor.return_value.__enter__.return_value)
+            cursor.execute.return_value.fetchmany.return_value = []
+            db.buscar_en_categoria([], 'abc', 'descripcion')
+            sql = cursor.execute.call_args[0][0]
+        self.assertNotIn('FI_CATEGORIA IN', sql)
+        self.assertIn('FI_CATEGORIA', sql)  # sigue seleccionando la columna
+
+    def test_resultado_incluye_categoria_del_producto(self):
+        db = PedidosDBISAM()
+        with patch.object(db, 'connect') as mock_connect:
+            cursor = (mock_connect.return_value.__enter__.return_value
+                      .cursor.return_value.__enter__.return_value)
+            cursor.execute.return_value.fetchmany.return_value = [
+                ('P1', 'Producto Uno', 'REF1', 'A1', 5, 'RP1', 'CAT9'),
+            ]
+            resultado = db.buscar_en_categoria([], 'abc', 'descripcion')
+        self.assertEqual(resultado[0][6], 'CAT9')
+
 
 class BuscarDocumentosTest(TestCase):
     def _capturar_sql(self, tipos, documento='', cliente='', estados=None):
@@ -377,6 +399,33 @@ class BuscarProductoVistaTest(TestCase):
         args, _ = mock_db.return_value.buscar_en_categoria.call_args
         self.assertEqual(args[0], ['CAT'])
 
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_todas_categorias_omite_exigencia_de_categoria(self, mock_db):
+        mock_db.return_value.buscar_en_categoria.return_value = []
+        resp = self.client.get('/pedidos/buscar-producto/',
+                        {'q': 'abc', 'todas_categorias': '1'})
+        self.assertNotIn('Seleccione una categoria', resp.content.decode())
+        args, _ = mock_db.return_value.buscar_en_categoria.call_args
+        self.assertEqual(args[0], [])
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_sin_todas_categorias_sigue_exigiendo_categoria(self, mock_db):
+        resp = self.client.get('/pedidos/buscar-producto/', {'q': 'abc'})
+        self.assertIn('Seleccione una categoria', resp.content.decode())
+        mock_db.return_value.buscar_en_categoria.assert_not_called()
+
+    @patch('PedidosAlmacen.views.PedidosDBISAM')
+    def test_todas_categorias_resultado_incluye_categoria_del_producto(self, mock_db):
+        mock_db.return_value.buscar_en_categoria.return_value = [
+            ('P1', 'Producto Uno', 'REF1', 'A1', 5, 'RP1', 'CAT9'),
+        ]
+        mock_db.return_value.obtener_categorias.return_value = [('CAT9', 'Categoria Nueve')]
+        resp = self.client.get('/pedidos/buscar-producto/',
+                        {'q': 'pro', 'todas_categorias': '1'})
+        html = resp.content.decode()
+        self.assertIn('CAT9', html)
+        self.assertIn('Categoria Nueve', html)
+
 
 class BotonAgregarBloqueoTest(TestCase):
     def setUp(self):
@@ -385,8 +434,8 @@ class BotonAgregarBloqueoTest(TestCase):
         self.client.force_login(self.user)
 
     def _buscar(self, existencia):
-        # (FI_CODIGO, FI_DESCRIPCION, FI_REFERENCIA, FI_PUESTO, existencia, ZZCAMPO_001)
-        fila = ('P1', 'Producto Uno', 'REF1', 'A1', existencia, 'RP1')
+        # (FI_CODIGO, FI_DESCRIPCION, FI_REFERENCIA, FI_PUESTO, existencia, ZZCAMPO_001, FI_CATEGORIA)
+        fila = ('P1', 'Producto Uno', 'REF1', 'A1', existencia, 'RP1', 'CAT')
         with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
             mock_db.return_value.buscar_en_categoria.return_value = [fila]
             resp = self.client.get('/pedidos/buscar-producto/',
@@ -2194,25 +2243,16 @@ class RecibirDespachoSkuExtraDuplicadoTest(TestCase):
         self.assertContains(resp, 'CODIGOS_PEDIDO')
         self.assertContains(resp, 'SKU1')
 
-    def test_get_pedido_mixto_incluye_todas_las_categorias_en_categoria_pedido(self):
-        from .models import PedidoItem
-        PedidoItem.objects.create(
-            pedido=self.pedido, codigo='SKU2', descripcion='Producto Dos',
-            cantidad_solicitada=3, cantidad_despachada=3, estado='DESPACHADO',
-            categoria='CAT2', categoria_nombre='Cat 2',
-        )
-        self.item.categoria = 'CAT1'
-        self.item.categoria_nombre = 'Cat 1'
-        self.item.save()
-
+    def test_get_busqueda_incidencia_no_restringe_por_categoria(self):
         resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, 200)
-        content = resp.content.decode()
-        import re
-        match = re.search(r'const CATEGORIA_PEDIDO = "([^"]*)";', content)
-        self.assertIsNotNone(match)
-        categorias_render = match.group(1).split(',')
-        self.assertCountEqual(categorias_render, ['CAT1', 'CAT2'])
+        self.assertContains(resp, 'todas_categorias=1')
+
+    def test_get_extra_propaga_categoria_del_producto_seleccionado(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'categoria: selectedProduct.categoria')
+        self.assertContains(resp, 'categoria_nombre: selectedProduct.categoria_nombre')
 
     def test_extra_sku_genuinamente_nuevo_sigue_funcionando(self):
         with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
@@ -2234,6 +2274,19 @@ class RecibirDespachoSkuExtraDuplicadoTest(TestCase):
             responsable=self.user.username, proposito='URGENTE',
             numero_despacho=self.despacho.numero_despacho,
         )
+
+    def test_extra_con_categoria_propia_usa_la_categoria_real_del_producto(self):
+        with patch('PedidosAlmacen.views.PedidosDBISAM') as mock_db:
+            mock_db.return_value.insertar_traslado_recepcion.return_value = None
+            resp = self._post([{
+                'codigo': 'SKU9', 'descripcion': 'Extra',
+                'categoria': 'CAT2', 'categoria_nombre': 'Cat 2', 'cantidad': 2,
+            }])
+
+        self.assertEqual(resp.status_code, 302)
+        extra = self.pedido.items.get(codigo='SKU9')
+        self.assertEqual(extra.categoria, 'CAT2')
+        self.assertEqual(extra.categoria_nombre, 'Cat 2')
 
 
 class RecibirDespachoRecibidoSinDespacharTest(TestCase):
@@ -4669,7 +4722,7 @@ class BuscarProductoUbicacionesInternasTest(TestCase):
     @patch('PedidosAlmacen.views.PedidosDBISAM')
     def test_buscar_producto_web_muestra_codigo_completo_del_nivel(self, mock_db):
         mock_db.return_value.buscar_en_categoria.return_value = [
-            ('SKU1', 'Producto Uno', 'REF1', 'P1', 10, 'PROV1'),
+            ('SKU1', 'Producto Uno', 'REF1', 'P1', 10, 'PROV1', 'FERRETERIA'),
         ]
         resp = self.client.get(
             '/pedidos/buscar-producto/',

@@ -273,7 +273,7 @@
                         </button>
                     </div>
                     <div id="modal-buscar-resultados" style="max-height:280px; overflow-y:auto; border:1px solid #dee2e6; border-radius:6px; padding:8px; min-height:60px;">
-                        <p class="text-muted text-center my-2 mb-0"><small>Ingrese un término para buscar productos de la categoría <strong id="label-categoria-buscar"></strong>.</small></p>
+                        <p class="text-muted text-center my-2 mb-0"><small>Ingrese un término para buscar el producto (<strong id="label-categoria-buscar">todas las categorías</strong>).</small></p>
                     </div>
                     <!-- Sección cantidad (solo para "Agregar nuevo") -->
                     <div id="modal-cantidad-section" class="d-none mt-3 p-3 bg-light rounded border">
@@ -343,8 +343,6 @@
 <script>
 const URL_VERIFICAR = "{% url 'pedidos-verificar-autorizacion' %}";
 const URL_BUSCAR    = "{% url 'pedidos-buscar-producto' %}";
-const CATEGORIA_PEDIDO = "{{ categorias_pedido|escapejs }}";
-const CATEGORIA_NOMBRE = "{{ pedido.categoria_nombre|escapejs }}";
 const CODIGOS_PEDIDO = [{% for di in despacho_items %}{% if di.pedido_item %}"{{ di.pedido_item.codigo|escapejs }}",{% endif %}{% endfor %}].map(c => c.trim().toUpperCase());
 const CSRF = document.querySelector('[name=csrfmiddlewaretoken]').value;
 
@@ -390,9 +388,9 @@ function showStep(step) {
         document.getElementById('modal-step-buscar').classList.remove('d-none');
         document.getElementById('modal-buscar-query').value = '';
         document.getElementById('modal-buscar-resultados').innerHTML =
-            `<p class="text-muted text-center my-2 mb-0"><small>Ingrese un término para buscar productos de la categoría <strong>${CATEGORIA_NOMBRE || CATEGORIA_PEDIDO || 'del pedido'}</strong>.</small></p>`;
+            `<p class="text-muted text-center my-2 mb-0"><small>Ingrese un término para buscar el producto (todas las categorías).</small></p>`;
         document.getElementById('modal-cantidad-section').classList.add('d-none');
-        document.getElementById('label-categoria-buscar').textContent = CATEGORIA_NOMBRE ? `${CATEGORIA_PEDIDO} — ${CATEGORIA_NOMBRE}` : (CATEGORIA_PEDIDO || '—');
+        document.getElementById('label-categoria-buscar').textContent = 'Todas las categorías';
         selectedProduct = null;
         setTimeout(() => document.getElementById('modal-buscar-query').focus(), 100);
     }
@@ -499,7 +497,7 @@ function realizarBusqueda() {
 
     cont.innerHTML = '<p class="text-muted text-center my-2 mb-0"><span class="spinner-border spinner-border-sm"></span> Buscando...</p>';
 
-    const url = `${URL_BUSCAR}?q=${encodeURIComponent(q)}&tipo=${tipo}&categoria=${encodeURIComponent(CATEGORIA_PEDIDO)}`;
+    const url = `${URL_BUSCAR}?q=${encodeURIComponent(q)}&tipo=${tipo}&todas_categorias=1`;
     fetch(url)
     .then(r => r.text())
     .then(html => {
@@ -518,8 +516,8 @@ function realizarBusqueda() {
 }
 
 // Esta función es invocada por el template pedidos-buscar-producto.html
-function agregarItem(codigo, descripcion, referencia, puesto, ref_proveedor) {
-    selectedProduct = {codigo, descripcion, referencia, puesto, ref_proveedor};
+function agregarItem(codigo, descripcion, referencia, puesto, ref_proveedor, categoria, categoria_nombre) {
+    selectedProduct = {codigo, descripcion, referencia, puesto, ref_proveedor, categoria, categoria_nombre};
 
     if (currentAction === 'cambiar') {
         // Rellenar los campos del panel-erroneo para este item
@@ -602,7 +600,13 @@ function confirmarAgregarExtra() {
     }
     errorEl.classList.add('d-none');
 
-    extrasRows.push({codigo: selectedProduct.codigo, descripcion: selectedProduct.descripcion, cantidad});
+    extrasRows.push({
+        codigo: selectedProduct.codigo,
+        descripcion: selectedProduct.descripcion,
+        categoria: selectedProduct.categoria,
+        categoria_nombre: selectedProduct.categoria_nombre,
+        cantidad,
+    });
     renderExtras();
     getModal().hide();
     actualizarPanelAutorizados();

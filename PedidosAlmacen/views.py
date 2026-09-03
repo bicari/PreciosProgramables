@@ -1328,6 +1328,9 @@ def recibir_despacho(request, pk, despacho_id):
                         if not codigo or cantidad <= 0:
                             continue
 
+                        categoria_extra = str(extra.get('categoria', '')).strip() or pedido.categoria
+                        categoria_nombre_extra = str(extra.get('categoria_nombre', '')).strip() or pedido.categoria_nombre
+
                         # Crear PedidoItem ficticio para trazabilidad
                         nuevo_item = PedidoItem.objects.create(
                             pedido=pedido,
@@ -1338,8 +1341,8 @@ def recibir_despacho(request, pk, despacho_id):
                             cantidad_recibida=cantidad,
                             estado='INCIDENCIA',
                             observacion='SKU no contemplado en el pedido original',
-                            categoria=pedido.categoria,
-                            categoria_nombre=pedido.categoria_nombre,
+                            categoria=categoria_extra,
+                            categoria_nombre=categoria_nombre_extra,
                         )
                         di_extra = DespachoItem(
                             despacho=despacho,
@@ -1436,18 +1439,12 @@ def recibir_despacho(request, pk, despacho_id):
         messages.success(request, f'Recepción del Despacho #{despacho_id} registrada correctamente')
         return redirect('pedidos-detalle', pk=pk)
 
-    categorias_pedido = list(
-        pedido.items.exclude(categoria='').values_list('categoria', flat=True).distinct()
-    )
-    categorias_pedido_str = ','.join(categorias_pedido) if categorias_pedido else pedido.categoria
-
     return render(request, 'pedidos-recibir-despacho.html', {
         'pedido': pedido,
         'despacho': despacho,
         'despacho_items': despacho_items,
         'ver_despachado': is_pedidos_supervisor(request.user) or is_pedidos_almacen(request.user),
         'items_fuera_despacho': _items_pedido_fuera_despacho(pedido, despacho),
-        'categorias_pedido': categorias_pedido_str,
     })
 
 
@@ -1559,15 +1556,16 @@ def buscar_producto(request):
     query = request.GET.get('q', '').strip()
     tipo = request.GET.get('tipo', 'codigo')
     categoria = request.GET.get('categoria', '').strip()
+    todas_categorias = request.GET.get('todas_categorias') == '1'
     solo_existencia = request.GET.get('solo_existencia') == '1'
 
-    if not categoria:
+    if not categoria and not todas_categorias:
         return HttpResponse('<p class="text-warning">Seleccione una categoria antes de buscar</p>')
 
     if len(query) < 2:
         return HttpResponse('')
 
-    categorias_lista = [c.strip() for c in categoria.split(',') if c.strip()]
+    categorias_lista = [] if todas_categorias else [c.strip() for c in categoria.split(',') if c.strip()]
 
     try:
         dbisam = PedidosDBISAM()
@@ -1575,6 +1573,13 @@ def buscar_producto(request):
             categorias_lista, query, tipo, solo_existencia=solo_existencia)
     except Exception:
         resultados_raw = []
+
+    categorias_map = {}
+    if todas_categorias and resultados_raw:
+        try:
+            categorias_map = {str(c[0]): c[1] for c in dbisam.obtener_categorias()}
+        except Exception:
+            categorias_map = {}
 
     # Enriquecer con ubicaciones internas (Postgres)
     from ubicaciones.models import ProductoUbicacion
@@ -1611,6 +1616,8 @@ def buscar_producto(request):
             'existencia': r[4],
             'ref_proveedor': r[5],
             'ubicaciones_internas': ubicaciones_map.get(r[0], []),
+            'categoria': r[6] if todas_categorias else '',
+            'categoria_nombre': categorias_map.get(str(r[6]), r[6]) if todas_categorias else '',
         }
         for r in resultados_raw
     ]

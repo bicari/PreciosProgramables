@@ -7,6 +7,7 @@
             <th>Descripcion</th>
             <th>Referencia</th>
             <th>Puesto</th>
+            {% if resultados.0.categoria %}<th>Categoría</th>{% endif %}
             <th>Ubicaciones internas</th>
             <th>Existencia</th>
             <th>Ref. Proveedor</th>
@@ -20,6 +21,9 @@
             <td data-label="Descripción">{{ producto.descripcion }}</td>
             <td data-label="Referencia">{{ producto.referencia }}</td>
             <td data-label="Puesto">{{ producto.puesto }}</td>
+            {% if producto.categoria %}
+            <td data-label="Categoría">{{ producto.categoria }}{% if producto.categoria_nombre %} — {{ producto.categoria_nombre }}{% endif %}</td>
+            {% endif %}
             <td data-label="Ubicaciones">
                 {% for u in producto.ubicaciones_internas %}
                     <span class="badge me-1
@@ -50,7 +54,7 @@
                             onclick="var e=document.getElementById('qs{{ forloop.counter }}');e.value=+e.value+1">+</button>
                     </div>
                     <button type="button" class="btn btn-sm btn-success"
-                        onclick="agregarItem('{{ producto.codigo|escapejs }}','{{ producto.descripcion|escapejs }}','{{ producto.referencia|escapejs }}','{{ producto.puesto|escapejs }}','{{ producto.ref_proveedor|escapejs }}',+document.getElementById('qs{{ forloop.counter }}').value)">
+                        onclick="agregarItem('{{ producto.codigo|escapejs }}','{{ producto.descripcion|escapejs }}','{{ producto.referencia|escapejs }}','{{ producto.puesto|escapejs }}','{{ producto.ref_proveedor|escapejs }}','{{ producto.categoria|escapejs }}','{{ producto.categoria_nombre|escapejs }}',+document.getElementById('qs{{ forloop.counter }}').value)">
                         <i class="fas fa-plus"></i> Agregar
                     </button>
                 </div>
