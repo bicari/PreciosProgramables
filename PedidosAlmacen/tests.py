@@ -9,10 +9,150 @@ from unittest.mock import patch, MagicMock
 from django.test import TestCase
 from django.db import IntegrityError
 
-from .models import DepositoPermitido
+from .models import DepositoPermitido, Condicion
 from .admin import sincronizar_depositos_permitidos
 from . import views
 from .dbisam import PedidosDBISAM
+
+
+class PedidoGetCondicionDisplayTest(TestCase):
+    """Django genera get_FOO_display() automaticamente para fields con choices=;
+    condicion perdio choices= al pasar al catalogo Condicion, asi que el metodo
+    se restaura a mano para no romper callers existentes (ej. formatos/contratos.py)."""
+
+    def test_devuelve_nombre_catalogado(self):
+        from users.models import User
+        from .models import Pedido
+        sup = User.objects.create_superuser(username='disp_u', password='x')
+        pedido = Pedido.objects.create(solicitante=sup, estado='PENDIENTE', condicion='SURTIDO')
+        self.assertEqual(pedido.get_condicion_display(), 'Surtido')
+
+    def test_condicion_vacia_devuelve_vacio(self):
+        from users.models import User
+        from .models import Pedido
+        sup = User.objects.create_superuser(username='disp_u2', password='x')
+        pedido = Pedido.objects.create(solicitante=sup, estado='PENDIENTE')
+        self.assertEqual(pedido.get_condicion_display(), '')
+
+    def test_codigo_desconocido_cae_al_codigo(self):
+        from users.models import User
+        from .models import Pedido
+        sup = User.objects.create_superuser(username='disp_u3', password='x')
+        pedido = Pedido.objects.create(solicitante=sup, estado='PENDIENTE', condicion='NO_EXISTE')
+        self.assertEqual(pedido.get_condicion_display(), 'NO_EXISTE')
+
+
+class CondicionModelTest(TestCase):
+    def test_creacion_y_str(self):
+        cond = Condicion.objects.create(codigo='PRUEBA', nombre='Prueba', color_badge='danger')
+        self.assertEqual(str(cond), 'Prueba')
+        self.assertTrue(cond.activo)  # default
+
+    def test_codigo_unico(self):
+        Condicion.objects.create(codigo='PRUEBA', nombre='Prueba')
+        with self.assertRaises(IntegrityError):
+            Condicion.objects.create(codigo='PRUEBA', nombre='Otra')
+
+    def test_condiciones_existentes_sembradas_por_migracion(self):
+        codigos = set(Condicion.objects.values_list('codigo', flat=True))
+        self.assertEqual(codigos, {'URGENTE', 'SURTIDO', 'CLIENTE_RETIRA', 'INSUMOS'})
+
+
+class CondicionBadgeTagTest(TestCase):
+    def test_renderiza_color_y_nombre(self):
+        from .templatetags.pedidos_extras import condicion_badge
+        html = str(condicion_badge('SURTIDO'))
+        self.assertIn('badge bg-success', html)
+        self.assertIn('Surtido', html)
+
+    def test_incluye_icono_cuando_esta_definido(self):
+        from .templatetags.pedidos_extras import condicion_badge
+        html = str(condicion_badge('URGENTE'))
+        self.assertIn('fa-bolt', html)
+
+    def test_codigo_vacio_muestra_guion(self):
+        from .templatetags.pedidos_extras import condicion_badge
+        html = str(condicion_badge(''))
+        self.assertIn('—', html)
+        self.assertNotIn('badge', html)
+
+    def test_codigo_desconocido_no_revienta(self):
+        from .templatetags.pedidos_extras import condicion_badge
+        html = str(condicion_badge('NO_EXISTE'))
+        self.assertIn('NO_EXISTE', html)
+        self.assertIn('badge', html)
+
+    def test_colores_claros_agregan_text_dark_por_contraste(self):
+        from .templatetags.pedidos_extras import condicion_badge
+        Condicion.objects.create(codigo='CLARA', nombre='Clara', color_badge='info')
+        html = str(condicion_badge('CLARA'))
+        self.assertIn('bg-info text-dark', html)
+
+    def test_colores_oscuros_no_agregan_text_dark(self):
+        from .templatetags.pedidos_extras import condicion_badge
+        html = str(condicion_badge('URGENTE'))
+        self.assertNotIn('text-dark', html)
+
+
+class CondicionFiltrosTest(TestCase):
+    def test_condicion_nombre_devuelve_nombre_catalogado(self):
+        from .templatetags.pedidos_extras import condicion_nombre
+        self.assertEqual(condicion_nombre('SURTIDO'), 'Surtido')
+
+    def test_condicion_nombre_desconocida_devuelve_codigo(self):
+        from .templatetags.pedidos_extras import condicion_nombre
+        self.assertEqual(condicion_nombre('NO_EXISTE'), 'NO_EXISTE')
+
+    def test_condicion_color_devuelve_color_catalogado(self):
+        from .templatetags.pedidos_extras import condicion_color
+        self.assertEqual(condicion_color('URGENTE'), 'danger')
+
+    def test_condicion_color_desconocida_devuelve_secondary(self):
+        from .templatetags.pedidos_extras import condicion_color
+        self.assertEqual(condicion_color('NO_EXISTE'), 'secondary')
+
+
+class CondicionLabelPdfTest(TestCase):
+    def test_devuelve_nombre_catalogado(self):
+        from .pdf import _condicion_label
+        self.assertEqual(_condicion_label('SURTIDO'), 'Surtido')
+
+    def test_codigo_desconocido_cae_al_codigo(self):
+        from .pdf import _condicion_label
+        self.assertEqual(_condicion_label('NO_EXISTE'), 'NO_EXISTE')
+
+
+class CondicionesContextoVistasTest(TestCase):
+    def setUp(self):
+        from users.models import User
+        from django.urls import reverse
+        self.reverse = reverse
+        self.user = User.objects.create_superuser(username='cond_ctx_u', password='x')
+        self.client.force_login(self.user)
+
+    def test_crear_pedido_solo_incluye_condiciones_activas(self):
+        Condicion.objects.filter(codigo='SURTIDO').update(activo=False)
+        resp = self.client.get(self.reverse('pedidos-crear'))
+        codigos = [c[0] for c in resp.context['condiciones']]
+        self.assertIn('URGENTE', codigos)
+        self.assertNotIn('SURTIDO', codigos)
+
+    def test_reporte_pedidos_incluye_condiciones_inactivas(self):
+        Condicion.objects.filter(codigo='SURTIDO').update(activo=False)
+        resp = self.client.get(self.reverse('pedidos-reporte'))
+        codigos = [c[0] for c in resp.context['condiciones']]
+        self.assertIn('SURTIDO', codigos)
+
+
+class CondicionAdminTest(TestCase):
+    def test_changelist_accesible_para_superusuario(self):
+        from users.models import User
+        from django.urls import reverse
+        user = User.objects.create_superuser(username='cond_admin_u', password='x')
+        self.client.force_login(user)
+        resp = self.client.get(reverse('admin:PedidosAlmacen_condicion_changelist'))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'URGENTE')
 
 
 class DepositoPermitidoModelTest(TestCase):
@@ -5510,3 +5650,54 @@ class CargarItemsExcelViewTest(TestCase):
         resp = self.client.post('/pedidos/cargar-items-excel/', {'archivo': archivo})
         self.assertEqual(resp.status_code, 400)
         mock_db.assert_not_called()
+
+
+class ApiUpdateItemDescuentaUbicacionTest(TestCase):
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from users.models import User
+        from .models import Pedido, PedidoItem
+        from ubicaciones.models import Cuerpo, Galpon, Nivel, ProductoUbicacion, Rack, Ubicacion
+
+        self.user = User.objects.create_superuser(username='api_item_ubic', password='x')
+        self.api = APIClient()
+        self.api.force_authenticate(user=self.user)
+
+        self.pedido = Pedido.objects.create(solicitante=self.user, estado='PICKING')
+        self.item = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SKU1', descripcion='Producto Uno',
+            cantidad_solicitada=10, estado='PENDIENTE',
+        )
+
+        galpon = Galpon.objects.create(codigo='1', nombre='Galpón 1', creado_por=self.user)
+        rack = Rack.objects.create(galpon=galpon, codigo='A', max_niveles=6, creado_por=self.user)
+        cuerpo = Cuerpo.objects.create(rack=rack, codigo='01', creado_por=self.user)
+        ubicacion = Ubicacion.objects.create(cuerpo=cuerpo, codigo='01', creado_por=self.user)
+        self.nivel = Nivel.objects.create(ubicacion=ubicacion, numero=1, tipo=Nivel.PICKING, creado_por=self.user)
+        self.pu = ProductoUbicacion.objects.create(codigo_producto='SKU1', nivel=self.nivel, cantidad=50)
+
+        self.url = f'/api/pedidos/{self.pedido.numero_pedido}/items/{self.item.id}/'
+
+    def test_guardar_cantidad_descuenta_ubicacion(self):
+        resp = self.api.patch(self.url, data={'cantidad_preparada': 6}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('ubicacion_picking', resp.data)
+        self.assertTrue(resp.data['ubicacion_picking']['aplicado'])
+        self.pu.refresh_from_db()
+        self.assertEqual(self.pu.cantidad, 44)
+
+    def test_reeditar_no_duplica_el_descuento(self):
+        self.api.patch(self.url, data={'cantidad_preparada': 6}, format='json')
+        self.api.patch(self.url, data={'cantidad_preparada': 4}, format='json')
+        self.pu.refresh_from_db()
+        self.assertEqual(self.pu.cantidad, 46)  # 50 - 4, no 50 - 6 - 4
+
+    def test_producto_sin_ubicacion_guarda_igual(self):
+        from .models import PedidoItem
+        item_sin_ubicacion = PedidoItem.objects.create(
+            pedido=self.pedido, codigo='SIN-UBIC', descripcion='Otro', cantidad_solicitada=5, estado='PENDIENTE',
+        )
+        url = f'/api/pedidos/{self.pedido.numero_pedido}/items/{item_sin_ubicacion.id}/'
+        resp = self.api.patch(url, data={'cantidad_preparada': 5}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.data['ubicacion_picking']['aplicado'])

@@ -80,10 +80,18 @@ def api_update_pedido(request, pk):
 def api_update_item(request, pedido_pk, item_pk):
     item = get_object_or_404(PedidoItem, id=item_pk, pedido__numero_pedido=pedido_pk)
     cantidad = request.data.get('cantidad_preparada')
+    resultado_ubicacion = None
     if cantidad is not None:
         item.cantidad_preparada = int(cantidad)
         item.save(update_fields=['cantidad_preparada'])
-    return Response(PedidoItemSerializer(item).data)
+        from ubicaciones.services import UbicacionesService
+        resultado_ubicacion = UbicacionesService.descontar_por_picking(
+            item, int(cantidad), request.user, nivel_id=request.data.get('ubicacion_picking'),
+        )
+    data = PedidoItemSerializer(item).data
+    if resultado_ubicacion is not None:
+        data['ubicacion_picking'] = resultado_ubicacion
+    return Response(data)
 
 
 @api_view(['GET'])
