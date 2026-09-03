@@ -1050,3 +1050,54 @@ class AjustarPorReconciliacionA2ServiceTest(TestCase):
         mov = MovimientoUbicacion.objects.get(tipo='AJUSTE_A2', codigo_producto='ABC')
         self.assertTrue(mov.pendiente_revision)
         self.assertIsNone(mov.nivel_destino)
+
+
+class ReconciliarExistenciasCommandTest(TestCase):
+    def setUp(self):
+        from django.core.management import call_command
+        self.call_command = call_command
+        self.user = User.objects.create(username='reconciliar_cmd')
+        self.galpon = Galpon.objects.create(codigo='1', nombre='Galpón 1', creado_por=self.user)
+        self.rack = Rack.objects.create(galpon=self.galpon, codigo='A', max_niveles=6, creado_por=self.user)
+        self.cuerpo = Cuerpo.objects.create(rack=self.rack, codigo='01', creado_por=self.user)
+        self.ubicacion = Ubicacion.objects.create(cuerpo=self.cuerpo, codigo='01', creado_por=self.user)
+        self.nivel = Nivel.objects.create(ubicacion=self.ubicacion, numero=1, creado_por=self.user)
+
+    def test_sin_asignaciones_no_consulta_dbisam(self):
+        with patch('ubicaciones.management.commands.reconciliar_existencias.PedidosDBISAM') as mock_db:
+            self.call_command('reconciliar_existencias')
+            mock_db.return_value.consultar_stock_multiple.assert_not_called()
+
+    def test_sin_diferencia_no_ajusta(self):
+        pu = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel, cantidad=30)
+        with patch('ubicaciones.management.commands.reconciliar_existencias.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.return_value = {'ABC': 30}
+            self.call_command('reconciliar_existencias')
+        pu.refresh_from_db()
+        self.assertEqual(pu.cantidad, 30)
+        self.assertFalse(MovimientoUbicacion.objects.filter(tipo='AJUSTE_A2').exists())
+
+    def test_diferencia_con_una_ubicacion_ajusta(self):
+        pu = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel, cantidad=30)
+        with patch('ubicaciones.management.commands.reconciliar_existencias.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.return_value = {'ABC': 20}
+            self.call_command('reconciliar_existencias')
+        pu.refresh_from_db()
+        self.assertEqual(pu.cantidad, 20)
+        self.assertTrue(MovimientoUbicacion.objects.filter(tipo='AJUSTE_A2', codigo_producto='ABC').exists())
+
+    def test_producto_no_devuelto_por_dbisam_se_trata_como_cero(self):
+        pu = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel, cantidad=10)
+        with patch('ubicaciones.management.commands.reconciliar_existencias.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.return_value = {}
+            self.call_command('reconciliar_existencias')
+        pu.refresh_from_db()
+        self.assertEqual(pu.cantidad, 0)
+
+    def test_error_dbisam_no_modifica_postgres(self):
+        pu = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel, cantidad=30)
+        with patch('ubicaciones.management.commands.reconciliar_existencias.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.side_effect = Exception('odbc down')
+            self.call_command('reconciliar_existencias')
+        pu.refresh_from_db()
+        self.assertEqual(pu.cantidad, 30)
