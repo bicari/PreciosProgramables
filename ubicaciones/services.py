@@ -391,3 +391,17 @@ class UbicacionesService:
             'DESFUSION_NIVEL', usuario, galpon=maestro.galpon, rack=maestro.rack,
             nivel_origen=maestro, nivel_destino=nivel_miembro,
         )
+
+    # ------------------------------------------------------------------ Principal / picking
+
+    @staticmethod
+    @transaction.atomic
+    def marcar_principal(producto_ubicacion: ProductoUbicacion, usuario) -> ProductoUbicacion:
+        """Marca esta ProductoUbicacion como principal para su codigo_producto,
+        desmarcando cualquier otra del mismo código."""
+        ProductoUbicacion.objects.filter(
+            codigo_producto=producto_ubicacion.codigo_producto,
+        ).exclude(pk=producto_ubicacion.pk).update(es_principal=False)
+        producto_ubicacion.es_principal = True
+        producto_ubicacion.save(update_fields=['es_principal'])
+        return producto_ubicacion

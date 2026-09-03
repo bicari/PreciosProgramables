@@ -814,3 +814,36 @@ class CamposIncidenciaModeloTest(TestCase):
         )
         mov = MovimientoUbicacion.objects.create(tipo='PICKING', codigo_producto='ABC', pedido_item=item)
         self.assertEqual(mov.pedido_item_id, item.id)
+
+
+class MarcarPrincipalServiceTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(username='marcar_principal')
+        self.galpon = Galpon.objects.create(codigo='1', nombre='Galpón 1', creado_por=self.user)
+        self.rack = Rack.objects.create(galpon=self.galpon, codigo='A', max_niveles=6, creado_por=self.user)
+        self.cuerpo = Cuerpo.objects.create(rack=self.rack, codigo='01', creado_por=self.user)
+        self.ubicacion = Ubicacion.objects.create(cuerpo=self.cuerpo, codigo='01', creado_por=self.user)
+        self.nivel1 = Nivel.objects.create(ubicacion=self.ubicacion, numero=1, creado_por=self.user)
+        self.nivel2 = Nivel.objects.create(ubicacion=self.ubicacion, numero=2, creado_por=self.user)
+        self.pu1 = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel1, cantidad=10)
+        self.pu2 = ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=self.nivel2, cantidad=5)
+
+    def test_marcar_principal_activa_el_flag(self):
+        UbicacionesService.marcar_principal(self.pu1, self.user)
+        self.pu1.refresh_from_db()
+        self.assertTrue(self.pu1.es_principal)
+
+    def test_marcar_principal_desmarca_otras_del_mismo_codigo(self):
+        UbicacionesService.marcar_principal(self.pu1, self.user)
+        UbicacionesService.marcar_principal(self.pu2, self.user)
+        self.pu1.refresh_from_db()
+        self.pu2.refresh_from_db()
+        self.assertFalse(self.pu1.es_principal)
+        self.assertTrue(self.pu2.es_principal)
+
+    def test_marcar_principal_no_afecta_otro_codigo_producto(self):
+        pu_otro = ProductoUbicacion.objects.create(codigo_producto='XYZ', nivel=self.nivel1, cantidad=1)
+        UbicacionesService.marcar_principal(pu_otro, self.user)
+        UbicacionesService.marcar_principal(self.pu1, self.user)
+        pu_otro.refresh_from_db()
+        self.assertTrue(pu_otro.es_principal)
