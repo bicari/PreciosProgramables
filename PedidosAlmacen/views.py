@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, time as dtime
 from urllib.parse import urlencode
 from .models import (
     Pedido, PedidoItem, Despacho, DespachoItem, DepositoPermitido,
-    ConfiguracionPedidos, ResolucionIncidencia, IncidenciaEvento, Condicion,
+    ConfiguracionPedidos, ResolucionIncidencia, IncidenciaEvento,
 )
 from .forms import PedidoForm
 from .dbisam import PedidosDBISAM, DEPOSITO_ALMACEN
@@ -280,7 +280,7 @@ def crear_pedido(request):
         'form': PedidoForm(),
         'categorias': categorias,
         'depositos': depositos,
-        'condiciones': Condicion.objects.filter(activo=True).values_list('codigo', 'nombre'),
+        'condiciones': Pedido.CONDICION_CHOICES,
     }
 
     if request.method == 'POST':
@@ -1739,7 +1739,7 @@ def reporte_pedidos(request):
         'por_categoria': por_categoria,
         'por_condicion': por_condicion,
         'categorias_disponibles': categorias_disponibles,
-        'condiciones': Condicion.objects.values_list('codigo', 'nombre'),
+        'condiciones': Pedido.CONDICION_CHOICES,
         'fecha_inicio': fecha_inicio,
         'fecha_fin': fecha_fin,
         'categoria_filtro': categoria_filtro,
