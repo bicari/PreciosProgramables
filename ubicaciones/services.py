@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
+from django.utils import timezone
 
 from PedidosAlmacen.dbisam import DEPOSITO_ALMACEN, PedidosDBISAM
 
@@ -500,3 +501,16 @@ class UbicacionesService:
         if incidencia:
             resultado['mensaje'] = f'Ubicación quedó en 0; faltaron {cantidad - disponible} unidades.'
         return resultado
+
+    # ------------------------------------------------------------------ Incidencias
+
+    @staticmethod
+    @transaction.atomic
+    def resolver_incidencia(movimiento: MovimientoUbicacion, usuario, nota: str = '') -> MovimientoUbicacion:
+        movimiento.pendiente_revision = False
+        movimiento.revisado_por = usuario
+        movimiento.fecha_revision = timezone.now()
+        if nota:
+            movimiento.notas = f"{movimiento.notas}\n{nota}".strip()
+        movimiento.save(update_fields=['pendiente_revision', 'revisado_por', 'fecha_revision', 'notas'])
+        return movimiento

@@ -962,3 +962,23 @@ class DescontarPorPickingServiceTest(TestCase):
         self.pu.refresh_from_db()
         self.assertEqual(self.pu.cantidad, 35)  # 50 - 15, no se revirtió nada porque no había nada activo
         self.assertTrue(resultado['aplicado'])
+
+
+class ResolverIncidenciaServiceTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(username='resolver_incidencia')
+        self.mov = MovimientoUbicacion.objects.create(
+            tipo='AJUSTE_A2', codigo_producto='ABC', cantidad=10, pendiente_revision=True,
+        )
+
+    def test_resolver_incidencia_limpia_pendiente_revision(self):
+        UbicacionesService.resolver_incidencia(self.mov, self.user)
+        self.mov.refresh_from_db()
+        self.assertFalse(self.mov.pendiente_revision)
+        self.assertEqual(self.mov.revisado_por, self.user)
+        self.assertIsNotNone(self.mov.fecha_revision)
+
+    def test_resolver_incidencia_agrega_nota(self):
+        UbicacionesService.resolver_incidencia(self.mov, self.user, nota='Conteo físico confirmado')
+        self.mov.refresh_from_db()
+        self.assertIn('Conteo físico confirmado', self.mov.notas)
