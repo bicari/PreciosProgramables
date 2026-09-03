@@ -197,7 +197,10 @@ def api_desfusionar(request, pk: int):
 @authentication_classes(_AUTH)
 @permission_classes(_PERM)
 def api_movimientos(request):
-    qs = MovimientoUbicacion.objects.select_related('usuario', 'rack', 'nivel_origen', 'nivel_destino')
+    qs = MovimientoUbicacion.objects.select_related(
+        'usuario', 'rack', 'nivel_origen__ubicacion__cuerpo__rack__galpon',
+        'nivel_destino__ubicacion__cuerpo__rack__galpon',
+    )
     tipo = request.query_params.get('tipo')
     codigo = request.query_params.get('codigo')
     if tipo:
@@ -234,7 +237,10 @@ def api_producto_ubicaciones(request, codigo: str):
 @authentication_classes(_AUTH)
 @permission_classes(_PERM)
 def api_incidencias_list(request):
-    qs = MovimientoUbicacion.objects.filter(pendiente_revision=True).select_related('usuario', 'rack')
+    qs = MovimientoUbicacion.objects.filter(pendiente_revision=True).select_related(
+        'usuario', 'rack', 'nivel_origen__ubicacion__cuerpo__rack__galpon',
+        'nivel_destino__ubicacion__cuerpo__rack__galpon',
+    )
     codigo = request.query_params.get('codigo')
     tipo = request.query_params.get('tipo')
     if codigo:

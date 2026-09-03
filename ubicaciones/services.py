@@ -425,7 +425,10 @@ class UbicacionesService:
         resultado = {'aplicado': False, 'nivel_id': None, 'incidencia': False, 'mensaje': ''}
 
         if nivel_id is not None:
-            nivel_id = int(nivel_id)
+            try:
+                nivel_id = int(nivel_id)
+            except (TypeError, ValueError):
+                nivel_id = None
 
         # Paso 1: revertir el descuento vigente para este ítem, si existe.
         anterior = (
@@ -458,7 +461,7 @@ class UbicacionesService:
         # Paso 2: resolver la ubicación de origen.
         candidatos = list(
             ProductoUbicacion.objects
-            .select_for_update()
+            .select_for_update(of=('self',))
             .filter(
                 codigo_producto=codigo, nivel__tipo=Nivel.PICKING, nivel__activo=True,
                 nivel__fusionado_en__isnull=True,
@@ -502,6 +505,19 @@ class UbicacionesService:
             resultado['mensaje'] = f'Ubicación quedó en 0; faltaron {cantidad - disponible} unidades.'
         return resultado
 
+    @staticmethod
+    @transaction.atomic
+    def consolidar_picking(pedido_item) -> None:
+        """Sella el descuento de ubicación vigente de este ítem al despacharlo:
+        lo marca no reversible (activo=False) sin tocar cantidades, porque el
+        stock ya salió físicamente. No hace nada si el ítem no tiene ningún
+        descuento de picking vigente (producto sin ubicación asignada, o ya
+        sellado). Se llama al crear un Despacho, nunca desde el flujo de
+        preparación."""
+        MovimientoUbicacion.objects.filter(
+            tipo='PICKING', pedido_item=pedido_item, activo=True,
+        ).update(activo=False)
+
     # ------------------------------------------------------------------ Incidencias
 
     @staticmethod
@@ -526,7 +542,7 @@ class UbicacionesService:
         No lanza excepciones."""
         asignaciones = list(
             ProductoUbicacion.objects
-            .select_for_update()
+            .select_for_update(of=('self',))
             .filter(codigo_producto=codigo_producto)
             .select_related('nivel__ubicacion__cuerpo__rack__galpon')
         )

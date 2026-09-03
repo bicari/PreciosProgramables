@@ -963,6 +963,31 @@ class DescontarPorPickingServiceTest(TestCase):
         self.assertEqual(self.pu.cantidad, 35)  # 50 - 15, no se revirtió nada porque no había nada activo
         self.assertTrue(resultado['aplicado'])
 
+    def test_consolidar_picking_sella_el_descuento(self):
+        UbicacionesService.descontar_por_picking(self.item, 30, self.user)
+        self.pu.refresh_from_db()
+        self.assertEqual(self.pu.cantidad, 20)
+
+        UbicacionesService.consolidar_picking(self.item)
+
+        # Reeditar después de consolidar NO debe revertir nada: no hay
+        # movimiento activo que revertir, el stock ya salió físicamente.
+        UbicacionesService.descontar_por_picking(self.item, 15, self.user)
+        self.pu.refresh_from_db()
+        self.assertEqual(self.pu.cantidad, 5)  # 20 - 15, NO 50 - 15
+
+    def test_consolidar_picking_sin_movimiento_activo_no_hace_nada(self):
+        UbicacionesService.consolidar_picking(self.item)
+        self.pu.refresh_from_db()
+        self.assertEqual(self.pu.cantidad, 50)  # sin cambios
+
+    def test_nivel_id_invalido_no_rompe(self):
+        nivel2 = Nivel.objects.create(ubicacion=self.ubicacion, numero=2, tipo=Nivel.PICKING, creado_por=self.user)
+        ProductoUbicacion.objects.create(codigo_producto='ABC', nivel=nivel2, cantidad=20)
+        resultado = UbicacionesService.descontar_por_picking(self.item, 10, self.user, nivel_id='')
+        self.assertFalse(resultado['aplicado'])
+        self.assertTrue(resultado['incidencia'])
+
 
 class ResolverIncidenciaServiceTest(TestCase):
     def setUp(self):
@@ -1101,6 +1126,16 @@ class ReconciliarExistenciasCommandTest(TestCase):
             self.call_command('reconciliar_existencias')
         pu.refresh_from_db()
         self.assertEqual(pu.cantidad, 30)
+
+    def test_mas_de_200_codigos_consulta_en_varios_lotes(self):
+        ProductoUbicacion.objects.bulk_create([
+            ProductoUbicacion(codigo_producto=f'COD{i:04d}', nivel=self.nivel, cantidad=1)
+            for i in range(201)
+        ])
+        with patch('ubicaciones.management.commands.reconciliar_existencias.PedidosDBISAM') as mock_db:
+            mock_db.return_value.consultar_stock_multiple.return_value = {}
+            self.call_command('reconciliar_existencias')
+            self.assertGreater(mock_db.return_value.consultar_stock_multiple.call_count, 1)
 
 
 class ApiIncidenciasTest(TestCase):

@@ -160,14 +160,15 @@ def api_preparar_pedido(request, pk):
     elif accion == 'finalizar':
         from ubicaciones.services import UbicacionesService
         cantidades = request.data.get('cantidades', {})
-        ubicaciones_por_item = request.data.get('ubicaciones_picking', {})
+        ubicaciones_por_item = request.data.get('ubicaciones_picking') or {}
         items = pedido.items.filter(estado__in=['PENDIENTE', 'BACK_ORDER', 'PARCIAL'])
+        resultados_ubicacion = {}
         for item in items:
             cantidad = cantidades.get(str(item.id))
             if cantidad is not None:
                 item.cantidad_preparada = int(cantidad)
                 item.save(update_fields=['cantidad_preparada'])
-                UbicacionesService.descontar_por_picking(
+                resultados_ubicacion[str(item.id)] = UbicacionesService.descontar_por_picking(
                     item, int(cantidad), request.user,
                     nivel_id=ubicaciones_por_item.get(str(item.id)),
                 )
@@ -182,9 +183,12 @@ def api_preparar_pedido(request, pk):
             status=400,
         )
 
-    return Response(PedidoDetailSerializer(
+    data = PedidoDetailSerializer(
         Pedido.objects.prefetch_related('items').get(pk=pk)
-    ).data)
+    ).data
+    if accion == 'finalizar':
+        data['ubicaciones_picking'] = resultados_ubicacion
+    return Response(data)
 
 
 @api_view(['POST'])
@@ -287,6 +291,8 @@ def api_crear_despacho(request):
             pedido_item.cantidad_preparada = None
             pedido_item.estado = 'DESPACHADO' if pedido_item.cantidad_back_order == 0 else 'PARCIAL'
             pedido_item.save()
+            from ubicaciones.services import UbicacionesService
+            UbicacionesService.consolidar_picking(pedido_item)
             ids_despachados.add(pedido_item.id)
 
     # Items elegibles no incluidos en el despacho → BACK_ORDER

@@ -5622,3 +5622,14 @@ class ApiPrepararPedidoFinalizarDescuentaUbicacionTest(TestCase):
         self.pu.refresh_from_db()
         self.assertEqual(pu2.cantidad, 13)
         self.assertEqual(self.pu.cantidad, 50)  # sin tocar
+
+    def test_finalizar_incluye_resultado_de_ubicacion_por_item(self):
+        resp = self.api.post(
+            self.url,
+            data={'accion': 'finalizar', 'cantidades': {str(self.item.id): 7}},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('ubicaciones_picking', resp.data)
+        self.assertIn(str(self.item.id), resp.data['ubicaciones_picking'])
+        self.assertTrue(resp.data['ubicaciones_picking'][str(self.item.id)]['aplicado'])

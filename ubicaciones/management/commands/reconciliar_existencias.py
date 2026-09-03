@@ -39,8 +39,13 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING('No hay productos con ubicación asignada.'))
             return
 
+        TAMANO_LOTE = 200
+        existencias = {}
         try:
-            existencias = PedidosDBISAM().consultar_stock_multiple(codigos, deposito=DEPOSITO_ALMACEN)
+            dbisam = PedidosDBISAM()
+            for i in range(0, len(codigos), TAMANO_LOTE):
+                lote = codigos[i:i + TAMANO_LOTE]
+                existencias.update(dbisam.consultar_stock_multiple(lote, deposito=DEPOSITO_ALMACEN))
         except Exception as e:
             self.stderr.write(self.style.ERROR(f'Error al consultar a2: {e}'))
             return
