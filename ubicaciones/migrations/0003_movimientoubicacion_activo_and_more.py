@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('PedidosAlmacen', '0032_seed_condiciones_existentes'),
+        ('PedidosAlmacen', '0030_pedido_es_mixto_pedidoitem_categoria'),
         ('ubicaciones', '0002_grupo_pedidos_ubicaciones'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
