@@ -3,7 +3,7 @@ from typing import Any, Iterable
 from django.contrib import admin, messages
 from django.shortcuts import redirect
 from django.urls import path
-from .models import Pedido, PedidoItem, DepositoPermitido, ConfiguracionPedidos
+from .models import Pedido, PedidoItem, DepositoPermitido, ConfiguracionPedidos, Condicion
 from .dbisam import PedidosDBISAM
 
 
@@ -100,6 +100,15 @@ class DepositoPermitidoAdmin(admin.ModelAdmin):
             f'Sincronización completa: {creados} creados, {actualizados} actualizados.',
         )
         return redirect('..')
+
+
+@admin.register(Condicion)
+class CondicionAdmin(admin.ModelAdmin):
+    list_display = ('codigo', 'nombre', 'color_badge', 'icono', 'activo', 'orden')
+    list_editable = ('activo', 'orden')
+    list_filter = ('activo', 'color_badge')
+    search_fields = ('codigo', 'nombre')
+    ordering = ('orden', 'codigo')
 
 
 @admin.register(ConfiguracionPedidos)

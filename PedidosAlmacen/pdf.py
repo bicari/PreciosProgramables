@@ -23,12 +23,11 @@ _LABEL_ESTADO = {
     "RECIBIDO": "Recibido",
     "CERRADO": "Cerrado",
 }
-_LABEL_CONDICION = {
-    "URGENTE": "Urgente",
-    "SURTIDO": "Surtido",
-    "CLIENTE_RETIRA": "Cliente Retira",
-    "INSUMOS": "Insumos",
-}
+def _condicion_label(codigo: str) -> str:
+    """Nombre catalogado (admin) de una condición; cae al código si no está en el catálogo."""
+    from .models import Condicion
+    nombre = Condicion.objects.filter(codigo=codigo).values_list('nombre', flat=True).first()
+    return nombre or codigo
 
 # Sufijo de título por variante de impresión ('' = sin sufijo).
 _VISTA_LABEL = {
@@ -152,7 +151,7 @@ def generar_reporte_pedidos_pdf(ctx: dict) -> bytes:
     if ctx.get("categoria_filtro"):
         filtros.append(f"Categoria: {ctx['categoria_filtro']}")
     if ctx.get("condicion_filtro"):
-        filtros.append(f"Condicion: {_LABEL_CONDICION.get(ctx['condicion_filtro'], ctx['condicion_filtro'])}")
+        filtros.append(f"Condicion: {_condicion_label(ctx['condicion_filtro'])}")
     if filtros:
         elements.append(Paragraph(" | ".join(filtros), st_sub))
     elements.append(Paragraph(f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}", st_sub))
@@ -207,7 +206,7 @@ def generar_reporte_pedidos_pdf(ctx: dict) -> bytes:
                     st_dest_cat
                 ),
                 Paragraph(
-                    f"{_LABEL_CONDICION.get(cond_top['condicion'], cond_top['condicion'])}  ({cond_top['total']} pedidos)"
+                    f"{_condicion_label(cond_top['condicion'])}  ({cond_top['total']} pedidos)"
                     if cond_top else "Sin datos",
                     st_dest_cond
                 ),
@@ -240,7 +239,7 @@ def generar_reporte_pedidos_pdf(ctx: dict) -> bytes:
     por_categoria = list(ctx["por_categoria"])
 
     filas_estado = [(_LABEL_ESTADO.get(i["estado"], i["estado"]), i["total"]) for i in por_estado]
-    filas_condicion = [(_LABEL_CONDICION.get(i["condicion"], i["condicion"]), i["total"]) for i in por_condicion]
+    filas_condicion = [(_condicion_label(i["condicion"]), i["total"]) for i in por_condicion]
     filas_categoria = [(i["categoria"], i["total"]) for i in por_categoria]
 
     sep = Spacer(10, 1)
@@ -456,7 +455,7 @@ def generar_pedido_pdf(pedido, items, vistas=("todos",), mostrar_cantidades: boo
 
     # ---- Encabezado ----
     estado_label = _LABEL_ESTADO.get(pedido.estado, pedido.estado)
-    condicion_label = _LABEL_CONDICION.get(pedido.condicion, pedido.condicion) if pedido.condicion else "-"
+    condicion_label = _condicion_label(pedido.condicion) if pedido.condicion else "-"
 
     sufijo_vista = ", ".join(
         label for label in (_VISTA_LABEL.get(v, "") for v in vistas) if label

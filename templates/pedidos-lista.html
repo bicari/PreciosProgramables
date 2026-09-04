@@ -1,5 +1,6 @@
 {% extends "dashboard.html" %}
 {% load permisos_tags %}
+{% load pedidos_extras %}
 {% block content %}
 {% load static %}
 <link rel="stylesheet" href="{% static 'vendor/datatables/css/dataTables.bootstrap5.min.css' %}">
@@ -93,17 +94,7 @@
                     {% else %}<span class="text-muted">—</span>{% endif %}
                 </td>
                 <td>
-                    {% if pedido.condicion == 'URGENTE' %}
-                        <span class="badge bg-danger"><i class="fas fa-bolt me-1"></i>Urgente</span>
-                    {% elif pedido.condicion == 'SURTIDO' %}
-                        <span class="badge bg-success">Surtido</span>
-                    {% elif pedido.condicion == 'CLIENTE_RETIRA' %}
-                        <span class="badge bg-info text-dark">Cliente Retira</span>
-                    {% elif pedido.condicion == 'INSUMOS' %}
-                        <span class="badge bg-secondary">Insumos</span>
-                    {% else %}
-                        <span class="text-muted">—</span>
-                    {% endif %}
+                    {% condicion_badge pedido.condicion %}
                 </td>
                 {% if not es_tienda and not es_picker %}
                 <td><small class="text-muted">{{ pedido.deposito|default:"—" }}</small></td>

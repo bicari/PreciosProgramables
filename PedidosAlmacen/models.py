@@ -15,17 +15,11 @@ class Pedido(models.Model):
         ('CERRADO', 'Cerrado'),
         ('ANULADO', 'Anulado'),
     ]
-    CONDICION_CHOICES = [
-        ('URGENTE', 'Urgente'),
-        ('SURTIDO', 'Surtido'),
-        ('CLIENTE_RETIRA', 'Cliente Retira'),
-        ('INSUMOS', 'Insumos'),
-    ]
     numero_pedido = models.AutoField(primary_key=True)
     solicitante = models.ForeignKey(User, on_delete=models.PROTECT, related_name='pedidos_solicitados')
     despachador = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='pedidos_despachados')
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='PENDIENTE')
-    condicion = models.CharField(max_length=20, choices=CONDICION_CHOICES, blank=True, default='')
+    condicion = models.CharField(max_length=20, blank=True, default='')  # codigo de Condicion, catalogo en admin
     deposito = models.CharField(max_length=100, blank=True, default='')
     observaciones = models.TextField(blank=True)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
@@ -68,6 +62,14 @@ class Pedido(models.Model):
 
     def __str__(self):
         return f"Pedido #{self.numero_pedido} - {self.solicitante.username}"
+
+    def get_condicion_display(self):
+        """Restaura el get_FOO_display() que Django generaba con choices=CONDICION_CHOICES,
+        ahora resuelto contra el catálogo Condicion (condicion ya no tiene choices= fijo)."""
+        if not self.condicion:
+            return ''
+        condicion = Condicion.objects.filter(codigo=self.condicion).first()
+        return condicion.nombre if condicion else self.condicion
 
 
 class PedidoItem(models.Model):
@@ -172,6 +174,37 @@ class DespachoItem(models.Model):
     def __str__(self):
         codigo = self.pedido_item.codigo if self.pedido_item else self.codigo_real
         return f"{codigo} x{self.cantidad_despachada} (Despacho #{self.despacho_id})"
+
+
+class Condicion(models.Model):
+    """Condición de un pedido (Urgente, Surtido, etc.), catalogada para poder
+    agregar nuevas sin tocar código: reemplaza la choice-list hardcodeada que
+    antes vivía en ``Pedido.CONDICION_CHOICES``.
+    """
+    BADGE_COLOR_CHOICES = [
+        ('danger', 'Rojo'),
+        ('success', 'Verde'),
+        ('info', 'Celeste'),
+        ('secondary', 'Gris'),
+        ('warning', 'Amarillo'),
+        ('primary', 'Azul'),
+        ('dark', 'Oscuro'),
+    ]
+
+    codigo = models.CharField(max_length=20, unique=True)  # va tal cual como FTI_PROPOSITO a a2
+    nombre = models.CharField(max_length=50)
+    color_badge = models.CharField(max_length=20, choices=BADGE_COLOR_CHOICES, default='secondary')
+    icono = models.CharField(max_length=30, blank=True, default='', help_text='Clase de Font Awesome, ej. fa-bolt (opcional).')
+    activo = models.BooleanField(default=True)
+    orden = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['orden', 'codigo']
+        verbose_name = 'Condición'
+        verbose_name_plural = 'Condiciones'
+
+    def __str__(self) -> str:
+        return self.nombre
 
 
 class DepositoPermitido(models.Model):

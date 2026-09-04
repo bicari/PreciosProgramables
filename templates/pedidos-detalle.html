@@ -1,5 +1,6 @@
 {% extends "dashboard.html" %}
 {% load permisos_tags %}
+{% load pedidos_extras %}
 {% block content %}
 
 <!-- Modal: Imprimir PDF del pedido -->
@@ -186,11 +187,7 @@
             <div class="pd-meta-row">
                 <dt class="pd-meta-label">Condición</dt>
                 <dd class="pd-meta-value">
-                    {% if pedido.condicion == 'URGENTE' %}<span class="badge bg-danger">Urgente</span>
-                    {% elif pedido.condicion == 'SURTIDO' %}<span class="badge bg-success">Surtido</span>
-                    {% elif pedido.condicion == 'CLIENTE_RETIRA' %}<span class="badge bg-info">Cliente Retira</span>
-                    {% elif pedido.condicion == 'INSUMOS' %}<span class="badge bg-secondary">Insumos</span>
-                    {% else %}-{% endif %}
+                    {% condicion_badge pedido.condicion %}
                 </dd>
             </div>
             <div class="pd-meta-row">
